@@ -62,6 +62,8 @@ Merci à [@wangmian0](https://github.com/wangmian0) d’avoir [désactivé le mo
 
 Merci à [@hubumulity](https://github.com/hubumulity) pour le [réglage du nombre de sous-titres affichés](https://github.com/yuxino/Mimi/pull/303).
 
+Merci à [@ryannyui](https://github.com/ryannyui) pour les [correctifs de compatibilité graphique de l’AppImage Linux et la mise à jour des outils de compilation](https://github.com/yuxino/Mimi/pull/312).
+
 <p>
   <a href="https://github.com/yuxino"><img src="../assets/contributors/yuxino.svg" width="40" height="40" alt="@yuxino"></a>
   <a href="https://github.com/LLLin000"><img src="../assets/contributors/LLLin000.svg" width="40" height="40" alt="@LLLin000"></a>
@@ -71,6 +73,7 @@ Merci à [@hubumulity](https://github.com/hubumulity) pour le [réglage du nombr
   <a href="https://github.com/EmmetZ"><img src="../assets/contributors/EmmetZ.svg" width="40" height="40" alt="@EmmetZ"></a>
   <a href="https://github.com/wangmian0"><img src="../assets/contributors/wangmian0.svg" width="40" height="40" alt="@wangmian0"></a>
   <a href="https://github.com/hubumulity"><img src="../assets/contributors/hubumulity.svg" width="40" height="40" alt="@hubumulity"></a>
+  <a href="https://github.com/ryannyui"><img src="../assets/contributors/ryannyui.svg" width="40" height="40" alt="@ryannyui"></a>
 </p>
 
 [Tous les contributeurs](https://github.com/yuxino/mimi/graphs/contributors)

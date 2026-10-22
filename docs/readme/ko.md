@@ -62,6 +62,8 @@ Mimi는 무료지만 클라우드 서비스는 요금이 발생할 수 있습니
 
 [자막 표시 개수 설정](https://github.com/yuxino/Mimi/pull/303)을 기여해 주신 [@hubumulity](https://github.com/hubumulity)께 감사드립니다.
 
+[Linux AppImage 그래픽 호환성 수정과 도구 체인 업그레이드](https://github.com/yuxino/Mimi/pull/312)에 기여해 주신 [@ryannyui](https://github.com/ryannyui)께 감사드립니다.
+
 <p>
   <a href="https://github.com/yuxino"><img src="../assets/contributors/yuxino.svg" width="40" height="40" alt="@yuxino"></a>
   <a href="https://github.com/LLLin000"><img src="../assets/contributors/LLLin000.svg" width="40" height="40" alt="@LLLin000"></a>
@@ -71,6 +73,7 @@ Mimi는 무료지만 클라우드 서비스는 요금이 발생할 수 있습니
   <a href="https://github.com/EmmetZ"><img src="../assets/contributors/EmmetZ.svg" width="40" height="40" alt="@EmmetZ"></a>
   <a href="https://github.com/wangmian0"><img src="../assets/contributors/wangmian0.svg" width="40" height="40" alt="@wangmian0"></a>
   <a href="https://github.com/hubumulity"><img src="../assets/contributors/hubumulity.svg" width="40" height="40" alt="@hubumulity"></a>
+  <a href="https://github.com/ryannyui"><img src="../assets/contributors/ryannyui.svg" width="40" height="40" alt="@ryannyui"></a>
 </p>
 
 [모든 기여자](https://github.com/yuxino/mimi/graphs/contributors)

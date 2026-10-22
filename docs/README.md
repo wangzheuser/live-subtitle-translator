@@ -15,6 +15,10 @@
 
 详细服务配置提供中、英文；Android 文档为英文。 / Detailed service setup is available in Chinese and English; Android docs are in English.
 
+## 更新记录 / Release notes
+
+[v1.6.7](releases/v1.6.7.md) · [v1.6.6](releases/v1.6.6.md) · [全部已发布版本 / Published releases](https://github.com/yuxino/mimi/releases)
+
 ## Development
 
 - [Contributing and local setup](../.github/CONTRIBUTING.md)

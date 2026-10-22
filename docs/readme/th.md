@@ -62,6 +62,8 @@ Mimi ใช้ฟรี แต่บริการคลาวด์อาจ�
 
 ขอบคุณ [@hubumulity](https://github.com/hubumulity) สำหรับ[การตั้งค่าจำนวนคำบรรยายที่แสดง](https://github.com/yuxino/Mimi/pull/303)
 
+ขอบคุณ [@ryannyui](https://github.com/ryannyui) สำหรับ[การแก้ไขความเข้ากันได้ของกราฟิกใน Linux AppImage และการอัปเกรดชุดเครื่องมือ](https://github.com/yuxino/Mimi/pull/312)
+
 <p>
   <a href="https://github.com/yuxino"><img src="../assets/contributors/yuxino.svg" width="40" height="40" alt="@yuxino"></a>
   <a href="https://github.com/LLLin000"><img src="../assets/contributors/LLLin000.svg" width="40" height="40" alt="@LLLin000"></a>
@@ -71,6 +73,7 @@ Mimi ใช้ฟรี แต่บริการคลาวด์อาจ�
   <a href="https://github.com/EmmetZ"><img src="../assets/contributors/EmmetZ.svg" width="40" height="40" alt="@EmmetZ"></a>
   <a href="https://github.com/wangmian0"><img src="../assets/contributors/wangmian0.svg" width="40" height="40" alt="@wangmian0"></a>
   <a href="https://github.com/hubumulity"><img src="../assets/contributors/hubumulity.svg" width="40" height="40" alt="@hubumulity"></a>
+  <a href="https://github.com/ryannyui"><img src="../assets/contributors/ryannyui.svg" width="40" height="40" alt="@ryannyui"></a>
 </p>
 
 [ผู้ร่วมพัฒนาทั้งหมด](https://github.com/yuxino/mimi/graphs/contributors)

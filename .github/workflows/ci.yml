@@ -302,6 +302,9 @@ jobs:
       - name: Test AppImage permission regression
         run: python3 scripts/check-appimage-permissions-test.py
 
+      - name: Test AppImage host graphics boundary
+        run: python3 -B scripts/check-appimage-gles-test.py
+
       - name: Verify updater platform mapping
         run: node --test scripts/updater-manifest.node.mjs
 

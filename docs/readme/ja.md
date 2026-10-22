@@ -62,6 +62,8 @@ Mimi は無料ですが、クラウドサービスは有料の場合がありま
 
 [@hubumulity](https://github.com/hubumulity) さんによる[字幕表示件数の設定](https://github.com/yuxino/Mimi/pull/303)に感謝します。
 
+[@ryannyui](https://github.com/ryannyui) さんによる [Linux AppImage のグラフィックス互換性修正とツールチェーン更新](https://github.com/yuxino/Mimi/pull/312)に感謝します。
+
 <p>
   <a href="https://github.com/yuxino"><img src="../assets/contributors/yuxino.svg" width="40" height="40" alt="@yuxino"></a>
   <a href="https://github.com/LLLin000"><img src="../assets/contributors/LLLin000.svg" width="40" height="40" alt="@LLLin000"></a>
@@ -71,6 +73,7 @@ Mimi は無料ですが、クラウドサービスは有料の場合がありま
   <a href="https://github.com/EmmetZ"><img src="../assets/contributors/EmmetZ.svg" width="40" height="40" alt="@EmmetZ"></a>
   <a href="https://github.com/wangmian0"><img src="../assets/contributors/wangmian0.svg" width="40" height="40" alt="@wangmian0"></a>
   <a href="https://github.com/hubumulity"><img src="../assets/contributors/hubumulity.svg" width="40" height="40" alt="@hubumulity"></a>
+  <a href="https://github.com/ryannyui"><img src="../assets/contributors/ryannyui.svg" width="40" height="40" alt="@ryannyui"></a>
 </p>
 
 [すべての貢献者を見る](https://github.com/yuxino/mimi/graphs/contributors)

@@ -62,6 +62,8 @@ Danke an [@wangmian0](https://github.com/wangmian0) für die [Deaktivierung des 
 
 Danke an [@hubumulity](https://github.com/hubumulity) für die [Einstellung der Anzahl sichtbarer Untertitel](https://github.com/yuxino/Mimi/pull/303).
 
+Danke an [@ryannyui](https://github.com/ryannyui) für die [Grafikkompatibilitätskorrekturen für das Linux-AppImage und die Aktualisierung der Build-Werkzeuge](https://github.com/yuxino/Mimi/pull/312).
+
 <p>
   <a href="https://github.com/yuxino"><img src="../assets/contributors/yuxino.svg" width="40" height="40" alt="@yuxino"></a>
   <a href="https://github.com/LLLin000"><img src="../assets/contributors/LLLin000.svg" width="40" height="40" alt="@LLLin000"></a>
@@ -71,6 +73,7 @@ Danke an [@hubumulity](https://github.com/hubumulity) für die [Einstellung der 
   <a href="https://github.com/EmmetZ"><img src="../assets/contributors/EmmetZ.svg" width="40" height="40" alt="@EmmetZ"></a>
   <a href="https://github.com/wangmian0"><img src="../assets/contributors/wangmian0.svg" width="40" height="40" alt="@wangmian0"></a>
   <a href="https://github.com/hubumulity"><img src="../assets/contributors/hubumulity.svg" width="40" height="40" alt="@hubumulity"></a>
+  <a href="https://github.com/ryannyui"><img src="../assets/contributors/ryannyui.svg" width="40" height="40" alt="@ryannyui"></a>
 </p>
 
 [Alle Mitwirkenden](https://github.com/yuxino/mimi/graphs/contributors)

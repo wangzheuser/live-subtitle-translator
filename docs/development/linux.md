@@ -15,6 +15,10 @@ Download the `.deb` or `.AppImage` from [Releases](https://github.com/yuxino/mim
   installer, or `sudo apt install ./mimi_<version>_amd64.deb`.
 - AppImage: make the downloaded file executable and open it. Older FUSE-based
   AppImage launchers need FUSE 2 support (`libfuse2` on Ubuntu 22.04).
+  Packages built after v1.6.6 use the host graphics stack, including GLES,
+  rather than bundling its entry library. If startup reports
+  `Couldn't open libGLESv2.so.2`, install your distribution's `libgles2`
+  package (`sudo apt install libgles2` on Ubuntu/Debian).
 - AppImage supports signed updates in Settings. Quit before updating `.deb`
   with a newer package; its Settings button opens Releases.
 

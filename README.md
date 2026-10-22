@@ -62,6 +62,8 @@ Mimi 本身免费，云服务可能收费。使用云端识别或翻译时，音
 
 感谢 [@hubumulity](https://github.com/hubumulity) 贡献[字幕显示条数设置](https://github.com/yuxino/Mimi/pull/303)。
 
+感谢 [@ryannyui](https://github.com/ryannyui) 贡献 [Linux AppImage 图形兼容性修复和工具链升级](https://github.com/yuxino/Mimi/pull/312)。
+
 <p>
   <a href="https://github.com/yuxino"><img src="docs/assets/contributors/yuxino.svg" width="40" height="40" alt="@yuxino"></a>
   <a href="https://github.com/LLLin000"><img src="docs/assets/contributors/LLLin000.svg" width="40" height="40" alt="@LLLin000"></a>
@@ -71,6 +73,7 @@ Mimi 本身免费，云服务可能收费。使用云端识别或翻译时，音
   <a href="https://github.com/EmmetZ"><img src="docs/assets/contributors/EmmetZ.svg" width="40" height="40" alt="@EmmetZ"></a>
   <a href="https://github.com/wangmian0"><img src="docs/assets/contributors/wangmian0.svg" width="40" height="40" alt="@wangmian0"></a>
   <a href="https://github.com/hubumulity"><img src="docs/assets/contributors/hubumulity.svg" width="40" height="40" alt="@hubumulity"></a>
+  <a href="https://github.com/ryannyui"><img src="docs/assets/contributors/ryannyui.svg" width="40" height="40" alt="@ryannyui"></a>
 </p>
 
 [查看所有贡献者](https://github.com/yuxino/mimi/graphs/contributors)

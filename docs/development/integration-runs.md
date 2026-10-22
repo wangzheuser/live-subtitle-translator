@@ -4,6 +4,43 @@
 实测范围和未解决项；条目是历史证据，后续任务仍须核对当前源码与设备。
 不写密钥、音频、字幕正文或个人目录，不把临时日志当作已持久归档的案例。
 
+## 2026-10-23：v1.6.7 工具链与 AppImage 发布检查
+
+- 发版源码 `ac2cbae8` 基于最新 main `3797001f`，包含
+  [PR #312](https://github.com/yuxino/Mimi/pull/312) 的 Tauri 升级与
+  AppImage 宿主图形库策略。补回 Linux 安装指南中的 `libgles2` 提示，
+  并同步九份 README 的新贡献者署名与头像。
+- 为新策略补回四项回归测试，覆盖正常运行库、嵌套图形库、图形库符号
+  链接及旧版权文件，接回 canonical check 与 CI。最终完整
+  `./scripts/check.sh` 通过，含实际 JNI、桌面测试、前端 153 文件／
+  2,664 项及生产构建；既有 ignored 未改动。
+- 使用项目启动脚本构建并安装固定签名的 `mimi-dev.app`。正式版运行时
+  冲突检查正确拒绝并行启动；用户同意临时退出后，通过原启动函数打开
+  已安装的内嵌 `ui-only` 包，避免与正式打包并行写入前端产物。
+  实查服务空态、通用页 v1.6.7、诊断空态与字幕设置导航，窗口正常渲染。
+  退出开发版后恢复原正式版，并以精确进程路径确认恢复。
+- 针对 [#311](https://github.com/yuxino/Mimi/issues/311) 对 Tauri 升级后
+  macOS 打包的顾虑，额外启动两个实际正式产物：ARM64 原生运行、Intel
+  通过本机 Rosetta 运行。均确认字幕设置渲染、通用页 v1.6.7、导航与退出，
+  用精确进程路径、架构和签名源码标记关联窗口与产物。两包完整 designated
+  requirement 与原安装一致。结束后重新打开原正式版。Rosetta 不等于
+  Intel 实体 Mac 验收，也不代表真实识别会话或系统权限已验证。
+- macOS ARM64 与 Intel 正式产物均通过固定身份、源码版本、架构与
+  DMG 内外一致性检查。未替换正式安装，未启动真实识别、翻译或采音；未验证
+  真实提供商、长会话、完整升级及实体跨平台设备。贡献者的 CachyOS／
+  Niri／Mesa 报告保留为外部环境证据，不推广到全部 Linux 桌面。
+
+- 发版标签的[完整 CI](https://github.com/yuxino/Mimi/actions/runs/39825533042)
+  与 [Android CI](https://github.com/yuxino/Mimi/actions/runs/39825533062)
+  均通过，包括 Windows ARM64 正式编译与启动、Linux 实际安装与启动、
+  双架构 macOS 产物独立验签和 Android APK 签名。
+- [v1.6.7](https://github.com/yuxino/Mimi/releases/tag/v1.6.7) 已公开为 Latest。
+  草稿和公开下载均验证全部 17 项资产的大小、GitHub 摘要及校验清单，
+  五组更新签名均验证通过且拒绝篡改。更新器清单与发布页使用相同双语
+  文案；匿名访问应用配置中的原仓库地址及规范仓库 Latest 地址均返回
+  同一份 v1.6.7 清单。实际浏览器确认 Latest 和 @ryannyui 的原生
+  Contributors 头像正常显示。
+
 ## 2026-10-21：v1.6.6 整合诊断、录音回听与字幕改进
 
 - [PR #307](https://github.com/yuxino/Mimi/pull/307) 整合主线后的

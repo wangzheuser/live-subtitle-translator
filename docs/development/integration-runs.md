@@ -4718,6 +4718,9 @@
   shared contracts, JNI crate tests, and 153 frontend files / 2,706 tests.
   Android's complete `:app:testDebugUnitTest` passed: 37 suites / 260 tests,
   including actual host JNI and the shared streaming transcript fixtures.
+  The same full Android suite passed again after preserving the saved model
+  when switching to Voice with an invalid hidden text-model draft. This was an
+  editor persistence correction; Android native interaction remains unverified.
   A later correction to automatic-language help passed the related frontend
   check (43 files / 920 tests); final shared setup copy passed generation checks.
 - Real localhost WebSocket + HTTP tests exercised the new recognizer through

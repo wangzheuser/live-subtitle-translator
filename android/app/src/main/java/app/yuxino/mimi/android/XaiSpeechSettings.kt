@@ -46,7 +46,7 @@ internal class XaiSpeechSettings(
     val view: View get() = root
     val selectedPosition: Int get() = mode.selectedItemPosition
     val speechMode: String get() = if (selectedPosition == 0) "asrMt" else "voice"
-    val textModel: String get() = model.text.toString().trim().ifBlank { if (speechMode == "voice") savedTextModel else "" }
+    val textModel: String get() = if (speechMode == "voice") savedTextModel else model.text.toString().trim()
 
     init {
         root.addView(HelpUi.heading(activity, activity.getString(R.string.xai_mode),

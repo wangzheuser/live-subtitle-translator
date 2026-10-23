@@ -110,6 +110,34 @@ Preserve these product constraints:
 - Keep platform-native UI and capture implementations. Record intentional feature or resource-limit differences in [platform parity](docs/development/platform-parity.md); do not silently imply an Android feature exists because desktop supports it.
 - Shared fixture and provider changes trigger both desktop and Android CI. Verify both suites before publishing their changes.
 
+## Build artifacts and task cleanup
+
+- Reuse the canonical target directories in the existing build scripts for each
+  necessary platform, architecture and profile. Do not create a fresh full
+  checkout, dependency cache or target directory for each task or version unless
+  isolation is required; remove that extra copy after verification.
+- At task completion, inspect accumulated binaries, object files and incremental
+  state. Remove superseded build variants that are no longer referenced by the
+  current usable build, after checking running builds and file use. Keep the
+  current build and dependencies with a concrete next use; an active repository
+  does not justify retaining every historical variant. File age alone does not
+  prove an artifact is unused. Caches can speed later builds, not the installed
+  app's runtime; do not claim a speed benefit without a comparable measurement.
+- Clean task-owned temporary environments, old installers and duplicate test
+  bundles after validation. Distinguish project caches from shared toolchains
+  and runtimes. Preserve source, dirty work, credentials, user data, necessary
+  evidence, and installed app/signing identities. Git history and recovery
+  snapshots are not disposable build cache.
+- Documentation-only or agent-instruction changes need diff, relevant link and
+  formatting checks; do not run full compilation, packaging or installation
+  solely for those changes. Code, build and dependency changes retain their
+  required verification below.
+- After an authorized merge, remove the completed task's local and remote branch
+  only after checking the latest main, PR state and worktree use. Preserve main,
+  protected branches, unmerged unique commits and active worktrees. Remove stale
+  worktree registrations through Git after verifying their paths are absent;
+  never delete another checkout's source to make a branch deletable.
+
 ## Verification
 
 ### Fast local iteration

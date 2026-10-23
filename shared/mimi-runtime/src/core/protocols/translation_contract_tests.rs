@@ -26,6 +26,7 @@ fn contract() -> Value {
         "liveSetups",
         "liveTranscriptSequences",
         "customRecognitionCompletions",
+        "previewContentChanges",
     ] {
         let cases = value[name].as_array().unwrap();
         assert!(!cases.is_empty(), "empty {name} contract");
@@ -89,6 +90,29 @@ fn initial_preview_candidate_contracts() {
         assert_eq!(
             serde_json::to_value(candidate).unwrap(),
             case["expected"],
+            "{}",
+            case["id"]
+        );
+    }
+}
+
+#[test]
+fn preview_content_changes_preserve_meaningful_punctuation() {
+    use crate::core::preview_pacing::PreviewCandidate;
+    for case in contract()["previewContentChanges"].as_array().unwrap() {
+        let previous = PreviewCandidate::new(
+            case["previousDraft"].as_str().unwrap(),
+            case["previousLanguage"].as_str(),
+            0,
+        );
+        let current = PreviewCandidate::new(
+            case["draft"].as_str().unwrap(),
+            case["language"].as_str(),
+            0,
+        );
+        assert_eq!(
+            !current.matches_content(previous),
+            case["expected"].as_bool().unwrap(),
             "{}",
             case["id"]
         );

@@ -668,6 +668,49 @@ fn volcano_decode(value: &Value) -> Result<Value, &'static str> {
     Ok(json!({"event":event}))
 }
 
+// Offline contract access to the same bounded content comparison as desktop.
+// Return no draft text, fingerprint, provider work or session state.
+fn preview_content_changed(value: &Value) -> Result<bool, &'static str> {
+    fn language(value: &Value) -> Result<Option<&str>, &'static str> {
+        match value {
+            Value::Null => Ok(None),
+            Value::String(language)
+                if SourceLanguage::ALL.into_iter().any(|source| {
+                    source != SourceLanguage::Automatic && source.raw_value() == language
+                }) =>
+            {
+                Ok(Some(language))
+            }
+            _ => Err("native_runtime_invalid_request"),
+        }
+    }
+    let text = |field: &str| {
+        value[field]
+            .as_str()
+            .filter(|text| mimi_runtime::core::models::subtitle_text_within_limit(text))
+            .ok_or("native_runtime_invalid_request")
+    };
+    let current = mimi_runtime::core::preview_pacing::PreviewCandidate::new(
+        text("draft")?,
+        language(
+            value
+                .get("language")
+                .ok_or("native_runtime_invalid_request")?,
+        )?,
+        0,
+    );
+    let previous = mimi_runtime::core::preview_pacing::PreviewCandidate::new(
+        text("previousDraft")?,
+        language(
+            value
+                .get("previousLanguage")
+                .ok_or("native_runtime_invalid_request")?,
+        )?,
+        0,
+    );
+    Ok(!current.matches_content(previous))
+}
+
 pub fn exchange(request: &str) -> Result<String, &'static str> {
     if request.len() > MAX_REQUEST {
         return Err("native_runtime_invalid_request");
@@ -683,6 +726,7 @@ pub fn exchange(request: &str) -> Result<String, &'static str> {
                 "sessionFinishTimeoutMs":mimi_runtime::core::health::SESSION_FINISH_TIMEOUT.as_millis() as u64})
         }
         "volcano_decode" => volcano_decode(&value)?,
+        "preview_content_changed" => json!(preview_content_changed(&value)?),
         "preview_candidate" => {
             let minimum = value["minimumCharacters"]
                 .as_u64()
@@ -1555,6 +1599,75 @@ mod tests {
                 serde_json::from_str(&exchange(&request.to_string()).unwrap()).unwrap();
             assert_eq!(response["event"], case["expected"], "{}", case["id"]);
         }
+    }
+
+    #[test]
+    fn preview_content_change_contracts_cross_native_exchange_without_network() {
+        let contract: Value =
+            serde_json::from_str(include_str!("../../translation-contracts.json")).unwrap();
+        let cases = contract["previewContentChanges"].as_array().unwrap();
+        assert!(!cases.is_empty());
+        for case in cases {
+            let mut request = case.clone();
+            request["operation"] = json!("preview_content_changed");
+            let response: Value =
+                serde_json::from_str(&exchange(&request.to_string()).unwrap()).unwrap();
+            assert!(response.is_boolean());
+            assert_eq!(response, case["expected"], "{}", case["id"]);
+        }
+    }
+
+    #[test]
+    fn invalid_preview_content_fields_have_content_free_errors() {
+        let request = || {
+            json!({"operation":"preview_content_changed", "draft":"synthetic-private-marker",
+                "previousDraft":"synthetic-private-marker", "language":"en", "previousLanguage":"en"})
+        };
+        for field in ["draft", "previousDraft"] {
+            for invalid in [
+                Value::Null,
+                json!(12),
+                json!(true),
+                json!("x".repeat(mimi_runtime::core::models::MAX_SUBTITLE_TEXT_BYTES + 1)),
+                json!("字".repeat(mimi_runtime::core::models::MAX_SUBTITLE_TEXT_BYTES / 3 + 1)),
+            ] {
+                let mut invalid_request = request();
+                invalid_request[field] = invalid;
+                assert_eq!(
+                    exchange(&invalid_request.to_string()).unwrap_err(),
+                    "native_runtime_invalid_request"
+                );
+            }
+        }
+        for field in ["language", "previousLanguage"] {
+            for invalid in [
+                json!(12),
+                json!(true),
+                json!(""),
+                json!("auto"),
+                json!("synthetic-private-marker"),
+                json!("x".repeat(65_537)),
+            ] {
+                let mut invalid_request = request();
+                invalid_request[field] = invalid;
+                assert_eq!(
+                    exchange(&invalid_request.to_string()).unwrap_err(),
+                    "native_runtime_invalid_request"
+                );
+            }
+        }
+        for field in ["draft", "previousDraft", "language", "previousLanguage"] {
+            let mut invalid_request = request();
+            invalid_request.as_object_mut().unwrap().remove(field);
+            assert_eq!(
+                exchange(&invalid_request.to_string()).unwrap_err(),
+                "native_runtime_invalid_request"
+            );
+        }
+        let maximum = "x".repeat(mimi_runtime::core::models::MAX_SUBTITLE_TEXT_BYTES);
+        let valid = json!({"operation":"preview_content_changed", "draft":maximum,
+            "previousDraft":maximum, "language":null, "previousLanguage":null});
+        assert_eq!(exchange(&valid.to_string()).unwrap(), "false");
     }
 
     #[test]

@@ -181,8 +181,48 @@ impl Drop for LifecycleOperationGuard {
     }
 }
 
-struct StartRequestGuard {
+struct SessionRequestGuard {
     in_progress: Arc<AtomicBool>,
+}
+
+impl SessionRequestGuard {
+    fn acquire(in_progress: &Arc<AtomicBool>) -> Option<Self> {
+        try_begin_start(in_progress).then(|| Self {
+            in_progress: Arc::clone(in_progress),
+        })
+    }
+}
+
+struct PauseRequest {
+    resume: bool,
+    _toggle: SessionRequestGuard,
+    _start: Option<SessionRequestGuard>,
+}
+
+fn begin_pause_request(
+    toggle_in_progress: &Arc<AtomicBool>,
+    start_in_progress: &Arc<AtomicBool>,
+    is_paused: impl FnOnce() -> bool,
+) -> Result<Option<PauseRequest>, &'static str> {
+    // Settings and the floating overlay have independent pending controls.
+    // Claim before reading direction, so an in-flight Resume cannot turn a
+    // second window's duplicate request into Pause (or the reverse).
+    let Some(toggle) = SessionRequestGuard::acquire(toggle_in_progress) else {
+        return Ok(None);
+    };
+    let resume = is_paused();
+    let start = if resume {
+        Some(SessionRequestGuard::acquire(start_in_progress).ok_or("session_resume_busy")?)
+    } else {
+        // Pause must remain able to invalidate a connecting Start. Stop also
+        // bypasses these admission flags and can always claim a newer epoch.
+        None
+    };
+    Ok(Some(PauseRequest {
+        resume,
+        _toggle: toggle,
+        _start: start,
+    }))
 }
 
 struct TeardownOperationGuard {
@@ -724,7 +764,7 @@ async fn run_generation_bound_operation<T>(
     }
 }
 
-impl Drop for StartRequestGuard {
+impl Drop for SessionRequestGuard {
     fn drop(&mut self) {
         self.in_progress.store(false, Ordering::SeqCst);
     }
@@ -1047,7 +1087,10 @@ pub struct SessionManager {
     lifecycle_notify: Arc<Notify>,
     active_generation: Arc<AtomicU64>,
     stopping_tail_generation: Arc<AtomicU64>,
+    /// Start and Resume share one connection owner; Pause/Stop may supersede it.
     start_in_progress: Arc<AtomicBool>,
+    /// Owns a toggle's direction and completion across independent WebViews.
+    pause_in_progress: Arc<AtomicBool>,
     generation_transition: Arc<Mutex<()>>,
     teardown_operations: Arc<AtomicUsize>,
     teardown_notify: Arc<Notify>,
@@ -1120,6 +1163,7 @@ impl SessionManager {
             active_generation: Arc::new(AtomicU64::new(NO_GENERATION)),
             stopping_tail_generation: Arc::new(AtomicU64::new(NO_GENERATION)),
             start_in_progress: Arc::new(AtomicBool::new(false)),
+            pause_in_progress: Arc::new(AtomicBool::new(false)),
             generation_transition: Arc::new(Mutex::new(())),
             teardown_operations: Arc::new(AtomicUsize::new(0)),
             teardown_notify: Arc::new(Notify::new()),
@@ -1665,15 +1709,12 @@ impl SessionManager {
             u8::from(self.start_in_progress.load(Ordering::SeqCst)),
             self.teardown_operations.load(Ordering::SeqCst),
         );
-        if !try_begin_start(&self.start_in_progress) {
+        let Some(_start_request) = SessionRequestGuard::acquire(&self.start_in_progress) else {
             self.record_diagnostic_event(DiagnosticEvent::Lifecycle {
                 action: LifecycleAction::StartBusy,
             });
             pipeline_log!("session start skipped label=start_in_progress");
             return Ok(());
-        }
-        let _start_request = StartRequestGuard {
-            in_progress: Arc::clone(&self.start_in_progress),
         };
         let accepted_recovery_replacement = self.is_recovering.load(Ordering::SeqCst);
         if !start_request_can_proceed(
@@ -2315,10 +2356,17 @@ impl SessionManager {
     }
 
     pub async fn toggle_paused(self: &Arc<Self>) -> Result<(), String> {
+        let Some(request) =
+            begin_pause_request(&self.pause_in_progress, &self.start_in_progress, || {
+                self.is_paused()
+            })
+            .map_err(str::to_owned)?
+        else {
+            return Ok(());
+        };
         if self.is_ui_test() {
-            let paused = self.is_paused.load(Ordering::SeqCst);
-            self.is_paused.store(!paused, Ordering::SeqCst);
-            if paused {
+            self.is_paused.store(!request.resume, Ordering::SeqCst);
+            if request.resume {
                 self.controller.lock().unwrap().did_connect();
             } else {
                 self.controller.lock().unwrap().did_pause();
@@ -2326,7 +2374,7 @@ impl SessionManager {
             self.publish_state();
             return Ok(());
         }
-        if self.is_paused() {
+        if request.resume {
             self.resume().await
         } else {
             self.pause().await;
@@ -2334,7 +2382,7 @@ impl SessionManager {
         }
     }
 
-    pub async fn pause(self: &Arc<Self>) {
+    async fn pause(self: &Arc<Self>) {
         if !self.can_pause_current_session() {
             return;
         }
@@ -2371,7 +2419,7 @@ impl SessionManager {
         pipeline_log!("session paused");
     }
 
-    pub async fn resume(self: &Arc<Self>) -> Result<(), String> {
+    async fn resume(self: &Arc<Self>) -> Result<(), String> {
         if !self.can_resume_current_session() {
             return Ok(());
         }
@@ -6970,12 +7018,125 @@ mod lifecycle_tests {
         assert!(try_begin_start(&in_progress));
         assert!(!try_begin_start(&in_progress));
 
-        let owner = StartRequestGuard {
+        let owner = SessionRequestGuard {
             in_progress: Arc::clone(&in_progress),
         };
         drop(owner);
         assert!(try_begin_start(&in_progress));
         in_progress.store(false, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn concurrent_pause_requests_are_admitted_before_reading_the_toggle_direction() {
+        let toggle = Arc::new(AtomicBool::new(false));
+        let start = Arc::new(AtomicBool::new(false));
+        let reads = Arc::new(AtomicUsize::new(0));
+        let (reading, read_started) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        let first = std::thread::spawn({
+            let toggle = Arc::clone(&toggle);
+            let start = Arc::clone(&start);
+            let reads = Arc::clone(&reads);
+            move || {
+                begin_pause_request(&toggle, &start, || {
+                    reads.fetch_add(1, Ordering::SeqCst);
+                    reading.send(()).unwrap();
+                    released.recv_timeout(Duration::from_secs(2)).unwrap();
+                    true
+                })
+            }
+        });
+        read_started.recv_timeout(Duration::from_secs(2)).unwrap();
+        let duplicate = begin_pause_request(&toggle, &start, || {
+            reads.fetch_add(1, Ordering::SeqCst);
+            false
+        })
+        .unwrap();
+        let duplicate_was_admitted = duplicate.is_some();
+        drop(duplicate);
+        // Release and join before asserting, including on the failing old
+        // implementation, so no test thread remains blocked on failure.
+        release.send(()).unwrap();
+        let owner = first.join().unwrap().unwrap().unwrap();
+        assert!(!duplicate_was_admitted);
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+        assert!(owner.resume);
+        drop(owner);
+        assert!(!toggle.load(Ordering::SeqCst));
+        assert!(!start.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn duplicate_pause_or_resume_does_not_reverse_an_in_flight_toggle() {
+        for was_paused in [false, true] {
+            let toggle = Arc::new(AtomicBool::new(false));
+            let start = Arc::new(AtomicBool::new(false));
+            let paused = AtomicBool::new(was_paused);
+            let request = begin_pause_request(&toggle, &start, || paused.load(Ordering::SeqCst))
+                .unwrap()
+                .unwrap();
+            assert_eq!(request.resume, was_paused);
+            // Pause publishes paused=true before teardown finishes; Resume
+            // sets it false before its connection finishes. A second window
+            // must not turn that intermediate state into the opposite action.
+            paused.store(!was_paused, Ordering::SeqCst);
+            assert!(
+                begin_pause_request(&toggle, &start, || paused.load(Ordering::SeqCst))
+                    .unwrap()
+                    .is_none()
+            );
+            drop(request);
+            let next = begin_pause_request(&toggle, &start, || paused.load(Ordering::SeqCst))
+                .unwrap()
+                .unwrap();
+            assert_eq!(next.resume, !was_paused);
+        }
+    }
+
+    #[test]
+    fn resume_and_start_share_admission_while_pause_can_cancel_a_start() {
+        let toggle = Arc::new(AtomicBool::new(false));
+        let start = Arc::new(AtomicBool::new(false));
+        let starting = SessionRequestGuard::acquire(&start).unwrap();
+        assert!(matches!(
+            begin_pause_request(&toggle, &start, || true),
+            Err("session_resume_busy")
+        ));
+        assert!(!toggle.load(Ordering::SeqCst));
+        let pause = begin_pause_request(&toggle, &start, || false)
+            .unwrap()
+            .unwrap();
+        assert!(!pause.resume);
+        drop(pause);
+        assert!(start.load(Ordering::SeqCst));
+        drop(starting);
+
+        let resume = begin_pause_request(&toggle, &start, || true)
+            .unwrap()
+            .unwrap();
+        assert!(SessionRequestGuard::acquire(&start).is_none());
+        drop(resume);
+        assert!(SessionRequestGuard::acquire(&start).is_some());
+    }
+
+    #[test]
+    fn pause_and_resume_admission_do_not_block_a_newer_stop_epoch() {
+        for was_paused in [false, true] {
+            let toggle = Arc::new(AtomicBool::new(false));
+            let start = Arc::new(AtomicBool::new(false));
+            let request = begin_pause_request(&toggle, &start, || was_paused)
+                .unwrap()
+                .unwrap();
+            let sequence = AtomicU64::new(71);
+            assert_eq!(
+                advance_lifecycle_sequence_if_current(&sequence, 71),
+                Some(72)
+            );
+            assert!(!lifecycle_sequence_matches(&sequence, 71));
+            drop(request);
+            assert!(!toggle.load(Ordering::SeqCst));
+            assert!(!start.load(Ordering::SeqCst));
+        }
     }
 
     #[tokio::test]

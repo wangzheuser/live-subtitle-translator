@@ -5,6 +5,7 @@ import { Switch } from "../../components/Switch";
 import { UI_LANGUAGE_OPTIONS, I18N, setStoredUiLanguage, type UiLanguage } from "../../lib/i18n";
 import { announceSettingsNavigationReady, isTauri, listenSettingsNavigation, type SettingsNavigationTarget } from "../../lib/ipc";
 import { selectSessionStatusKind, useStore } from "../../lib/store";
+import { credentialStateForTarget } from "../../lib/providerCapabilities";
 import type { SettingsDraft, SubtitleAlignment } from "../../lib/types";
 import { SUBTITLE_DISPLAY_OPTIONS, VISIBLE_SUBTITLE_COUNT_OPTIONS, visibleSubtitleCountChoice, visibleSubtitleCountDraft, subtitleDisplayShortcut } from "../../lib/subtitleDisplay";
 import { subtitleBackgroundColor } from "../../lib/subtitleColor";
@@ -94,7 +95,7 @@ export function SettingsView() {
     settings.profiles[0];
   const locationCategory = settingsCategoryFromHash(window.location.hash);
   const preferredCategory: SettingsCategory =
-    activeProfile?.credentialState === "present" ? "subtitles" : "service";
+    credentialStateForTarget(activeProfile, settings.targetLanguage) === "present" ? "subtitles" : "service";
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>(
     locationCategory ?? preferredCategory,
   );

@@ -6265,6 +6265,104 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn semantic_number_correction_retranslates_the_same_utterances_completed_preview() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            for (source, translation) in [
+                ("Use 1.5 liters", "Synthetic 1.5 translation"),
+                ("Use 15 liters", "Synthetic 15 translation"),
+            ] {
+                let (mut socket, _) =
+                    tokio::time::timeout(Duration::from_secs(8), listener.accept())
+                        .await
+                        .unwrap()
+                        .unwrap();
+                let request = read_synthetic_request(&mut socket).await;
+                let header_end = request
+                    .windows(4)
+                    .position(|bytes| bytes == b"\r\n\r\n")
+                    .unwrap()
+                    + 4;
+                let body: serde_json::Value =
+                    serde_json::from_slice(&request[header_end..]).unwrap();
+                assert_eq!(body["text"], source);
+                write_synthetic_response(
+                    &mut socket,
+                    200,
+                    &serde_json::json!({"code":200,"data":translation}).to_string(),
+                )
+                .await;
+            }
+        });
+        let (sender, mut events) = provider_event_channel();
+        let mut client = HighQualityTranslationClient::new_deeplx(
+            "synthetic-asr",
+            &endpoint,
+            "",
+            SourceLanguage::English,
+            TargetLanguage::Japanese,
+            sender,
+        )
+        .unwrap();
+        client.stable_draft_delay = Duration::from_secs(60);
+        client.maximum_wait_delay = Duration::from_secs(60);
+        let mut controller = crate::core::session::TranslationSessionController::default();
+        for (index, (source, translation)) in [
+            ("Use 1.5 liters", "Synthetic 1.5 translation"),
+            ("Use 15 liters", "Synthetic 15 translation"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            client
+                .handle_asr_event(LiveTranslateServerEvent::SourceUtteranceDraft {
+                    utterance_id: 17,
+                    text: source.into(),
+                    language: Some("en".into()),
+                })
+                .await;
+            let revision = client.inner.lock().await.draft_revision;
+            client
+                .start_preview(source.into(), Some("en".into()), revision)
+                .await;
+            let scheduled = client.inner.lock().await.preview_task.is_some();
+            if !scheduled {
+                client.disconnect().await;
+                server.abort();
+            }
+            assert!(
+                scheduled,
+                "A decimal correction must schedule another preview for the same source identity"
+            );
+            tokio::time::timeout(Duration::from_secs(8), async {
+                loop {
+                    let event = events.recv().await.unwrap();
+                    let completed = matches!(&event, LiveTranslateServerEvent::SubtitlePreviewPair {
+                        source_utterance_id: Some(17), source: actual_source, translation: actual_translation, ..
+                    } if actual_source == source && actual_translation == translation);
+                    controller.handle(event);
+                    if completed { break; }
+                }
+                while client.inner.lock().await.preview_task.is_some() { tokio::task::yield_now().await; }
+            }).await.unwrap();
+            let pair = controller.state.subtitles.preview_pair.as_ref().unwrap();
+            assert_eq!(pair.source, source);
+            assert_eq!(pair.translation, translation);
+            assert!(
+                controller.state.subtitles.history.is_empty(),
+                "A corrected preview remains replaceable"
+            );
+            assert!(!controller.state.subtitles.display_pair_final);
+            if index == 0 {
+                assert_eq!(controller.state.subtitles.source.text, "Use 1.5 liters");
+            }
+        }
+        client.disconnect().await;
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
     async fn opening_fragments_wait_for_stability_but_maximum_and_corrections_still_preview() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         for (kind, correcting) in [

@@ -420,6 +420,16 @@ page must include a review of other instances of the same pattern.
   Verify both translated and Original routes and a stale capability snapshot.
   Explicit source selection retains the target subject to provider normalization;
   Chinese must not silently switch translation off or rewrite an Original target.
+- First settings navigation uses the selected target's credential requirements,
+  just like Start and profile selection. An Original route with configured speech
+  must not be redirected to setup because its unused text route is incomplete.
+  Cover both an initial ready snapshot and loading-to-ready, while preserving
+  explicit page/deep-link intent.
+- Pause/Resume admission belongs to the native session, not a WebView's busy
+  control. Claim a toggle before reading its direction and retain ownership
+  through completion. Resume shares Start's connection admission, while Pause
+  and Stop can still supersede connecting work. Verify concurrent windows cannot
+  reverse an in-flight toggle or retire its generation without a replacement.
 - AppKit window mutations, including window level and collection behavior,
   must run on the macOS main thread.
 - Full-screen visibility requires the overlay's all-spaces and full-screen
@@ -443,6 +453,12 @@ page must include a review of other instances of the same pattern.
   status visible; source previews belong only to Original/same-language mode.
   Changing preview kind or removing a preview must immediately invalidate the
   text stabilizer's old display value.
+- Preview deduplication must retain meaningful number and word punctuation:
+  decimals, signs, percentages and word-internal connectors cannot be collapsed
+  into unchanged text. Keep terminal punctuation/spacing churn suppressed and
+  existing correction pacing intact. Use a real loopback request correction
+  alongside shared Rust/JNI fixtures; a hash assertion alone does not establish
+  that the corrected preview reaches the subtitle event stream.
 - An identified empty ASR completion withdraws that source's preview and stop
   fallback. Keep the withdrawal identified through the shared reducer: the
   latest recognition draft and the displayed pair may have different owners.

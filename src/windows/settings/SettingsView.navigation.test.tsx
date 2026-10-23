@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { I18N, setStoredUiLanguage } from "../../lib/i18n";
 import { useStore } from "../../lib/store";
 import type { SettingsNavigationTarget } from "../../lib/ipc";
+import type { SettingsSnapshot } from "../../lib/types";
 import { SettingsView } from "./SettingsView";
 
 const native = vi.hoisted(() => ({ listen: vi.fn(), ready: vi.fn(), archive: vi.fn(), unlisten: vi.fn() }));
@@ -83,6 +84,42 @@ it("opens subtitles when an existing configured profile arrives after the empty 
   await act(async () => useStore.setState({ initializationStatus: "ready", settings: { ...initial.settings,
     activeProfileId: "existing", profiles: [{ id: "existing", provider: "googleGeminiLive", name: "Existing service", credentialState: "present" }] } }));
   expect(host.querySelector("#settings-category-subtitles")?.getAttribute("aria-current")).toBe("page");
+});
+
+const recognitionOnlyCases = (["customDashScopeASR", "customOpenAIASR"] as const).flatMap(provider =>
+  (["ready", "loading"] as const).flatMap(initializationStatus =>
+    ([{ targetLanguage: "original", category: "subtitles" }, { targetLanguage: "zh", category: "service" }] as const)
+      .map(selection => ({ provider, initializationStatus, ...selection }))));
+
+it.each(recognitionOnlyCases)("opens $category for $provider → $targetLanguage after initial $initializationStatus", async ({ provider, initializationStatus, targetLanguage, category }) => {
+  window.history.replaceState(null, "", window.location.pathname);
+  const settings: SettingsSnapshot = { ...initial.settings, activeProfileId: "recognition-only", targetLanguage,
+    profiles: [{ id: "recognition-only", provider, name: "Configured recognition", credentialState: "missing",
+      speechCredentialState: "present", textCredentialState: "missing", textTranslation: "deepL" }] };
+  useStore.setState({ initializationStatus, settings: initializationStatus === "ready" ? settings : initial.settings });
+  await act(async () => root.render(<SettingsView />));
+  if (initializationStatus === "loading") {
+    await act(async () => useStore.setState({ initializationStatus: "ready", settings }));
+  }
+  expect(host.querySelector(`#settings-category-${category}`)?.getAttribute("aria-current")).toBe("page");
+  if (targetLanguage === "original") {
+    const start = host.querySelector<HTMLButtonElement>(`[role="switch"][aria-label="${I18N.settings.liveSubtitles}"]`);
+    expect(start).not.toBeNull();
+    expect(start!.disabled).toBe(false);
+    expect(host.querySelector("#settings-session-status")?.textContent).toBe(I18N.settings.sessionIdle);
+  }
+});
+
+it.each(["ready", "loading"] as const)("preserves an explicit settings hash for a recognition-only profile after initial %s", async initializationStatus => {
+  window.history.replaceState(null, "", "#application-settings");
+  const settings: SettingsSnapshot = { ...initial.settings, activeProfileId: "recognition-only", targetLanguage: "original",
+    profiles: [{ id: "recognition-only", provider: "customDashScopeASR", name: "Configured recognition", credentialState: "missing",
+      speechCredentialState: "present", textCredentialState: "missing", textTranslation: "deepL" }] };
+  useStore.setState({ initializationStatus, settings: initializationStatus === "ready" ? settings : initial.settings });
+  await act(async () => root.render(<SettingsView />));
+  if (initializationStatus === "loading") await act(async () => useStore.setState({ initializationStatus: "ready", settings }));
+  expect(host.querySelector("#settings-category-general")?.getAttribute("aria-current")).toBe("page");
+  expect(window.location.hash).toBe("#application-settings");
 });
 
 it("keeps a fresh install on services and preserves navigation after its first profile is added", async () => {

@@ -4622,3 +4622,45 @@
   restart recovery, real translation and Windows/Linux device checks remain
   unverified. Next check is still the user's same-identity update/start case
   without pressing Prepare when it can be done without interrupting playback.
+
+## 2026-10-23 — Preview corrections and session entry
+
+- Source: `b6d03584` plus this entry's commit. Preview deduplication discarded
+  meaning-changing punctuation, including decimal points and numeric signs.
+  The shared fingerprint now retains these and word-internal connectors while
+  ignoring cosmetic punctuation changes. Request budgets, correction cooldown,
+  final ordering and provider protocols stay unchanged. Controlled regressions
+  failed before repair; a loopback HQ request test then observed the corrected
+  preview for the same utterance. This is not a live-provider latency result.
+- Original-only settings entry now uses recognition's credential requirements,
+  matching the existing Start control. Translation targets still require their
+  text service, and explicit page links retain priority. Four original-only
+  entry cases failed before repair; all 17 navigation tests then passed.
+- Native Pause/Resume claims ownership before reading its direction, preventing
+  independent windows from reversing an unfinished action. Resume also shares
+  Start's connection ownership; Pause and Stop retain cancellation precedence.
+  The actual admission helper reproduced the race before repair. All 85 focused
+  lifecycle tests passed; independent final source review found no further issue.
+- Final `./scripts/check.sh` passed: native safety checks, formatting, strict
+  Clippy, 676 desktop, 106 core, 856 runtime, 26 Rust JNI-adapter and 2,692 frontend
+  tests, plus lint/typecheck and production frontend build. Existing manual
+  HTTPS/offline-DSP tests remained ignored. Actual Android JVM JNI debug and
+  release each passed 253 tests across 37 suites, including the same 43 shared
+  preview-identity fixtures and strict input-boundary checks. No emulator ran.
+- Hidden browser fixtures covered 16 initial-entry layouts across eight locales
+  and 520/760 px, alternating dark/light, plus four provider/target controls,
+  an explicit General route and actual navigation/menu actions. Checked original
+  entries opened Subtitles with Start enabled; translation targets opened service
+  setup. No horizontal overflow was found. Saved 20 synthetic screenshots and
+  two navigation reports outside Git; visually reviewed three representative
+  layouts. These are component/UI fixtures, not native-session acceptance.
+- Production Mimi remained running. No installation, foreground app, audio,
+  playback, model, permission, private setting or credential operation occurred.
+  Closed the hidden page/server and removed temporary logs after retaining check
+  evidence. Removed 534 obsolete root-crate build artifacts (480 MB) and their
+  43 fingerprints for features absent from the current manifest, after checking
+  no build was running and excluding current output inodes. Retained current
+  outputs/dependencies and uncertain incremental state; created no extra target
+  directory or checkout. Real provider correction, native cross-window operation
+  and Windows/Linux/device acceptance remain unverified. Repeat these exact
+  cases when native testing can proceed without interrupting playback.

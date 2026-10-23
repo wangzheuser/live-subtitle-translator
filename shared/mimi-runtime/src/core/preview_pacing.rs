@@ -40,10 +40,13 @@ impl PreviewCandidate {
         let mut hasher = DefaultHasher::new();
         language.hash(&mut hasher);
         let mut meaningful_chars = 0usize;
-        // Ignore punctuation/spacing churn without keeping another draft copy.
+        // Ignore presentation punctuation/spacing churn, while retaining
+        // numeric signs/separators and word connectors that change the input.
         let mut previous_ascii_word = false;
         let mut word_boundary = false;
-        for character in text.chars() {
+        let mut previous_character = None;
+        let mut characters = text.chars().peekable();
+        while let Some(character) = characters.next() {
             if character.is_alphanumeric() {
                 // Preserve ASCII word boundaries: "now here" and "nowhere"
                 // are different content, unlike repeated spaces or commas.
@@ -56,7 +59,15 @@ impl PreviewCandidate {
                 word_boundary = false;
             } else if character.is_whitespace() {
                 word_boundary = true;
+            } else if let Some(symbol) = preview_identity_symbol(
+                character,
+                previous_character,
+                characters.peek().copied(),
+                characters.clone().nth(1),
+            ) {
+                symbol.hash(&mut hasher);
             }
+            previous_character = Some(character);
         }
         Self {
             fingerprint: hasher.finish(),
@@ -85,6 +96,42 @@ impl PreviewCandidate {
             .saturating_mul(1_000)
             .div_ceil(SHARED_UNITS_PER_SECOND);
         Duration::from_millis(milliseconds as u64).max(MIN_SHARED_REQUEST_SPACING)
+    }
+}
+
+fn preview_identity_symbol(
+    character: char,
+    previous: Option<char>,
+    next: Option<char>,
+    after_next: Option<char>,
+) -> Option<char> {
+    let character = match character {
+        '．' => '.',
+        '，' => ',',
+        '：' => ':',
+        '／' => '/',
+        '＋' => '+',
+        '－' => '-',
+        '％' => '%',
+        character => character,
+    };
+    let numeric_before = previous.is_some_and(char::is_numeric);
+    let numeric_after = next.is_some_and(char::is_numeric);
+    let fractional_after =
+        matches!(next, Some('.' | ',' | '．' | '，')) && after_next.is_some_and(char::is_numeric);
+    let inside_word =
+        previous.is_some_and(char::is_alphanumeric) && next.is_some_and(char::is_alphanumeric);
+    match character {
+        // A leading decimal has no preceding digit; a sentence-ending dot
+        // still has no following digit and remains presentation punctuation.
+        '.' | ',' if numeric_after => Some(character),
+        ':' | '/' if numeric_before && numeric_after => Some(character),
+        '+' if numeric_after || fractional_after => Some('+'),
+        '-' | '−' | '‐' | '‑' if numeric_after || fractional_after => Some('-'),
+        '%' if numeric_before => Some('%'),
+        '\'' | '’' if inside_word => Some('\''),
+        '-' | '‐' | '‑' if inside_word => Some('-'),
+        _ => None,
     }
 }
 
@@ -330,6 +377,70 @@ mod tests {
             pacer.has_changed(original),
             "a repeated spoken line after a final is new work"
         );
+    }
+
+    #[test]
+    fn semantic_number_and_word_punctuation_remains_eligible_for_a_bounded_revision() {
+        let now = Instant::now();
+        for (original, correction) in [
+            ("Use 1.5 liters", "Use 15 liters"),
+            ("Use 1,5 liters", "Use 15 liters"),
+            ("Use .5 liters", "Use 5 liters"),
+            ("Use ,5 liters", "Use 5 liters"),
+            ("Set -5 degrees", "Set 5 degrees"),
+            ("Set +5 degrees", "Set 5 degrees"),
+            ("Set -.5 degrees", "Set .5 degrees"),
+            ("Set +.5 degrees", "Set .5 degrees"),
+            ("Set -,5 degrees", "Set ,5 degrees"),
+            ("Set +,5 degrees", "Set ,5 degrees"),
+            ("Mix 1:5", "Mix 15"),
+            ("Use 1/5 cup", "Use 15 cup"),
+            ("Set 50% power", "Set 50 power"),
+            ("I can't stay", "I cant stay"),
+            ("Please re-sign here", "Please resign here"),
+        ] {
+            for (original, correction) in [(original, correction), (correction, original)] {
+                let original = PreviewCandidate::new(original, Some("en"), 0);
+                let correction = PreviewCandidate::new(correction, Some("en"), 0);
+                assert!(
+                    !original.matches_content(correction),
+                    "A meaning-changing separator must not be cosmetic"
+                );
+                let mut pacer = PreviewRequestPacer::default();
+                pacer.record_candidate_start(now, original);
+                assert_eq!(
+                    pacer.next_candidate_start_at(now, correction),
+                    Some(now + REVISION_REFRESH_SPACING),
+                    "A semantic correction keeps the existing revision cooldown"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cosmetic_punctuation_and_connector_glyphs_do_not_retranslate_a_number() {
+        for (original, cosmetic) in [
+            ("Use 1.5 liters", "Use 1.5 liters!"),
+            ("Use 1,5 liters", "Use 1,5   liters."),
+            ("Set 5", "Set 5."),
+            ("Use .5 liters", "Use ．5 liters."),
+            ("Use ,5 liters", "Use ，5 liters."),
+            ("Set -.5 degrees", "Set −．5 degrees!"),
+            ("Set +,5 degrees", "Set ＋，5 degrees!"),
+            ("Set -5 degrees", "Set －5 degrees!"),
+            ("Use 1.5 liters", "Use 1．5 liters!"),
+            ("Use 1,5 liters", "Use 1，5 liters!"),
+            ("Mix 1:5", "Mix 1：5."),
+            ("Use 1/5 cup", "Use 1／5 cup."),
+            ("Set 50% power", "Set 50％ power."),
+            (
+                "I can't re-sign at -5 degrees",
+                "I can’t re‐sign at −5 degrees!",
+            ),
+        ] {
+            assert!(PreviewCandidate::new(original, Some("en"), 0)
+                .matches_content(PreviewCandidate::new(cosmetic, Some("en"), 0)));
+        }
     }
 
     #[test]

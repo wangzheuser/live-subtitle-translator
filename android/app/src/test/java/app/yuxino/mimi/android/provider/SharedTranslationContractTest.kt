@@ -32,6 +32,39 @@ class SharedTranslationContractTest {
         assertEquals(case.getString("id"), case.get("expected"), actual.get("candidate"))
     }
 
+    @Test fun previewContentChangesCrossActualJniWithoutProviderRequests() = cases("previewContentChanges") { case ->
+        val actual = NativeRuntimeConfiguration.exchangeRaw(JSONObject(case.toString())
+            .put("operation", "preview_content_changed").toString())
+        assertEquals(case.getString("id"), case.getBoolean("expected"), actual.toBooleanStrict())
+    }
+
+    @Test fun invalidPreviewContentFieldsHaveSanitizedNativeErrors() {
+        fun request() = JSONObject().put("operation", "preview_content_changed")
+            .put("draft", "synthetic-private-marker").put("previousDraft", "synthetic-private-marker")
+            .put("language", "en").put("previousLanguage", "en")
+        fun reject(value: JSONObject) {
+            val error = assertThrows(IllegalArgumentException::class.java) { NativeRuntimeConfiguration.exchangeRaw(value.toString()) }
+            assertEquals("native_runtime_invalid_request", error.message)
+        }
+        for (field in listOf("draft", "previousDraft")) {
+            for (invalid in listOf(JSONObject.NULL, 12, true, "x".repeat(65_537), "字".repeat(21_846))) {
+                reject(request().put(field, invalid))
+            }
+        }
+        for (field in listOf("language", "previousLanguage")) {
+            for (invalid in listOf(12, true, "", "auto", "synthetic-private-marker", "x".repeat(65_537))) {
+                reject(request().put(field, invalid))
+            }
+        }
+        for (field in listOf("draft", "previousDraft", "language", "previousLanguage")) {
+            reject(request().apply { remove(field) })
+        }
+        val maximum = "x".repeat(65_536)
+        val unchanged = request().put("draft", maximum).put("previousDraft", maximum)
+            .put("language", JSONObject.NULL).put("previousLanguage", JSONObject.NULL)
+        assertEquals("false", NativeRuntimeConfiguration.exchangeRaw(unchanged.toString()))
+    }
+
     @Test fun volcanoProto3TimingContractsCrossActualJniWithoutProviderRequests() = cases("volcanoSubtitleTimingEvents") { case ->
         val response = NativeRuntimeConfiguration.exchange(JSONObject().put("operation", "volcano_decode")
             .put("hex", case.getString("hex")))

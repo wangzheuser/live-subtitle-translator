@@ -4664,3 +4664,45 @@
   directory or checkout. Real provider correction, native cross-window operation
   and Windows/Linux/device acceptance remain unverified. Repeat these exact
   cases when native testing can proceed without interrupting playback.
+
+## 2026-10-23 — v1.6.8 release and package acceptance
+
+- Released source: `fd60cee920d040ce791174d08d538dda8b33dec5`, tag `v1.6.8`.
+  Desktop version sources agree on 1.6.8; Android uses 1.6.8 / 10608. Reviewed
+  English-first bilingual notes are identical in the release and updater.
+  No new external contribution first ships in this range, so earlier release
+  credit was not repeated.
+- The release version passed `./scripts/check.sh`, including 676 desktop,
+  106 core, 856 runtime, 26 Rust JNI-adapter and 2,692 frontend tests. Only
+  release-note wording changed afterward. Main [desktop CI](https://github.com/yuxino/Mimi/actions/runs/39923128026)
+  and [Android CI](https://github.com/yuxino/Mimi/actions/runs/39923128097), then
+  tag [release CI](https://github.com/yuxino/Mimi/actions/runs/39924048764) and
+  [Android CI](https://github.com/yuxino/Mimi/actions/runs/39924048750), all passed.
+  Tag jobs include Windows x64/ARM64 startup, extracted portable startup, Linux
+  package installation/startup, actual JNI tests and signed Android packaging.
+- Both macOS release architectures were prepared with the pinned certificate
+  and background DMG mode. App, DMG and updater archive checks passed for sealed
+  source/version, architecture, production-only content and matching CDHash.
+  The new ARM app's complete designated requirement matches the installed app.
+  No installation or launch was performed; signature continuity alone is not
+  acceptance of a real update or its existing permission grants.
+- After all 17 draft files finished downloading, every checksum matched both
+  `SHA256SUMS.txt` and GitHub's asset digest. Five updater signatures passed
+  independent verification. The APK has the correct production identifier,
+  version/code, fixed signing certificate, non-debug flag and 16 KiB ZIP
+  alignment; CI also checked native ELF alignment. Original macOS upload bytes
+  matched the final draft. The tag stayed on the sealed source and Latest was
+  still 1.6.7 before the explicitly authorized publication.
+- [v1.6.8](https://github.com/yuxino/Mimi/releases/tag/v1.6.8) was published as
+  Latest. Anonymous checks returned HTTP 200 for all 17 download URLs. The
+  tag-specific, canonical Latest and exact lowercase-repository updater endpoint
+  returned byte-identical 1.6.8 manifests. Public asset digests remained unchanged.
+  The hidden public page showed Latest, the correct source and both languages;
+  its screenshot and verification reports are retained outside Git.
+- Production Mimi's original process remained running. Foreground playback,
+  audio, permissions, models, private settings and credentials were untouched.
+  Full in-place updates, live translation and physical Windows/Linux/Android
+  acceptance remain unverified and are disclosed in the notes. Closed the hidden
+  page and removed the temporary verifier, logs and downloaded duplicate assets
+  after retaining evidence. Previous-version DMGs were already absent after
+  packaging; current canonical packages and reusable build caches remain.

@@ -78,3 +78,76 @@ it("sanitizes failed support and pair queries and recovers on explicit retry", a
   expect(current.support).toEqual(available);
   expect(pair.status).toBe("installed");
 });
+
+it("shows pending capability and pair retries and shares repeated requests in the same context", async () => {
+  vi.mocked(getAppleTranslationSupport).mockRejectedValueOnce(new Error("private-support"));
+  vi.mocked(getAppleTranslationStatus).mockRejectedValueOnce(new Error("private-status"));
+  await render();
+  const support = deferred<AppleTranslationSupport>(), status = deferred<AppleTranslationStatus>();
+  vi.mocked(getAppleTranslationSupport).mockReturnValueOnce(support.promise);
+  vi.mocked(getAppleTranslationStatus).mockReturnValueOnce(status.promise);
+  let retries!: Promise<void>[];
+  await act(async () => { retries = [current.refresh(), current.refresh(), pair.refresh(), pair.refresh()]; });
+  expect(getAppleTranslationSupport).toHaveBeenCalledTimes(2);
+  expect(getAppleTranslationStatus).toHaveBeenCalledTimes(2);
+  expect(current.loading).toBe(true);
+  expect(current.failed).toBe(false);
+  expect(pair.loading).toBe(true);
+  expect(pair.failed).toBe(false);
+  expect(pair.status).toBeNull();
+  await act(async () => { support.resolve(available); status.resolve("supported"); await Promise.all(retries); });
+  expect(current.support).toEqual(available);
+  expect(current.loading).toBe(false);
+  expect(pair.status).toBe("supported");
+  expect(pair.loading).toBe(false);
+});
+
+it("does not send explicit refreshes while hidden", async () => {
+  await render(false);
+  await act(async () => { await current.refresh(); await pair.refresh(); });
+  expect(getAppleTranslationSupport).not.toHaveBeenCalled();
+  expect(getAppleTranslationStatus).not.toHaveBeenCalled();
+});
+
+it.each(["resolve", "reject"] as const)("keeps a fresh reopened query pending after an older retry %s", async outcome => {
+  await render();
+  const oldSupport = deferred<AppleTranslationSupport>(), oldStatus = deferred<AppleTranslationStatus>();
+  vi.mocked(getAppleTranslationSupport).mockReturnValueOnce(oldSupport.promise);
+  vi.mocked(getAppleTranslationStatus).mockReturnValueOnce(oldStatus.promise);
+  let old!: Promise<void>[];
+  await act(async () => { old = [current.refresh(), pair.refresh()]; });
+  await render(false);
+  const latestSupport = deferred<AppleTranslationSupport>(), latestStatus = deferred<AppleTranslationStatus>();
+  vi.mocked(getAppleTranslationSupport).mockReturnValueOnce(latestSupport.promise);
+  vi.mocked(getAppleTranslationStatus).mockReturnValueOnce(latestStatus.promise);
+  await render();
+  await act(async () => {
+    if (outcome === "resolve") { oldSupport.resolve(available); oldStatus.resolve("installed"); }
+    else { oldSupport.reject(new Error("private-old-support")); oldStatus.reject(new Error("private-old-status")); }
+    await Promise.all(old);
+  });
+  expect(current.loading).toBe(true);
+  expect(current.support).toBeNull();
+  expect(pair.loading).toBe(true);
+  expect(pair.status).toBeNull();
+  await act(async () => { latestSupport.resolve(available); latestStatus.resolve("supported"); });
+  expect(current.support).toEqual(available);
+  expect(pair.status).toBe("supported");
+});
+
+it("starts a fresh status retry after an explicit preparation supersedes the old query", async () => {
+  await render();
+  const old = deferred<AppleTranslationStatus>(), latest = deferred<AppleTranslationStatus>();
+  vi.mocked(getAppleTranslationStatus).mockReturnValueOnce(old.promise).mockReturnValueOnce(latest.promise);
+  let oldRetry!: Promise<void>, latestRetry!: Promise<void>;
+  await act(async () => { oldRetry = pair.refresh(); });
+  await act(async () => pair.update("installed"));
+  await act(async () => { latestRetry = pair.refresh(); });
+  expect(getAppleTranslationStatus).toHaveBeenCalledTimes(3);
+  expect(pair.loading).toBe(true);
+  await act(async () => { old.resolve("unsupported"); await oldRetry; });
+  expect(pair.loading).toBe(true);
+  expect(pair.status).toBeNull();
+  await act(async () => { latest.resolve("installed"); await latestRetry; });
+  expect(pair.status).toBe("installed");
+});

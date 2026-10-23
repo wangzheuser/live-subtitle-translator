@@ -203,6 +203,7 @@ These project rules apply to implementation and review.
 | Invalid input or failed save with an unsaved field to correct | Keep the draft, error and retry beside that field. Toasts do not replace field validation. |
 | Connection check | Keep progress, result and actual request duration beside its triggering action; recognition and translation remain independent. |
 | History-list or transcript read failure | Keep Retry beside the content and preserve search, page and reading choices. Clear the error only after that read succeeds; opening a record or starting rename/delete cannot dismiss it. Reject results from older visits. |
+| Apple resource queries | Reopening a view starts a fresh readiness check even when the language pair is unchanged. A resource-signature refresh within the same visit keeps current controls mounted and disabled so an ongoing recognition check survives another locale's update. Explicit Retry shows progress immediately and shares an already-pending query for that context. Hidden views and old callbacks cannot launch or overwrite the new visit's query. |
 | Ongoing session, device or local-storage problem | Keep the relevant state/error and recovery control visible until resolved. |
 | Update download/install/restart state | Keep progress and the next action visible. An up-to-date acknowledgement or failed Releases link uses a toast. |
 

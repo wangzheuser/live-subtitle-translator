@@ -4580,3 +4580,45 @@
   restart/update case remains unverified while foreground testing would interrupt
   video viewing. Next check: repeat that exact update/start case without pressing
   Prepare, then compare readiness and translation timing before and after.
+
+## 2026-10-23 — Apple capability and settings recovery
+
+- Source: `39011172` plus this entry's commit. A failed capability query was
+  cached as a completed empty scan. Speech and Translation now clear stale
+  readiness while allowing a later settings read to retry. Concurrent bootstrap
+  reads share the completed attempt, explicit refreshes remain ordered, and a
+  partial Speech preparation does not certify a full inventory. A changed
+  settings capability snapshot is published to already-open windows.
+- Apple Translation Retry immediately shows progress and shares a pending query
+  for its current context. Hidden or obsolete callbacks cannot launch another
+  query. Speech reopening starts a fresh visit; an in-place inventory refresh
+  retains disabled controls so an ongoing recognition check survives an update
+  to another locale. Existing localized progress/error copy remains unchanged.
+- Controlled regressions reproduced failed-cache, duplicate-query, publication
+  and stale/busy UI boundaries before repair. The first complete frontend run
+  caught an overbroad Speech reset that unmounted a current check. Separating
+  visible-visit identity from inventory revision fixed it; the unchanged
+  ServiceProfiles regression and all 285 related tests passed. Independent final
+  review found no further actionable issue.
+- Final `./scripts/check.sh` passed: native safety checks, strict compile/lint,
+  672 desktop, 106 core, 852 runtime, 24 JNI-adapter and 2,682 frontend tests,
+  plus production frontend build. Existing manual HTTPS/offline-DSP tests remain
+  ignored. The first launch check encountered the review server's port; closing
+  that task-owned server resolved it. Actual Android JVM JNI debug and release
+  tests each passed 251 tests across 37 suites, rebuilding the shared host library
+  with the existing SDK/JDK. No emulator, device or model query was involved.
+- Hidden in-app browser fixtures exercised 16 pair-status flows across eight
+  locales and 520/760 px widths, alternating dark/light, plus six Translation/
+  Speech support flows in Chinese, English and Japanese. Each checked failure,
+  Retry, pending and recovery; request counts stayed at one initial query plus
+  one retry, and checked layouts had no horizontal overflow. Saved 25 screenshots
+  and two result reports outside Git; visually reviewed six representative
+  states. These are synthetic UI results, not native-model acceptance.
+- The original production process remained running; no app replacement, signing,
+  permission, player, audio, private setting or credential operation occurred.
+  Closed the hidden review page/server and removed the one-off harness. Retained
+  current canonical build outputs for continued development and necessary review
+  evidence; no extra target directory or checkout was created. Native update/
+  restart recovery, real translation and Windows/Linux device checks remain
+  unverified. Next check is still the user's same-identity update/start case
+  without pressing Prepare when it can be done without interrupting playback.

@@ -4,6 +4,7 @@
 use crate::apple_translation::{self, AppleTranslationCapabilities, AppleTranslationStatus};
 use crate::core::models::{SourceLanguage, TargetLanguage};
 use serde::Serialize;
+use std::future::Future;
 use std::sync::{Mutex, OnceLock};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
@@ -14,7 +15,43 @@ pub struct AppleTranslationSupport {
     pub target_languages: Vec<TargetLanguage>,
 }
 
-static SUPPORT: OnceLock<Mutex<Option<AppleTranslationSupport>>> = OnceLock::new();
+#[derive(Default)]
+struct SupportCache {
+    support: Option<AppleTranslationSupport>,
+    // An unavailable inventory is a successful result; a failed scan stays
+    // retryable without retaining an old availability claim.
+    refresh_attempt: u64,
+    last_refresh: Option<Result<(), String>>,
+}
+
+impl SupportCache {
+    fn is_loaded(&self) -> bool {
+        self.last_refresh.as_ref().is_some_and(Result::is_ok)
+    }
+
+    fn completed_since(&self, attempt: u64) -> Option<Result<AppleTranslationSupport, String>> {
+        if self.is_loaded() || self.refresh_attempt != attempt {
+            self.last_refresh
+                .as_ref()
+                .map(|result| result.clone().map(|()| self.snapshot()))
+        } else {
+            None
+        }
+    }
+
+    fn snapshot(&self) -> AppleTranslationSupport {
+        self.support.clone().unwrap_or_default()
+    }
+
+    fn record_refresh(&mut self, support: &Result<AppleTranslationSupport, String>) {
+        self.support = support.as_ref().ok().cloned();
+        self.refresh_attempt = self.refresh_attempt.wrapping_add(1);
+        self.last_refresh = Some(support.as_ref().map(|_| ()).map_err(Clone::clone));
+    }
+}
+
+static SUPPORT: OnceLock<Mutex<SupportCache>> = OnceLock::new();
+static REFRESHING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 static PREPARING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub fn cached() -> AppleTranslationSupport {
@@ -22,8 +59,7 @@ pub fn cached() -> AppleTranslationSupport {
         .get_or_init(Default::default)
         .lock()
         .unwrap()
-        .clone()
-        .unwrap_or_default()
+        .snapshot()
 }
 
 pub fn is_loaded() -> bool {
@@ -31,16 +67,51 @@ pub fn is_loaded() -> bool {
         .get_or_init(Default::default)
         .lock()
         .unwrap()
-        .is_some()
+        .is_loaded()
 }
 
 pub async fn refresh() -> Result<AppleTranslationSupport, String> {
-    let result = apple_translation::capabilities()
-        .await
-        .map(map_capabilities)
-        .map_err(|error| error_label(&error).to_string());
-    *SUPPORT.get_or_init(Default::default).lock().unwrap() =
-        Some(result.clone().unwrap_or_default());
+    load(false).await
+}
+
+/// Retry failed inventory reads on a later snapshot request, while sharing a
+/// read that completed after this caller started waiting for the refresh lock.
+pub async fn ensure_loaded() -> Result<AppleTranslationSupport, String> {
+    load(true).await
+}
+
+async fn load(reuse_completed: bool) -> Result<AppleTranslationSupport, String> {
+    load_support(
+        SUPPORT.get_or_init(Default::default),
+        &REFRESHING,
+        reuse_completed,
+        async {
+            apple_translation::capabilities()
+                .await
+                .map(map_capabilities)
+                .map_err(|error| error_label(&error).to_string())
+        },
+    )
+    .await
+}
+
+async fn load_support(
+    cache: &Mutex<SupportCache>,
+    refreshing: &tokio::sync::Mutex<()>,
+    reuse_completed: bool,
+    query: impl Future<Output = Result<AppleTranslationSupport, String>>,
+) -> Result<AppleTranslationSupport, String> {
+    // Explicit refresh and bootstrap share one lock; an old failed query
+    // cannot finish after a newer scan and clear its recovered choices.
+    let attempt = cache.lock().unwrap().refresh_attempt;
+    let _refreshing = refreshing.lock().await;
+    if reuse_completed {
+        if let Some(result) = cache.lock().unwrap().completed_since(attempt) {
+            return result;
+        }
+    }
+    let result = query.await;
+    cache.lock().unwrap().record_refresh(&result);
     result
 }
 
@@ -201,6 +272,147 @@ pub fn error_label(error: &apple_translation::AppleTranslationError) -> &'static
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn snapshot_loads_share_completed_attempts_and_retry_failed_scans() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let ready = map_capabilities(AppleTranslationCapabilities {
+            available: true,
+            languages: vec!["en".into(), "ja".into()],
+        });
+        for initial in [
+            Ok(ready.clone()),
+            Ok(AppleTranslationSupport::default()),
+            Err("apple_translation_status_failed".into()),
+        ] {
+            let cache = Mutex::new(SupportCache::default());
+            let refreshing = tokio::sync::Mutex::new(());
+            let held = refreshing.lock().await;
+            let queries = AtomicUsize::new(0);
+            let mut first = Box::pin(load_support(&cache, &refreshing, true, async {
+                queries.fetch_add(1, Ordering::SeqCst);
+                initial.clone()
+            }));
+            let mut second = Box::pin(load_support(&cache, &refreshing, true, async {
+                queries.fetch_add(1, Ordering::SeqCst);
+                initial.clone()
+            }));
+            assert!(futures_util::poll!(first.as_mut()).is_pending());
+            assert!(futures_util::poll!(second.as_mut()).is_pending());
+            drop(held);
+            let (first, second) = tokio::join!(first, second);
+            assert_eq!(first, initial);
+            assert_eq!(second, initial);
+            assert_eq!(
+                queries.load(Ordering::SeqCst),
+                1,
+                "Concurrent snapshots must share the completed query, including failure"
+            );
+
+            let retry = load_support(&cache, &refreshing, true, async {
+                queries.fetch_add(1, Ordering::SeqCst);
+                Ok(ready.clone())
+            })
+            .await;
+            assert_eq!(retry, Ok(initial.clone().unwrap_or_else(|_| ready.clone())));
+            assert_eq!(
+                queries.load(Ordering::SeqCst),
+                if initial.is_ok() { 1 } else { 2 },
+                "Only a new request after failure should start another scan"
+            );
+            assert!(cache.lock().unwrap().is_loaded());
+        }
+    }
+
+    #[tokio::test]
+    async fn explicit_refreshes_serialize_before_publishing_the_newest_inventory() {
+        let ready = map_capabilities(AppleTranslationCapabilities {
+            available: true,
+            languages: vec!["en".into(), "ja".into()],
+        });
+        let cache = Mutex::new(SupportCache::default());
+        let refreshing = tokio::sync::Mutex::new(());
+        let (release, released) = tokio::sync::oneshot::channel();
+        let mut first = Box::pin(load_support(&cache, &refreshing, false, async {
+            released.await.unwrap();
+            Err("apple_translation_status_failed".into())
+        }));
+        assert!(futures_util::poll!(first.as_mut()).is_pending());
+        let mut second = Box::pin(load_support(&cache, &refreshing, false, async {
+            Ok(ready.clone())
+        }));
+        assert!(
+            futures_util::poll!(second.as_mut()).is_pending(),
+            "A newer refresh must wait for the older native query"
+        );
+        release.send(()).unwrap();
+        let (first, second) = tokio::join!(first, second);
+        assert!(first.is_err());
+        assert_eq!(second, Ok(ready.clone()));
+        assert_eq!(cache.lock().unwrap().snapshot(), ready);
+        assert!(cache.lock().unwrap().is_loaded());
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_inventory_query_releases_the_next_snapshot_retry() {
+        let ready = map_capabilities(AppleTranslationCapabilities {
+            available: true,
+            languages: vec!["en".into(), "ja".into()],
+        });
+        let cache = Mutex::new(SupportCache::default());
+        let refreshing = tokio::sync::Mutex::new(());
+        let mut cancelled = Box::pin(load_support(
+            &cache,
+            &refreshing,
+            true,
+            std::future::pending(),
+        ));
+        assert!(futures_util::poll!(cancelled.as_mut()).is_pending());
+        let mut retry = Box::pin(load_support(&cache, &refreshing, true, async {
+            Ok(ready.clone())
+        }));
+        assert!(futures_util::poll!(retry.as_mut()).is_pending());
+        drop(cancelled);
+        assert_eq!(retry.await, Ok(ready));
+        assert!(cache.lock().unwrap().is_loaded());
+    }
+
+    #[test]
+    fn failed_inventory_queries_clear_claims_and_remain_retryable() {
+        let ready = map_capabilities(AppleTranslationCapabilities {
+            available: true,
+            languages: vec!["en".into(), "ja".into()],
+        });
+        let mut cache = SupportCache::default();
+        assert!(!cache.is_loaded());
+        let failed = Err("apple_translation_timeout".into());
+        cache.record_refresh(&failed);
+        assert!(
+            !cache.is_loaded(),
+            "A failed initial scan must permit retry"
+        );
+        assert_eq!(cache.snapshot(), AppleTranslationSupport::default());
+
+        cache.record_refresh(&Ok(ready.clone()));
+        assert!(cache.is_loaded());
+        assert_eq!(cache.snapshot(), ready);
+        cache.record_refresh(&failed);
+        assert!(!cache.is_loaded(), "A failed rescan must permit retry");
+        assert_eq!(cache.snapshot(), AppleTranslationSupport::default());
+        cache.record_refresh(&failed);
+        assert!(!cache.is_loaded());
+
+        cache.record_refresh(&Ok(AppleTranslationSupport::default()));
+        assert!(
+            cache.is_loaded(),
+            "A successful unavailable scan is authoritative"
+        );
+        assert_eq!(cache.snapshot(), AppleTranslationSupport::default());
+        cache.record_refresh(&Ok(ready.clone()));
+        assert!(cache.is_loaded());
+        assert_eq!(cache.snapshot(), ready);
+    }
+
     #[test]
     fn runtime_inventory_preserves_chinese_scripts_and_hides_auto_original() {
         let support = map_capabilities(AppleTranslationCapabilities {

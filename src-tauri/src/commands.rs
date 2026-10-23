@@ -134,7 +134,7 @@ impl ServiceProfilePayload {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LanguageCapabilitiesPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -315,6 +315,144 @@ mod tests {
         assert_eq!(
             load_settings_snapshot(&store, true).await.unwrap_err(),
             "Service profile settings are unavailable."
+        );
+    }
+
+    fn apple_bootstrap_snapshot(
+        sources: &[SourceLanguage],
+        revision: u64,
+    ) -> SettingsSnapshotPayload {
+        let store = SettingsStore::in_memory(Box::new(PartiallyUnavailableSecretStore), true);
+        let profile = store
+            .create_profile(ProviderKind::AppleSpeech, "Synthetic Apple profile")
+            .unwrap();
+        store.select_profile(&profile.id).unwrap();
+        let mut snapshot = SettingsSnapshotPayload::try_from_store(&store).unwrap();
+        let capabilities = snapshot.language_capabilities.as_mut().unwrap();
+        capabilities.source_languages = sources.to_vec();
+        capabilities.apple_speech_support_revision = Some(revision);
+        snapshot
+    }
+
+    #[tokio::test]
+    async fn initial_settings_support_recovery_publishes_the_exact_returned_snapshot() {
+        let mut recovered = apple_bootstrap_snapshot(&[SourceLanguage::English], 1);
+        let mut previous = recovered.language_capabilities.clone();
+        previous.as_mut().unwrap().source_languages.clear();
+        previous.as_mut().unwrap().apple_speech_support_revision = Some(0);
+        recovered.font_size = 21.0;
+        let expected = serde_json::to_value(&recovered).unwrap();
+        let published = std::cell::RefCell::new(Vec::new());
+        let loaded = std::cell::Cell::new(false);
+        let returned = load_and_publish_settings_snapshot(
+            previous,
+            async {
+                loaded.set(true);
+                Ok(recovered)
+            },
+            |payload| {
+                assert!(loaded.get());
+                published
+                    .borrow_mut()
+                    .push(serde_json::to_value(payload).unwrap());
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(serde_json::to_value(returned).unwrap(), expected);
+        assert_eq!(*published.borrow(), vec![expected]);
+    }
+
+    #[tokio::test]
+    async fn initial_settings_resource_revision_change_is_published_without_a_language_list_change()
+    {
+        let mut recovered = apple_bootstrap_snapshot(&[SourceLanguage::English], 2);
+        let mut previous = recovered.language_capabilities.clone();
+        previous.as_mut().unwrap().apple_speech_support_revision = Some(1);
+        let published = std::cell::Cell::new(0);
+        recovered.font_size = 22.0;
+        load_and_publish_settings_snapshot(previous, async { Ok(recovered) }, |_| {
+            published.set(published.get() + 1);
+        })
+        .await
+        .unwrap();
+        assert_eq!(published.get(), 1);
+    }
+
+    #[tokio::test]
+    async fn initial_settings_equivalent_ready_or_failed_support_does_not_rebroadcast() {
+        for sources in [Vec::new(), vec![SourceLanguage::English]] {
+            let mut current = apple_bootstrap_snapshot(&sources, 1);
+            let previous = current.language_capabilities.clone();
+            current.font_size = 23.0;
+            let returned =
+                load_and_publish_settings_snapshot(previous, async { Ok(current) }, |_| {
+                    panic!("Equivalent capabilities must not trigger another resource query")
+                })
+                .await
+                .unwrap();
+            assert_eq!(returned.font_size, 23.0);
+        }
+    }
+
+    #[tokio::test]
+    async fn initial_settings_failed_snapshot_does_not_publish_fallback_capabilities() {
+        let result = load_and_publish_settings_snapshot(
+            apple_bootstrap_snapshot(&[], 0).language_capabilities,
+            async { Err("Service profile settings are unavailable.".into()) },
+            |_| panic!("A failed catalog read must not publish a fallback snapshot"),
+        )
+        .await;
+        assert_eq!(
+            result.unwrap_err(),
+            "Service profile settings are unavailable."
+        );
+    }
+
+    #[tokio::test]
+    async fn initial_settings_recovery_reads_the_current_profile_after_the_loader_wait() {
+        let store = SettingsStore::in_memory(Box::new(PartiallyUnavailableSecretStore), true);
+        let previous = SettingsSnapshotPayload::try_from_store(&store)
+            .unwrap()
+            .language_capabilities;
+        let published = std::cell::RefCell::new(Vec::new());
+        let (release, released) = tokio::sync::oneshot::channel();
+        let mut loading = Box::pin(load_and_publish_settings_snapshot(
+            previous,
+            async {
+                released.await.unwrap();
+                // UI-test loading must never inspect real native support.
+                load_settings_snapshot(&store, true).await
+            },
+            |payload| {
+                published
+                    .borrow_mut()
+                    .push(serde_json::to_value(payload).unwrap());
+            },
+        ));
+        std::future::poll_fn(|cx| {
+            assert!(std::future::Future::poll(loading.as_mut(), cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        assert!(published.borrow().is_empty());
+        let profile = store
+            .create_profile(
+                ProviderKind::AppleSpeech,
+                "Synthetic newly selected profile",
+            )
+            .unwrap();
+        store.select_profile(&profile.id).unwrap();
+        release.send(()).unwrap();
+        let returned = loading.await.unwrap();
+        assert_eq!(returned.active_profile_id, profile.id);
+        assert_eq!(
+            returned.language_capabilities.as_ref().unwrap().profile_id,
+            profile.id
+        );
+        assert_eq!(
+            *published.borrow(),
+            vec![serde_json::to_value(returned).unwrap()]
         );
     }
 
@@ -1492,8 +1630,34 @@ pub struct SettingsDraft {
 /// never enter this payload. Async keeps OS credential-store reads off wry's
 /// main-thread path.
 #[tauri::command]
-pub async fn settings_get(state: State<'_, AppState>) -> Result<SettingsSnapshotPayload, String> {
-    load_settings_snapshot(&state.settings, app_is_ui_test()).await
+pub async fn settings_get(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<SettingsSnapshotPayload, String> {
+    let previous = SettingsSnapshotPayload::try_from_store(&state.settings)?.language_capabilities;
+    load_and_publish_settings_snapshot(
+        previous,
+        load_settings_snapshot(&state.settings, app_is_ui_test()),
+        |payload| {
+            let _ = app.emit("settings-changed", payload);
+        },
+    )
+    .await
+}
+
+async fn load_and_publish_settings_snapshot(
+    previous: Option<LanguageCapabilitiesPayload>,
+    load: impl std::future::Future<Output = Result<SettingsSnapshotPayload, String>>,
+    publish: impl FnOnce(&SettingsSnapshotPayload),
+) -> Result<SettingsSnapshotPayload, String> {
+    let payload = load.await?;
+    // Another window may have initialized while Apple's inventory was not
+    // readable. Publish recovered capabilities to it without making equivalent
+    // bootstrap reads trigger the resource editor's refresh cycle again.
+    if payload.language_capabilities != previous {
+        publish(&payload);
+    }
+    Ok(payload)
 }
 
 async fn load_settings_snapshot(
@@ -1508,7 +1672,7 @@ async fn load_settings_snapshot(
     {
         // Query runtime support once for an already selected local recognizer.
         // Failure leaves an empty language list and is surfaced by its editor.
-        let _ = crate::apple_speech_support::refresh().await;
+        let _ = crate::apple_speech_support::ensure_loaded().await;
     }
     if !is_ui_test
         && !crate::apple_translation_support::is_loaded()
@@ -1516,7 +1680,7 @@ async fn load_settings_snapshot(
             .active_profile()
             .is_ok_and(|profile| profile.text_translation() == TextTranslation::Apple)
     {
-        let _ = crate::apple_translation_support::refresh().await;
+        let _ = crate::apple_translation_support::ensure_loaded().await;
     }
     SettingsSnapshotPayload::try_from_store(settings)
 }

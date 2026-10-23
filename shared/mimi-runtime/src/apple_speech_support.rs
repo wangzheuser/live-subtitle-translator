@@ -7,6 +7,7 @@ use crate::apple_speech::{
 use crate::core::models::{SourceLanguage, TargetLanguage};
 use crate::core::provider::ServiceProfile;
 use serde::Serialize;
+use std::future::Future;
 use std::sync::{Mutex, OnceLock};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -38,9 +39,33 @@ pub struct AppleSpeechSupport {
 struct SupportCache {
     support: Option<AppleSpeechSupport>,
     revision: u64,
+    // Query completion is separate from the published resource revision. A
+    // preparation may restore one locale after a failed full inventory scan.
+    refresh_attempt: u64,
+    last_refresh: Option<Result<(), String>>,
 }
 
 impl SupportCache {
+    fn is_loaded(&self) -> bool {
+        self.last_refresh.as_ref().is_some_and(Result::is_ok)
+    }
+
+    fn completed_since(&self, attempt: u64) -> Option<Result<AppleSpeechSupport, String>> {
+        if self.is_loaded() || self.refresh_attempt != attempt {
+            self.last_refresh
+                .as_ref()
+                .map(|result| result.clone().map(|()| self.snapshot().0))
+        } else {
+            None
+        }
+    }
+
+    fn record_refresh(&mut self, support: &Result<AppleSpeechSupport, String>) {
+        self.replace(support.clone().unwrap_or_default());
+        self.refresh_attempt = self.refresh_attempt.wrapping_add(1);
+        self.last_refresh = Some(support.as_ref().map(|_| ()).map_err(Clone::clone));
+    }
+
     fn replace(&mut self, support: AppleSpeechSupport) {
         if self.support.as_ref() != Some(&support) {
             self.support = Some(support);
@@ -126,22 +151,52 @@ pub fn is_loaded() -> bool {
         .get_or_init(Default::default)
         .lock()
         .unwrap()
-        .support
-        .is_some()
+        .is_loaded()
 }
 
 pub async fn refresh() -> Result<AppleSpeechSupport, String> {
-    let _refreshing = REFRESHING.lock().await;
-    let native = apple_speech::capabilities()
-        .await
-        .map_err(|_| "apple_speech_status_failed".to_string());
-    let support = native.map(map_capabilities);
+    load(false).await
+}
+
+/// Retry failed inventory reads on a later snapshot request, while sharing a
+/// read that completed after this caller started waiting for the refresh lock.
+pub async fn ensure_loaded() -> Result<AppleSpeechSupport, String> {
+    load(true).await
+}
+
+async fn load(reuse_completed: bool) -> Result<AppleSpeechSupport, String> {
+    load_support(
+        SUPPORT.get_or_init(Default::default),
+        &REFRESHING,
+        reuse_completed,
+        async {
+            apple_speech::capabilities()
+                .await
+                .map(map_capabilities)
+                .map_err(|_| "apple_speech_status_failed".to_string())
+        },
+    )
+    .await
+}
+
+async fn load_support(
+    cache: &Mutex<SupportCache>,
+    refreshing: &tokio::sync::Mutex<()>,
+    reuse_completed: bool,
+    query: impl Future<Output = Result<AppleSpeechSupport, String>>,
+) -> Result<AppleSpeechSupport, String> {
+    // Remember before waiting so callers of the same failed scan share its
+    // error, while a new snapshot request after failure can try once again.
+    let attempt = cache.lock().unwrap().refresh_attempt;
+    let _refreshing = refreshing.lock().await;
+    if reuse_completed {
+        if let Some(result) = cache.lock().unwrap().completed_since(attempt) {
+            return result;
+        }
+    }
+    let support = query.await;
     // A failed refresh must not keep a stale available/installed claim alive.
-    SUPPORT
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap()
-        .replace(support.clone().unwrap_or_default());
+    cache.lock().unwrap().record_refresh(&support);
     support
 }
 
@@ -367,6 +422,191 @@ mod tests {
                 AppleSpeechResourceStatus::Supported
             },
         }
+    }
+
+    #[tokio::test]
+    async fn snapshot_loads_share_completed_attempts_and_retry_failed_scans() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let ready = map_capabilities(AppleSpeechCapabilities {
+            available: true,
+            locales: vec![locale("en-US", true)],
+        });
+        for initial in [
+            Ok(ready.clone()),
+            Ok(AppleSpeechSupport::default()),
+            Err("apple_speech_status_failed".into()),
+        ] {
+            let cache = Mutex::new(SupportCache::default());
+            let refreshing = tokio::sync::Mutex::new(());
+            let held = refreshing.lock().await;
+            let queries = AtomicUsize::new(0);
+            let mut first = Box::pin(load_support(&cache, &refreshing, true, async {
+                queries.fetch_add(1, Ordering::SeqCst);
+                initial.clone()
+            }));
+            let mut second = Box::pin(load_support(&cache, &refreshing, true, async {
+                queries.fetch_add(1, Ordering::SeqCst);
+                initial.clone()
+            }));
+            assert!(futures_util::poll!(first.as_mut()).is_pending());
+            assert!(futures_util::poll!(second.as_mut()).is_pending());
+            drop(held);
+            let (first, second) = tokio::join!(first, second);
+            assert_eq!(first, initial);
+            assert_eq!(second, initial);
+            assert_eq!(
+                queries.load(Ordering::SeqCst),
+                1,
+                "Concurrent snapshots must share the completed query, including failure"
+            );
+
+            let retry = load_support(&cache, &refreshing, true, async {
+                queries.fetch_add(1, Ordering::SeqCst);
+                Ok(ready.clone())
+            })
+            .await;
+            assert_eq!(retry, Ok(initial.clone().unwrap_or_else(|_| ready.clone())));
+            assert_eq!(
+                queries.load(Ordering::SeqCst),
+                if initial.is_ok() { 1 } else { 2 },
+                "Only a new request after failure should start another scan"
+            );
+            assert!(cache.lock().unwrap().is_loaded());
+        }
+    }
+
+    #[tokio::test]
+    async fn explicit_refreshes_serialize_before_publishing_the_newest_inventory() {
+        let ready = map_capabilities(AppleSpeechCapabilities {
+            available: true,
+            locales: vec![locale("en-US", true)],
+        });
+        let cache = Mutex::new(SupportCache::default());
+        let refreshing = tokio::sync::Mutex::new(());
+        let (release, released) = tokio::sync::oneshot::channel();
+        let mut first = Box::pin(load_support(&cache, &refreshing, false, async {
+            released.await.unwrap();
+            Err("apple_speech_status_failed".into())
+        }));
+        assert!(futures_util::poll!(first.as_mut()).is_pending());
+        let mut second = Box::pin(load_support(&cache, &refreshing, false, async {
+            Ok(ready.clone())
+        }));
+        assert!(
+            futures_util::poll!(second.as_mut()).is_pending(),
+            "A newer refresh must wait for the older native query"
+        );
+        release.send(()).unwrap();
+        let (first, second) = tokio::join!(first, second);
+        assert!(first.is_err());
+        assert_eq!(second, Ok(ready.clone()));
+        assert_eq!(cache.lock().unwrap().snapshot().0, ready);
+        assert!(cache.lock().unwrap().is_loaded());
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_inventory_query_releases_the_next_snapshot_retry() {
+        let ready = map_capabilities(AppleSpeechCapabilities {
+            available: true,
+            locales: vec![locale("en-US", true)],
+        });
+        let cache = Mutex::new(SupportCache::default());
+        let refreshing = tokio::sync::Mutex::new(());
+        let mut cancelled = Box::pin(load_support(
+            &cache,
+            &refreshing,
+            true,
+            std::future::pending(),
+        ));
+        assert!(futures_util::poll!(cancelled.as_mut()).is_pending());
+        let mut retry = Box::pin(load_support(&cache, &refreshing, true, async {
+            Ok(ready.clone())
+        }));
+        assert!(futures_util::poll!(retry.as_mut()).is_pending());
+        drop(cancelled);
+        assert_eq!(retry.await, Ok(ready));
+        assert!(cache.lock().unwrap().is_loaded());
+    }
+
+    #[test]
+    fn failed_inventory_queries_clear_claims_and_remain_retryable() {
+        let ready = map_capabilities(AppleSpeechCapabilities {
+            available: true,
+            locales: vec![locale("en-US", true), locale("ja-JP", false)],
+        });
+        let mut cache = SupportCache::default();
+        assert!(!cache.is_loaded());
+        let failed = Err("apple_speech_status_failed".into());
+        cache.record_refresh(&failed);
+        assert!(
+            !cache.is_loaded(),
+            "A failed initial scan must permit retry"
+        );
+        assert_eq!(cache.snapshot().0, AppleSpeechSupport::default());
+
+        cache.record_refresh(&Ok(ready.clone()));
+        assert!(cache.is_loaded());
+        assert_eq!(cache.snapshot().0, ready);
+        let ready_revision = cache.snapshot().1;
+        cache.record_refresh(&failed);
+        assert!(!cache.is_loaded(), "A failed rescan must permit retry");
+        assert_eq!(
+            cache.snapshot(),
+            (AppleSpeechSupport::default(), ready_revision + 1)
+        );
+        let failed_revision = cache.snapshot().1;
+        cache.record_refresh(&failed);
+        assert_eq!(
+            cache.snapshot().1,
+            failed_revision,
+            "Repeated failures must not republish the same empty inventory"
+        );
+
+        cache.record_refresh(&Ok(AppleSpeechSupport::default()));
+        assert!(
+            cache.is_loaded(),
+            "A successful unavailable scan is authoritative"
+        );
+        assert_eq!(
+            cache.snapshot(),
+            (AppleSpeechSupport::default(), failed_revision)
+        );
+        cache.record_refresh(&Ok(ready.clone()));
+        assert!(cache.is_loaded());
+        assert_eq!(cache.snapshot(), (ready, failed_revision + 1));
+    }
+
+    #[test]
+    fn preparation_after_failed_inventory_does_not_mark_the_complete_scan_loaded() {
+        let before = map_capabilities(AppleSpeechCapabilities {
+            available: true,
+            locales: vec![locale("en-US", true), locale("ja-JP", false)],
+        });
+        let mut cache = SupportCache::default();
+        cache.record_refresh(&Ok(before.clone()));
+        let before_failure = cache.refresh_attempt;
+        cache.record_refresh(&Err("apple_speech_status_failed".into()));
+        let after = cache.prepared_locale("ja-JP", before);
+        assert!(
+            !cache.is_loaded(),
+            "One prepared locale cannot validate the complete inventory"
+        );
+        assert_eq!(
+            cache.completed_since(before_failure),
+            Some(Err("apple_speech_status_failed".into())),
+            "Waiters must receive the failed complete scan, even after one locale is prepared"
+        );
+        assert_eq!(after.languages.len(), 1);
+        assert!(
+            require_language(&after, SourceLanguage::Japanese)
+                .unwrap()
+                .installed
+        );
+        assert!(require_language(&after, SourceLanguage::English).is_err());
+        let prepared_revision = cache.snapshot().1;
+        cache.record_refresh(&Ok(after.clone()));
+        assert!(cache.is_loaded());
+        assert_eq!(cache.snapshot(), (after, prepared_revision));
     }
 
     #[test]

@@ -64,6 +64,7 @@ it("requeries resources when a visible native ready list changes and hides stale
   await act(async () => useStore.setState({ settings: settings([]) }));
   expect(getAppleSpeechSupport).toHaveBeenCalledTimes(2);
   expect(current.loading).toBe(true);
+  expect(current.support).toEqual(ready);
   await act(async () => refreshed.resolve(missing));
   expect(current.support).toEqual(missing);
   expect(current.loading).toBe(false);
@@ -169,6 +170,21 @@ it("does not query while hidden and queries the latest native readiness when sho
   await render();
   expect(getAppleSpeechSupport).toHaveBeenCalledTimes(2);
   expect(current.support).toEqual(ready);
+});
+
+it("hides the previous visit's readiness while reopening the same unchanged route", async () => {
+  await render();
+  expect(current.support).toEqual(ready);
+  await render(false);
+  const query = deferred();
+  vi.mocked(getAppleSpeechSupport).mockReturnValueOnce(query.promise);
+  await render();
+  expect(current.loading).toBe(true);
+  expect(current.support).toBeNull();
+  expect(current.failed).toBe(false);
+  await act(async () => query.resolve(missing));
+  expect(current.loading).toBe(false);
+  expect(current.support).toEqual(missing);
 });
 
 it("queries after a matching route change without inferring resource installation from the filtered list", async () => {

@@ -155,6 +155,14 @@ that UI before preparing must keep the pair unready and allow retry. Do not infe
 that application updates revoke authorization from a report that this button
 restores translation; verify a signed same-identity restart/update separately.
 
+Keep a failed capability scan distinct from a successful unavailable inventory.
+Failure clears stale readiness but must allow a later settings read to retry.
+Concurrent bootstrap reads share the same scan, including its failure; explicit
+refreshes remain ordered. A partial Speech preparation cannot certify a complete
+scan, and repeated equivalent failures must not advance its resource revision.
+When a settings read recovers capabilities, publish that returned snapshot to
+already-open windows so their language choices recover too.
+
 Treat language aliases and scripts at the owning adapter boundary. A Simplified
 Chinese selection must not fall back to a Traditional Chinese recognition locale
 and then report the source as Simplified Chinese. Explicit regional variants need

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAppleSpeechSupport } from "../../lib/ipc";
 import { I18N } from "../../lib/i18n";
 import { activeServiceProfile, textTranslationForProfile } from "../../lib/providerCapabilities";
@@ -34,45 +34,51 @@ function readyLanguagesSignature(settings: SettingsSnapshot): string | null {
 
 export function useAppleSpeechSupport(visible: boolean) {
   const readySignature = useStore(state => readyLanguagesSignature(state.settings));
-  const currentSignature = useRef(readySignature);
-  useEffect(() => { currentSignature.current = readySignature; }, [readySignature]);
+  const visit = useMemo(() => Symbol(visible ? "visible" : "hidden"), [visible]);
+  const context = useMemo(() => ({ readySignature, visible, visit }), [readySignature, visible, visit]);
+  const currentContext = useRef(context);
+  useEffect(() => { currentContext.current = context; }, [context]);
   const [support, setSupport] = useState<AppleSpeechSupport | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  const [settledSignature, setSettledSignature] = useState<string | null>();
+  const [settledContext, setSettledContext] = useState<typeof context>();
   const generation = useRef(0);
   const { beginToast } = useSettingsToast();
   const load = useCallback((notify?: (message: string, failure: boolean) => void) => {
+    if (!context.visible || currentContext.current !== context) return Promise.resolve();
     const request = ++generation.current;
     return getAppleSpeechSupport().then(result => {
-      if (request === generation.current) { setSupport(result); setFailed(false); setSettledSignature(readySignature); }
+      if (request === generation.current) { setSupport(result); setFailed(false); setSettledContext(context); }
     }).catch(() => {
       if (request === generation.current) {
         setSupport(null);
         setFailed(true);
-        setSettledSignature(readySignature);
+        setSettledContext(context);
         notify?.(I18N.settings.appleSpeechLoadFailed, true);
       }
     }).finally(() => {
       if (request === generation.current) setLoading(false);
     });
-  }, [readySignature]);
+  }, [context]);
   const refresh = useCallback(() => {
+    if (!context.visible || currentContext.current !== context) return Promise.resolve();
     setLoading(true);
     setFailed(false);
     return load(beginToast());
-  }, [beginToast, load]);
+  }, [beginToast, context, load]);
   useEffect(() => {
     if (visible) void load();
     return () => { generation.current += 1; };
-  }, [visible, load, readySignature]);
+  }, [visible, load]);
   const update = useCallback((result: AppleSpeechSupport) => {
     generation.current += 1;
     setSupport(result);
     setLoading(false);
     setFailed(false);
-    setSettledSignature(currentSignature.current);
+    setSettledContext(currentContext.current);
   }, []);
-  const current = settledSignature === readySignature;
-  return { support, loading: loading || !current, failed: failed && current, refresh, update };
+  const current = settledContext === context;
+  // Keep in-place refreshes mounted but disabled; only a new visible visit
+  // must withhold its previous visit's readiness until the fresh query settles.
+  return { support: visible && settledContext?.visit !== visit ? null : support, loading: loading || !current, failed: failed && current, refresh, update };
 }

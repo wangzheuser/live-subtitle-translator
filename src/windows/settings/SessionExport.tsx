@@ -49,9 +49,12 @@ export function SessionExport({ visible, onReaderChange }: { visible: boolean; o
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
   const [transcriptError, setTranscriptError] = useState(false);
+  const [settledTranscriptRead, setSettledTranscriptRead] = useState<object | null>(null);
+  const [transcriptRefresh, setTranscriptRefresh] = useState(0);
   const [history, setHistory] = useState<SessionHistoryItem[]>([]);
   const [historyRefresh, setHistoryRefresh] = useState(0);
   const [historyError, setHistoryError] = useState(false);
+  const [settledHistoryRead, setSettledHistoryRead] = useState<object | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [readerOpen, setReaderOpen] = useState(false);
   const [exportAudio, setExportAudio] = useState(false);
@@ -115,6 +118,13 @@ export function SessionExport({ visible, onReaderChange }: { visible: boolean; o
   const selectedAudioSource = audioSources.includes(recordingSource) ? recordingSource : audioSources[0];
   const availableCount = selectedId ? (selected?.count ?? 0) : (archive?.transcriptCount ?? 0);
   const displayedTranscript = availableCount && transcript?.owner === transcriptContext ? transcript.page : undefined;
+  // A changed read is pending during render, before its effect starts. Late
+  // completions can settle only that visit's identity, never a newer retry.
+  const historyRead = useMemo(() => ({ pageVisible, active, historyRefresh }), [pageVisible, active, historyRefresh]);
+  const transcriptReadKey = JSON.stringify([pageVisible, readerOpen, availableCount, selectedId, query, page, transcriptEnabled, transcriptRefresh]);
+  const transcriptRead = useMemo(() => ({ owner: transcriptContext, key: transcriptReadKey }), [transcriptContext, transcriptReadKey]);
+  const historyLoading = pageVisible && settledHistoryRead !== historyRead;
+  const transcriptLoading = pageVisible && readerOpen && availableCount > 0 && transcriptEnabled && settledTranscriptRead !== transcriptRead;
 
   useLayoutEffect(() => {
     onReaderChange?.(readerOpen);
@@ -153,7 +163,6 @@ export function SessionExport({ visible, onReaderChange }: { visible: boolean; o
     selectedHistoryId.current = id;
     interaction.current += 1;
     clearToast();
-    setHistoryError(false);
     transcriptRequest.current += 1;
     audioRequest.current += 1;
     setAudioUrl(null);
@@ -243,9 +252,9 @@ export function SessionExport({ visible, onReaderChange }: { visible: boolean; o
         setHistoryError(false);
       },
       () => { if (request === historyRequest.current) setHistoryError(true); },
-    );
+    ).finally(() => { if (request === historyRequest.current) setSettledHistoryRead(historyRead); });
     return () => { historyRequest.current += 1; };
-  }, [pageVisible, active, historyRefresh]);
+  }, [pageVisible, historyRead]);
 
   useEffect(() => {
     return () => { if (audioUrl) URL.revokeObjectURL(audioUrl); };
@@ -268,13 +277,13 @@ export function SessionExport({ visible, onReaderChange }: { visible: boolean; o
         () => {
           if (request === transcriptRequest.current) setTranscriptError(true);
         },
-      );
+      ).finally(() => { if (request === transcriptRequest.current) setSettledTranscriptRead(transcriptRead); });
     }, query ? 180 : 0);
     return () => {
       transcriptRequest.current += 1;
       clearTimeout(timer);
     };
-  }, [pageVisible, readerOpen, availableCount, selectedId, query, page, transcriptEnabled, transcriptContext]);
+  }, [pageVisible, readerOpen, availableCount, selectedId, query, page, transcriptEnabled, transcriptContext, transcriptRead]);
 
   async function perform(action: () => Promise<"saved" | "cleared" | null>, failureMessage = I18N.settings.sessionExportFailed, requiresStopped = true) {
     if (!isTauri || operation.current || (requiresStopped && useStore.getState().session.isActive))
@@ -359,7 +368,6 @@ export function SessionExport({ visible, onReaderChange }: { visible: boolean; o
     const currentInteraction = interaction.current;
     operation.current = true;
     setBusy(true);
-    setHistoryError(false);
     const notify = beginToast();
     try {
       await sessionHistoryDelete(id);
@@ -512,7 +520,9 @@ export function SessionExport({ visible, onReaderChange }: { visible: boolean; o
           ))}
           </div>
           {history.length > 0 && filteredHistory.length === 0 && <p className="session-transcript__empty">{copy.noMatches}</p>}
-          {historyError && <InlineFeedback tone="error">{I18N.settings.historyReadFailed}</InlineFeedback>}
+          {historyError && <InlineFeedback tone="error">{I18N.settings.historyReadFailed} <button type="button" className="settings-link"
+            disabled={!pageVisible || historyLoading} aria-busy={historyLoading || undefined}
+            onClick={() => setHistoryRefresh(value => value + 1)}>{I18N.settings.retryUpdate}</button></InlineFeedback>}
           {!showCurrent && history.length === 0 && !historyError && <p className="session-export__empty">{I18N.settings.historyEmpty}</p>}
         </div>}
         {showContent ? <div className="session-transcript">
@@ -537,9 +547,7 @@ export function SessionExport({ visible, onReaderChange }: { visible: boolean; o
             labels={{ play: I18N.settings.historyPlayAudio, pause: copy.pause, loading: copy.loadingAudio, retry: copy.retryAudio, seek: copy.seek, playFailed: copy.playFailed, ready: copy.audioReady, label: I18N.settings.historyAudio }} />}
           {canExportAudio && active && <InlineFeedback tone="info">{copy.stopPlayback}</InlineFeedback>}
           {confirmDelete && selected && visible && <SettingsConfirmation message={I18N.settings.historyDeleteConfirm} confirmLabel={I18N.settings.historyDelete} disabled={busy}
-            onCancel={() => setConfirmDelete(false)} onConfirm={() => { void deleteHistory(selected.id); }}>
-            {historyError && <InlineFeedback tone="error">{I18N.settings.historyReadFailed}</InlineFeedback>}
-          </SettingsConfirmation>}
+            onCancel={() => setConfirmDelete(false)} onConfirm={() => { void deleteHistory(selected.id); }} />}
           {availableCount > 0 && <div className="session-transcript__toolbar">
             <input
               type="search"
@@ -554,7 +562,9 @@ export function SessionExport({ visible, onReaderChange }: { visible: boolean; o
           </div>}
           <div className="session-transcript__list" aria-live="polite">
             {availableCount && transcriptError ? (
-              <p className="session-transcript__empty">{I18N.settings.transcriptReadFailed}</p>
+              <InlineFeedback tone="error">{I18N.settings.transcriptReadFailed} <button type="button" className="settings-link"
+                disabled={!pageVisible || transcriptLoading} aria-busy={transcriptLoading || undefined}
+                onClick={() => setTranscriptRefresh(value => value + 1)}>{I18N.settings.retryUpdate}</button></InlineFeedback>
             ) : displayedTranscript?.entries.length ? displayedTranscript.entries.map((entry) => (
               <article className="session-transcript__entry" key={entry.index}>
                 <div className="session-transcript__meta">

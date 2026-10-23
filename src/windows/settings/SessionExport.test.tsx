@@ -515,6 +515,146 @@ describe("history operation state", () => {
     expect(host.textContent).toContain(I18N.settings.transcriptReadFailed);
     await search("Synthetic"); expect(host.textContent).toContain("Synthetic A");
   });
+  it("retries a failed transcript page in place without changing its query, page or reading mode", async () => {
+    await select(1); await search("Synthetic"); await choose(copy().reading, copy().translation);
+    ipc.sessionHistoryPage.mockRejectedValueOnce(new Error("private transcript read failure"));
+    await click(button(I18N.settings.transcriptNext)); await flush(180);
+    expect(host.textContent).toContain(I18N.settings.transcriptReadFailed);
+    const pending = deferred();
+    ipc.sessionHistoryPage.mockReturnValueOnce(pending.promise);
+    const reads = ipc.sessionHistoryPage.mock.calls.length;
+    await click(button(I18N.settings.retryUpdate)); await flush(180);
+    expect(button(I18N.settings.retryUpdate).disabled).toBe(true);
+    await click(button(I18N.settings.retryUpdate));
+    expect(ipc.sessionHistoryPage).toHaveBeenCalledTimes(reads + 1);
+    expect(ipc.sessionHistoryPage).toHaveBeenLastCalledWith("A", "Synthetic", 1);
+    await act(async () => pending.resolve(page("A", 1)));
+    expect(host.textContent).not.toContain(I18N.settings.transcriptReadFailed);
+    expect(host.textContent).not.toContain("private transcript read failure");
+    expect(input(I18N.settings.transcriptSearch).value).toBe("Synthetic");
+    expect(host.textContent).toContain(I18N.settings.transcriptPage(2, 3));
+    expect(host.querySelector(".session-transcript__pair")?.textContent).toContain("Fixture A");
+    expect(host.querySelector(".session-transcript__pair")?.textContent).not.toContain("Synthetic A");
+  });
+  it("retries a failed history listing in place and preserves its filters", async () => {
+    await library();
+    await type(input(copy().search), "Review");
+    await choose(copy().filter, copy().text);
+    ipc.sessionHistoryList.mockRejectedValueOnce(new Error("private history read failure"));
+    await render(false); await render();
+    expect(host.textContent).toContain(I18N.settings.historyReadFailed);
+    const pending = deferred();
+    ipc.sessionHistoryList.mockReturnValueOnce(pending.promise);
+    const reads = ipc.sessionHistoryList.mock.calls.length;
+    await click(button(I18N.settings.retryUpdate));
+    expect(button(I18N.settings.retryUpdate).disabled).toBe(true);
+    await click(button(I18N.settings.retryUpdate));
+    expect(ipc.sessionHistoryList).toHaveBeenCalledTimes(reads + 1);
+    await act(async () => pending.resolve(catalog().map(item => ({ ...item, title: `Review ${item.id}` }))));
+    expect(host.textContent).not.toContain(I18N.settings.historyReadFailed);
+    expect(host.textContent).not.toContain("private history read failure");
+    expect(input(copy().search).value).toBe("Review");
+    expect(host.querySelector('[role="combobox"]')?.textContent).toBe(copy().text);
+    expect(host.querySelector('[data-history-id="A"]')?.textContent).toContain("Review A");
+  });
+  it("keeps a failed catalog refresh visible after opening an existing session and returning", async () => {
+    await library();
+    ipc.sessionHistoryList.mockRejectedValueOnce(new Error("private catalog refresh failure"));
+    await render(false); await render();
+    expect(host.textContent).toContain(I18N.settings.historyReadFailed);
+    const reads = ipc.sessionHistoryList.mock.calls.length;
+    await select(1); await library();
+    expect(ipc.sessionHistoryList).toHaveBeenCalledTimes(reads);
+    expect(host.textContent).toContain(I18N.settings.historyReadFailed);
+    expect(button(I18N.settings.retryUpdate).disabled).toBe(false);
+    await click(button(I18N.settings.retryUpdate));
+    expect(host.textContent).not.toContain(I18N.settings.historyReadFailed);
+  });
+  it.each(["rename", "delete"] as const)("does not dismiss a catalog-read failure when an unrelated %s fails", async action => {
+    await library();
+    ipc.sessionHistoryList.mockRejectedValueOnce(new Error("private catalog refresh failure"));
+    await render(false); await render();
+    await select(1);
+    if (action === "rename") {
+      await more(copy().rename);
+      ipc.sessionHistoryRename.mockRejectedValueOnce(new Error("private rename failure"));
+      await click(button(copy().save));
+    } else {
+      await confirm();
+      expect(document.querySelector(".settings-confirmation")?.textContent).not.toContain(I18N.settings.historyReadFailed);
+      ipc.sessionHistoryDelete.mockRejectedValueOnce(new Error("private delete failure"));
+      await click(button(I18N.settings.historyDelete));
+    }
+    await click(button(I18N.settings.cancel));
+    await library();
+    expect(host.textContent).toContain(I18N.settings.historyReadFailed);
+    expect(button(I18N.settings.retryUpdate).disabled).toBe(false);
+  });
+  it.each(["current", "saved"] as const)("keeps a failed %s transcript retry available until a read succeeds", async kind => {
+    const read = kind === "current" ? ipc.sessionTranscriptPage : ipc.sessionHistoryPage;
+    read.mockRejectedValueOnce(new Error("first private read failure"));
+    if (kind === "current") await click(button(I18N.settings.transcriptNext));
+    else await select(1);
+    read.mockRejectedValueOnce(new Error("second private read failure"));
+    await click(button(I18N.settings.retryUpdate));
+    expect(host.textContent).toContain(I18N.settings.transcriptReadFailed);
+    expect(host.textContent).not.toContain("private read failure");
+    expect(button(I18N.settings.retryUpdate).disabled).toBe(false);
+    await click(button(I18N.settings.retryUpdate));
+    expect(host.textContent).not.toContain(I18N.settings.transcriptReadFailed);
+    expect(host.textContent).toContain(kind === "current" ? "Synthetic current" : "Synthetic A");
+  });
+  it("keeps an initially failed history list retryable without presenting an empty library", async () => {
+    await act(() => root.render(null));
+    ipc.sessionHistoryList.mockRejectedValueOnce(new Error("first private listing failure"));
+    await render();
+    expect(host.textContent).toContain(I18N.settings.historyReadFailed);
+    expect(host.textContent).not.toContain(I18N.settings.historyEmpty);
+    ipc.sessionHistoryList.mockRejectedValueOnce(new Error("second private listing failure"));
+    await click(button(I18N.settings.retryUpdate));
+    expect(host.textContent).toContain(I18N.settings.historyReadFailed);
+    expect(button(I18N.settings.retryUpdate).disabled).toBe(false);
+    await click(button(I18N.settings.retryUpdate));
+    expect(host.textContent).not.toContain(I18N.settings.historyReadFailed);
+    expect(host.querySelector('[data-history-id="A"]')).not.toBeNull();
+  });
+  it.each(["resolve", "reject"] as const)("ignores an old transcript retry that later %s after selecting another session", async outcome => {
+    ipc.sessionHistoryPage.mockRejectedValueOnce(new Error("initial read failure"));
+    await select(1);
+    const pending = deferred();
+    ipc.sessionHistoryPage.mockReturnValueOnce(pending.promise);
+    await click(button(I18N.settings.retryUpdate));
+    await select(2);
+    await act(async () => {
+      if (outcome === "resolve") pending.resolve(page("outdated-A"));
+      else pending.reject(new Error("private old retry failure"));
+    });
+    expect(host.textContent).toContain("Synthetic B");
+    expect(host.textContent).not.toContain("outdated-A");
+    expect(host.textContent).not.toContain(I18N.settings.transcriptReadFailed);
+  });
+  it.each(["resolve", "reject"] as const)("ignores an old history retry that later %s after reopening the page", async outcome => {
+    await library();
+    ipc.sessionHistoryList.mockRejectedValueOnce(new Error("initial listing failure"));
+    await render(false); await render();
+    const pending = deferred();
+    ipc.sessionHistoryList.mockReturnValueOnce(pending.promise);
+    await click(button(I18N.settings.retryUpdate));
+    await render(false);
+    expect(button(I18N.settings.retryUpdate).disabled).toBe(true);
+    const reads = ipc.sessionHistoryList.mock.calls.length;
+    await click(button(I18N.settings.retryUpdate));
+    expect(ipc.sessionHistoryList).toHaveBeenCalledTimes(reads);
+    ipc.sessionHistoryList.mockResolvedValue(catalog().map(item => ({ ...item, title: `Current ${item.id}` })));
+    await render();
+    await act(async () => {
+      if (outcome === "resolve") pending.resolve(catalog().map(item => ({ ...item, title: `Outdated ${item.id}` })));
+      else pending.reject(new Error("private old listing failure"));
+    });
+    expect(host.querySelector('[data-history-id="A"]')?.textContent).toContain("Current A");
+    expect(host.textContent).not.toContain("Outdated");
+    expect(host.textContent).not.toContain(I18N.settings.historyReadFailed);
+  });
 });
 
 

@@ -13,10 +13,47 @@ use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
 static EXPORT_BUSY: AtomicBool = AtomicBool::new(false);
-struct ExportGuard;
+#[derive(Debug)]
+struct ExportGuard(&'static AtomicBool);
+
+impl ExportGuard {
+    fn acquire(busy: &'static AtomicBool) -> Result<Self, String> {
+        busy.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .map(|_| Self(busy))
+            .map_err(|_| "An export is already open.".into())
+    }
+}
+
 impl Drop for ExportGuard {
     fn drop(&mut self) {
-        EXPORT_BUSY.store(false, Ordering::SeqCst);
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+async fn run_export_worker<T: Send + 'static>(
+    busy: ExportGuard,
+    lifecycle: Option<tokio::sync::OwnedMutexGuard<()>>,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> tauri::Result<(ExportGuard, T)> {
+    tauri::async_runtime::spawn_blocking(move || {
+        // A cancelled command cannot stop an in-flight disk operation. Keep
+        // its locks with that operation, then return only export exclusivity
+        // so the native picker never blocks session or preference changes.
+        let _lifecycle = lifecycle;
+        let result = work();
+        (busy, result)
+    })
+    .await
+}
+
+fn export_picker_callback<T: Send + 'static>(
+    busy: ExportGuard,
+    reply: tokio::sync::oneshot::Sender<(ExportGuard, T)>,
+) -> impl FnOnce(T) + Send + 'static {
+    move |path| {
+        // The native dialog outlives a cancelled command. Keep exclusivity
+        // until its callback runs or is dropped, then hand it to the writer.
+        let _ = reply.send((busy, path));
     }
 }
 
@@ -180,33 +217,33 @@ pub async fn session_export(
     audio_source: Option<AudioSource>,
     options: Option<TranscriptExportOptions>,
 ) -> Result<bool, String> {
-    if EXPORT_BUSY
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        return Err("An export is already open.".into());
-    }
-    let _busy = ExportGuard;
+    let busy = ExportGuard::acquire(&EXPORT_BUSY)?;
     let options = options.unwrap_or_default();
-    let (revision, bytes) = if let Some(id) = id {
+    let (busy, revision, bytes) = if let Some(id) = id {
         let history = state.session.history();
-        let bytes = tauri::async_runtime::spawn_blocking(move || match kind {
+        let (busy, bytes) = run_export_worker(busy, None, move || match kind {
             ExportKind::Transcript => history.export_transcript_with_options(&id, options),
             ExportKind::Audio => history.audio_selected(&id, audio_source),
         })
         .await
-        .map_err(|_| "Could not read saved session.")?
         .map_err(|_| "Could not read saved session.")?;
-        (None, bytes)
+        let bytes = bytes.map_err(|_| "Could not read saved session.")?;
+        (busy, None, bytes)
     } else {
-        let _lifecycle = state.session.settings_mutation_guard(true).await?;
-        let bytes = match kind {
-            ExportKind::Transcript => state.session.export_transcript(options),
-            ExportKind::Audio => state.session.export_audio_from(audio_source),
-        }
-        .map_err(|_| "Could not read current session content.")?
-        .ok_or("No session content is available to export.")?;
-        (Some(state.session.archive_revision()), bytes)
+        let lifecycle = state.session.settings_mutation_guard(true).await?;
+        let session = std::sync::Arc::clone(&state.session);
+        let (busy, snapshot) = run_export_worker(busy, Some(lifecycle), move || {
+            let bytes = match kind {
+                ExportKind::Transcript => session.export_transcript(options),
+                ExportKind::Audio => session.export_audio_from(audio_source),
+            }?;
+            Ok::<_, std::io::Error>((session.archive_revision(), bytes))
+        })
+        .await
+        .map_err(|_| "Could not read current session content.")?;
+        let (revision, bytes) = snapshot.map_err(|_| "Could not read current session content.")?;
+        let bytes = bytes.ok_or("No session content is available to export.")?;
+        (busy, Some(revision), bytes)
     };
     let (extension, description) = export_file_type(kind, options);
     let (tx, rx) = tokio::sync::oneshot::channel();
@@ -221,13 +258,11 @@ pub async fn session_export(
         .file()
         .add_filter(description, &[extension])
         .set_file_name(file_name)
-        .save_file(move |path| {
-            let _ = tx.send(path);
-        });
-    let Some(path) = rx
+        .save_file(export_picker_callback(busy, tx));
+    let (busy, path) = rx
         .await
-        .map_err(|_| "The export dialog closed unexpectedly.")?
-    else {
+        .map_err(|_| "The export dialog closed unexpectedly.")?;
+    let Some(path) = path else {
         return Ok(false);
     };
     let path = path
@@ -236,7 +271,7 @@ pub async fn session_export(
     // Revalidate after the picker: toggling off, clearing or starting a session
     // must invalidate the old snapshot. Serialize only the final write, never
     // the user's time in the dialog, with lifecycle and preference changes.
-    let _lifecycle = if revision.is_some() {
+    let lifecycle = if revision.is_some() {
         Some(state.session.settings_mutation_guard(true).await?)
     } else {
         None
@@ -246,10 +281,10 @@ pub async fn session_export(
             return Err("The session changed. Please export again.".into());
         }
     }
-    tauri::async_runtime::spawn_blocking(move || write_export(&path, &bytes))
+    let (_busy, written) = run_export_worker(busy, lifecycle, move || write_export(&path, &bytes))
         .await
-        .map_err(|_| "The export could not be completed.")?
-        .map_err(|_| "The export could not be saved.")?;
+        .map_err(|_| "The export could not be completed.")?;
+    written.map_err(|_| "The export could not be saved.")?;
     Ok(true)
 }
 
@@ -283,6 +318,138 @@ mod tests {
     use crate::core::models::SubtitlePair;
     use crate::session_history::SessionHistory;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn cancelled_export_keeps_exclusivity_until_the_native_picker_replies() {
+        static BUSY: AtomicBool = AtomicBool::new(false);
+        let (reply, receiver) = tokio::sync::oneshot::channel();
+        let callback = export_picker_callback(ExportGuard::acquire(&BUSY).unwrap(), reply);
+        // Cancelling the async command drops the receiver, while the native
+        // picker still owns its callback and remains visible.
+        drop(receiver);
+        assert!(ExportGuard::acquire(&BUSY).is_err());
+        callback(None::<std::path::PathBuf>);
+        assert!(ExportGuard::acquire(&BUSY).is_ok());
+    }
+
+    #[tokio::test]
+    async fn picker_reply_transfers_exclusivity_to_the_export_and_dropped_callbacks_release_it() {
+        static BUSY: AtomicBool = AtomicBool::new(false);
+        let (reply, receiver) = tokio::sync::oneshot::channel();
+        let callback = export_picker_callback(ExportGuard::acquire(&BUSY).unwrap(), reply);
+        callback(Some(std::path::PathBuf::from("synthetic-export.txt")));
+        assert!(ExportGuard::acquire(&BUSY).is_err());
+        let (busy, path) = receiver.await.unwrap();
+        assert_eq!(path.unwrap(), Path::new("synthetic-export.txt"));
+        assert!(ExportGuard::acquire(&BUSY).is_err());
+        drop(busy);
+
+        let (reply, receiver) = tokio::sync::oneshot::channel::<(ExportGuard, Option<String>)>();
+        let callback = export_picker_callback(ExportGuard::acquire(&BUSY).unwrap(), reply);
+        drop(callback);
+        assert!(receiver.await.is_err());
+        assert!(ExportGuard::acquire(&BUSY).is_ok());
+    }
+
+    #[tokio::test]
+    async fn cancelled_export_worker_keeps_lifecycle_and_exclusivity_until_disk_work_finishes() {
+        static BUSY: AtomicBool = AtomicBool::new(false);
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join("export.txt");
+        let worker_destination = destination.clone();
+        let lock = Arc::new(tokio::sync::Mutex::new(()));
+        let (started, working) = tokio::sync::oneshot::channel();
+        let (finished, completed) = tokio::sync::oneshot::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        let task = tokio::spawn(run_export_worker(
+            ExportGuard::acquire(&BUSY).unwrap(),
+            Some(Arc::clone(&lock).lock_owned().await),
+            move || {
+                started.send(()).unwrap();
+                released.recv().unwrap();
+                write_export(&worker_destination, b"Synthetic export").unwrap();
+                finished.send(()).unwrap();
+            },
+        ));
+        working.await.unwrap();
+        assert!(lock.try_lock().is_err());
+        assert!(ExportGuard::acquire(&BUSY).is_err());
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        let lifecycle_retained = lock.try_lock().is_err();
+        let busy_retained = ExportGuard::acquire(&BUSY).is_err();
+        // Release before asserting so a regression cannot leave a blocked
+        // worker behind when this test fails.
+        release.send(()).unwrap();
+        completed.await.unwrap();
+        let _lifecycle = tokio::time::timeout(std::time::Duration::from_secs(2), lock.lock())
+            .await
+            .expect("The completed worker must release the lifecycle lock");
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if let Ok(busy) = ExportGuard::acquire(&BUSY) {
+                    break busy;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("The completed worker must release export exclusivity");
+        assert!(lifecycle_retained);
+        assert!(busy_retained);
+        assert_eq!(std::fs::read(destination).unwrap(), b"Synthetic export");
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn export_snapshot_releases_lifecycle_but_keeps_exclusivity_through_the_picker() {
+        static BUSY: AtomicBool = AtomicBool::new(false);
+        let lock = Arc::new(tokio::sync::Mutex::new(()));
+        let (busy, snapshot) = run_export_worker(
+            ExportGuard::acquire(&BUSY).unwrap(),
+            Some(Arc::clone(&lock).lock_owned().await),
+            || b"Synthetic snapshot".to_vec(),
+        )
+        .await
+        .unwrap();
+        assert!(lock.try_lock().is_ok());
+        assert!(ExportGuard::acquire(&BUSY).is_err());
+        // A native picker owns only export exclusivity; the final worker
+        // obtains the lifecycle guard again after revision validation.
+        let (busy, written) = run_export_worker(
+            busy,
+            Some(Arc::clone(&lock).lock_owned().await),
+            move || snapshot,
+        )
+        .await
+        .unwrap();
+        assert_eq!(written, b"Synthetic snapshot");
+        assert!(lock.try_lock().is_ok());
+        assert!(ExportGuard::acquire(&BUSY).is_err());
+        drop(busy);
+        assert!(ExportGuard::acquire(&BUSY).is_ok());
+    }
+
+    #[tokio::test]
+    async fn failed_export_worker_releases_its_lifecycle_and_busy_guards() {
+        static BUSY: AtomicBool = AtomicBool::new(false);
+        let lock = Arc::new(tokio::sync::Mutex::new(()));
+        let result: Result<(), String> = async {
+            let (_busy, written) = run_export_worker(
+                ExportGuard::acquire(&BUSY).unwrap(),
+                Some(Arc::clone(&lock).lock_owned().await),
+                || Err::<(), _>(std::io::Error::other("Synthetic private failure")),
+            )
+            .await
+            .map_err(|_| "The export could not be completed.")?;
+            written.map_err(|_| "The export could not be saved.")?;
+            Ok(())
+        }
+        .await;
+        assert_eq!(result.unwrap_err(), "The export could not be saved.");
+        assert!(lock.try_lock().is_ok());
+        assert!(ExportGuard::acquire(&BUSY).is_ok());
+    }
 
     #[tokio::test]
     async fn current_audio_requires_stopped_state_and_sanitizes_read_failures() {

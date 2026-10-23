@@ -4516,3 +4516,37 @@
   production replacement. Browser fixture pages were closed. Zero-profile
   screenshots are synthetic; native Windows/Linux and visual user acceptance
   remain separate. No full Rust/shared acceptance run for this frontend change.
+
+
+## 2026-10-23 — Session export ownership and read recovery
+
+- Source: `5e0759b8` plus the changes in this entry's commit. Current-session
+  export reads now use blocking workers; workers and native save-picker callbacks
+  retain export ownership across cancellation. The lifecycle lock remains absent
+  during destination selection and revision checks still precede writes.
+- History/transcript reads have localized inline Retry. Search, page, reading
+  mode and library filters survive recovery. Opening a reader or starting an
+  unrelated rename/delete no longer dismisses a failed catalog read. New
+  regressions failed before the fixes; 12 focused export tests and 188 related
+  frontend tests passed. Independent final diff review found no further issue.
+- Final `./scripts/check.sh` passed: formatting, strict Clippy, 667 desktop tests,
+  106 core tests, 843 runtime tests, 24 JNI-adapter tests, frontend lint/typecheck,
+  2,676 frontend tests and production build. Existing manual public-HTTPS and
+  offline-DSP tests stayed ignored. No Android JVM or device run was needed
+  for these desktop adapter/frontend changes; shared behavior was unchanged.
+- Hidden in-app browser: 96 settings cases (six pages, eight locales, 520/760 px,
+  alternating light/dark), plus 32 history/transcript retry-error cases. No
+  horizontal overflow, out-of-window controls or missing pointer cursors were
+  detected in the checked controls. Saved 28 synthetic screenshots outside Git
+  and visually reviewed representative layouts and error states. Actual DOM
+  actions covered repeated failure/recovery, A→Back error retention, preserved
+  search/translation-only reading, long-name deletion cancellation and diagnostic
+  refresh. Existing archive polling and audio retry were reviewed as siblings.
+- The user requested uninterrupted video viewing. Stopped the signed watch
+  launcher during compilation before installation/launch; all later UI work
+  remained hidden. Formal Mimi, player, audio settings, permissions and private
+  data were untouched. Foreground native, hover/animation, real capture/provider
+  and Windows/Linux-device acceptance remain unverified. Removed the one-off
+  review harness and closed its page/server; kept canonical build caches and
+  review evidence. Next check: signed native Retry/layout acceptance when
+  foreground testing will not interrupt the user.

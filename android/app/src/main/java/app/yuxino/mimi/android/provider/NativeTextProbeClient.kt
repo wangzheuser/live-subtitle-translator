@@ -19,13 +19,15 @@ internal class NativeTextProbeClient(
     private val exchange: (JSONObject) -> JSONObject = NativeRuntimeConfiguration::exchange,
     private val networkSnapshot: (JSONObject) -> JSONObject = NativeRuntimeNetwork::textSnapshot,
     private val executor: Executor = worker,
+    private val speech: Boolean = false,
 ) {
     fun check(configuration: JSONObject, callback: (TranslationResult) -> Unit): TranslationCall {
+        val stage = if (speech) "speech" else "text"
         val gate = Any()
         var cancelled = false
         var handle: Long? = null
         fun cancelHandle(value: Long) {
-            runCatching { exchange(JSONObject().put("operation", "text_probe_cancel").put("handle", value)) }
+            runCatching { exchange(JSONObject().put("operation", "${stage}_probe_cancel").put("handle", value)) }
         }
         fun deliver(result: TranslationResult) = synchronized(gate) { if (!cancelled) callback(result) }
         executor.execute {
@@ -35,12 +37,12 @@ internal class NativeTextProbeClient(
                 if (synchronized(gate) { cancelled }) return@execute
                 val network = networkSnapshot(configuration)
                 if (synchronized(gate) { cancelled }) return@execute
-                val created = exchange(JSONObject().put("operation", "create_text_probe")
+                val created = exchange(JSONObject().put("operation", "create_${stage}_probe")
                     .put("configuration", configuration).put("network", network)).getLong("handle")
                 ownedHandle = created
                 synchronized(gate) { handle = created }
                 while (!synchronized(gate) { cancelled }) {
-                    val state = exchange(JSONObject().put("operation", "text_probe_poll").put("handle", created))
+                    val state = exchange(JSONObject().put("operation", "${stage}_probe_poll").put("handle", created))
                     if (state.getBoolean("finished")) {
                         deliver(nativeTextProbeResult(state.getJSONObject("result")))
                         break
@@ -62,8 +64,8 @@ internal class NativeTextProbeClient(
     }
 
     private companion object {
-        val worker: Executor = Executors.newSingleThreadExecutor { action ->
-            Thread(action, "mimi-text-probe-ui").apply { isDaemon = true }
+        val worker: Executor = Executors.newFixedThreadPool(2) { action ->
+            Thread(action, "mimi-service-probe-ui").apply { isDaemon = true }
         }
     }
 }

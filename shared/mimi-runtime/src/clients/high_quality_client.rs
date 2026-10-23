@@ -611,6 +611,45 @@ impl HighQualityTranslationClient {
         ))
     }
 
+    /// xAI's two explicitly selected stages share this profile's xAI key.
+    pub fn new_xai(
+        configuration: &LiveTranslationConfiguration,
+        events: ProviderEventSender,
+    ) -> Result<Self, QwenMTClientError> {
+        let source = configuration.source_language;
+        let target = configuration.target_language;
+        let key = configuration
+            .credentials
+            .direct_api_key()
+            .ok_or(QwenMTClientError::MissingTextTranslation)?;
+        let asr = RecognitionClient::xai(key, source).map_err(recognition_error)?;
+        let mt = if target.translates_audio() {
+            TextTranslationClient::OpenAICompatible(
+                crate::clients::openai_compatible_client::OpenAICompatibleClient::new(
+                    crate::core::provider::XAI_TEXT_ENDPOINT,
+                    key,
+                    &configuration.xai_text_model,
+                    source,
+                    target,
+                )
+                .map_err(QwenMTClientError::OpenAICompatible)?,
+            )
+        } else {
+            TextTranslationClient::Disabled
+        };
+        Ok(Self::from_components(
+            asr,
+            mt,
+            source,
+            target,
+            Duration::from_millis(250),
+            Duration::from_millis(1_000),
+            12,
+            false,
+            events,
+        ))
+    }
+
     /// Custom recognition never supplies a key to a built-in translation service.
     pub fn new_custom(
         configuration: &LiveTranslationConfiguration,
@@ -3088,6 +3127,312 @@ mod tests {
             target,
             TranslationMode::Turbo,
         )
+    }
+
+    async fn xai_loopback_read_http(socket: &mut tokio::net::TcpStream) -> serde_json::Value {
+        use tokio::io::AsyncReadExt;
+        let mut bytes = Vec::new();
+        loop {
+            let mut buffer = [0; 4096];
+            let read = socket.read(&mut buffer).await.unwrap();
+            assert!(read > 0);
+            bytes.extend_from_slice(&buffer[..read]);
+            assert!(bytes.len() <= 64 * 1024);
+            if let Some(end) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
+                let headers = String::from_utf8_lossy(&bytes[..end]);
+                assert!(headers.starts_with("POST /v1/chat/completions HTTP/1.1"));
+                assert!(headers
+                    .to_ascii_lowercase()
+                    .contains("authorization: bearer synthetic-text-key"));
+                let length: usize = headers
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length:")
+                            .map(|value| value.trim().parse().unwrap())
+                    })
+                    .unwrap();
+                if bytes.len() >= end + 4 + length {
+                    return serde_json::from_slice(&bytes[end + 4..end + 4 + length]).unwrap();
+                }
+            }
+        }
+    }
+
+    async fn xai_loopback_confirmed_pair(
+        receiver: &mut ProviderEventReceiver,
+        expected_id: u64,
+        expected_source: &str,
+        expected_translation: &str,
+        expected_revision: u64,
+    ) {
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let envelope = receiver.recv_with_revision().await.unwrap();
+                match envelope.event {
+                    LiveTranslateServerEvent::SubtitleConfirmedPair {
+                        source_utterance_id,
+                        source,
+                        translation,
+                        ..
+                    } => {
+                        assert_eq!(source_utterance_id, Some(expected_id));
+                        assert_eq!(source, expected_source);
+                        assert_eq!(translation, expected_translation);
+                        assert_eq!(envelope.content_revision, expected_revision);
+                        return;
+                    }
+                    LiveTranslateServerEvent::Error { code, .. } => {
+                        panic!("Synthetic pipeline failed: {code}")
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn xai_stt_chunks_reach_real_mt_before_speech_final_and_original_never_requests_http() {
+        use crate::clients::openai_compatible_client::OpenAICompatibleClient;
+        use crate::clients::xai_stt_client::XaiSttClient;
+        use crate::core::network_proxy::{ProxyConfig, ProxyMode};
+        use futures_util::{SinkExt, StreamExt};
+        use serde_json::{json, Value};
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::TcpListener;
+        use tokio::sync::mpsc;
+        use tokio_tungstenite::{accept_async, tungstenite::Message};
+
+        for target in [TargetLanguage::Japanese, TargetLanguage::Original] {
+            let speech = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let text = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let mut asr =
+                XaiSttClient::new("synthetic-speech-key", SourceLanguage::English).unwrap();
+            asr.set_loopback_for_test(speech.local_addr().unwrap());
+            // Deliberately keep a reachable, functional MT transport even for
+            // Original, proving the pipeline itself never calls it in that mode.
+            let mt = OpenAICompatibleClient::new(
+                &format!("http://{}/v1", text.local_addr().unwrap()),
+                "synthetic-text-key",
+                "synthetic-text-model",
+                SourceLanguage::English,
+                TargetLanguage::Japanese,
+            )
+            .unwrap();
+            let (events, mut receiver) = provider_event_channel();
+            let mut client = HighQualityTranslationClient::from_components(
+                RecognitionClient::Xai(asr),
+                TextTranslationClient::OpenAICompatible(mt),
+                SourceLanguage::English,
+                target,
+                Duration::from_secs(60),
+                Duration::from_secs(60),
+                12,
+                false,
+                events,
+            );
+            client
+                .set_network(
+                    ProviderNetwork::resolve(&ProxyConfig {
+                        mode: ProxyMode::Direct,
+                        url: None,
+                    })
+                    .unwrap(),
+                )
+                .unwrap();
+            let (requests, mut received_requests) = mpsc::channel::<String>(8);
+            let text_server = tokio::spawn(async move {
+                loop {
+                    let (mut socket, _) = text.accept().await.unwrap();
+                    let request = xai_loopback_read_http(&mut socket).await;
+                    assert_eq!(request["model"], "synthetic-text-model");
+                    assert_eq!(request["stream"], false);
+                    let source = request["messages"][1]["content"]
+                        .as_str()
+                        .unwrap()
+                        .to_owned();
+                    requests.send(source.clone()).await.unwrap();
+                    let body = json!({"choices":[{"finish_reason":"stop","message":{"content":format!("translated {source}")}}]}).to_string();
+                    socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+                }
+            });
+            let (frames, mut pending_frames) = mpsc::channel::<Value>(8);
+            let speech_server = tokio::spawn(async move {
+                for connection in 0..2 {
+                    let mut socket = accept_async(speech.accept().await.unwrap().0)
+                        .await
+                        .unwrap();
+                    socket
+                        .send(Message::Text(
+                            json!({"type":"transcript.created"}).to_string().into(),
+                        ))
+                        .await
+                        .unwrap();
+                    assert_eq!(
+                        socket.next().await.unwrap().unwrap(),
+                        Message::Binary(vec![1, 0, 2, 0].into())
+                    );
+                    loop {
+                        tokio::select! {
+                            frame = pending_frames.recv() => {
+                                socket.send(Message::Text(frame.unwrap().to_string().into())).await.unwrap();
+                            }
+                            message = socket.next() => {
+                                match message.unwrap().unwrap() {
+                                    Message::Text(text) => {
+                                        assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["type"], "audio.done");
+                                        assert_eq!(connection, 1, "Stop must follow the first connection's clear boundary");
+                                        socket.send(Message::Text(json!({"type":"transcript.done","text":"fourth synthetic chunk","duration":3.0}).to_string().into())).await.unwrap();
+                                        return;
+                                    }
+                                    Message::Close(_) => break,
+                                    Message::Ping(bytes) => socket.send(Message::Pong(bytes)).await.unwrap(),
+                                    other => panic!("Unexpected synthetic STT wire message: {other:?}"),
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            let partial = |text: &str,
+                           is_final: bool,
+                           speech_final: bool,
+                           start: f64,
+                           duration: f64| json!({"type":"transcript.partial","text":text,"is_final":is_final,"speech_final":speech_final,"start":start,"duration":duration});
+            client.connect().await.unwrap();
+            client.send_audio(&[1, 0, 2, 0]).await.unwrap();
+            frames
+                .send(partial("first synthetic draft", false, false, 0.0, 1.0))
+                .await
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    match receiver.recv().await.unwrap() {
+                        LiveTranslateServerEvent::SourceUtteranceDraft {
+                            utterance_id: 1,
+                            text,
+                            ..
+                        } if text == "first synthetic draft" => break,
+                        LiveTranslateServerEvent::SubtitleConfirmedPair { .. } => {
+                            panic!("An interim STT result became a durable subtitle")
+                        }
+                        LiveTranslateServerEvent::Error { code, .. } => {
+                            panic!("Synthetic pipeline failed: {code}")
+                        }
+                        _ => {}
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            assert!(
+                tokio::time::timeout(Duration::from_millis(20), received_requests.recv())
+                    .await
+                    .is_err()
+            );
+
+            for (id, source) in [(1, "first synthetic chunk"), (2, "second synthetic chunk")] {
+                frames
+                    .send(partial(source, true, false, (id - 1) as f64 * 3.0, 3.0))
+                    .await
+                    .unwrap();
+                if target.translates_audio() {
+                    // This request is received while the server has sent no
+                    // speech_final and the client has not begun stopping.
+                    assert_eq!(
+                        tokio::time::timeout(Duration::from_secs(2), received_requests.recv())
+                            .await
+                            .unwrap()
+                            .unwrap(),
+                        source
+                    );
+                }
+                let translated = if target.translates_audio() {
+                    format!("translated {source}")
+                } else {
+                    source.to_owned()
+                };
+                xai_loopback_confirmed_pair(&mut receiver, id, source, &translated, 0).await;
+            }
+            frames
+                .send(partial(
+                    "first synthetic chunk second synthetic chunk",
+                    true,
+                    true,
+                    0.0,
+                    6.0,
+                ))
+                .await
+                .unwrap();
+            // A following real chunk is a processing barrier: any duplicate
+            // summary request or confirmation would arrive before this pair.
+            let source = "third synthetic chunk";
+            frames
+                .send(partial(source, true, false, 6.0, 3.0))
+                .await
+                .unwrap();
+            if target.translates_audio() {
+                assert_eq!(
+                    tokio::time::timeout(Duration::from_secs(2), received_requests.recv())
+                        .await
+                        .unwrap()
+                        .unwrap(),
+                    source
+                );
+            }
+            let translated = if target.translates_audio() {
+                format!("translated {source}")
+            } else {
+                source.to_owned()
+            };
+            xai_loopback_confirmed_pair(&mut receiver, 3, source, &translated, 0).await;
+            assert!(received_requests.try_recv().is_err());
+
+            // The real pipeline retains its replay watermark across clear.
+            // The replacement xAI socket must therefore continue at ID 4.
+            assert_eq!(client.clear_content().await, 1);
+            client.send_audio(&[1, 0, 2, 0]).await.unwrap();
+            let source = "fourth synthetic chunk";
+            frames
+                .send(partial(source, true, false, 0.0, 3.0))
+                .await
+                .unwrap();
+            if target.translates_audio() {
+                assert_eq!(
+                    tokio::time::timeout(Duration::from_secs(2), received_requests.recv())
+                        .await
+                        .unwrap()
+                        .unwrap(),
+                    source
+                );
+            }
+            let translated = if target.translates_audio() {
+                format!("translated {source}")
+            } else {
+                source.to_owned()
+            };
+            xai_loopback_confirmed_pair(&mut receiver, 4, source, &translated, 1).await;
+            client.finish().await;
+            speech_server.await.unwrap();
+            while let Ok(event) = receiver.try_recv() {
+                assert!(!matches!(
+                    event,
+                    LiveTranslateServerEvent::SubtitleConfirmedPair { .. }
+                ));
+            }
+            assert!(
+                tokio::time::timeout(Duration::from_millis(20), received_requests.recv())
+                    .await
+                    .is_err()
+            );
+            if target == TargetLanguage::Original {
+                assert_eq!(client.translation_latency(), None);
+            }
+            text_server.abort();
+            let _ = text_server.await;
+        }
     }
 
     #[tokio::test]

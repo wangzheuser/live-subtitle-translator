@@ -135,6 +135,7 @@ object SettingsStore {
         return try {
             require(qwenMtModel == null || qwenMtModel in listOf("lite", "flash", "plus")) { "translation_model" }
             require(config.alibabaRealtimeMode in listOf("asrMt", "liveTranslate")) { "speech_mode" }
+            require(config.xaiSpeechMode in listOf("voice", "asrMt")) { "speech_mode" }
             val repository = repository(context)
             val prior = id?.let(repository::contents)
             val selected = if (translationEnabled == false) TextTranslationProvider.BUILTIN else translation?.provider
@@ -174,7 +175,7 @@ object SettingsStore {
     fun setApiKey(context: Context, value: String, provider: String = provider(context)) {
         val saved = configuration(context, app.yuxino.mimi.android.provider.ServiceProvider.fromId(provider))
         check(saveConfiguration(context, app.yuxino.mimi.android.provider.ServiceConfiguration(saved.provider,
-            saved.credentials + ("apiKey" to value.trim()), saved.endpoint, saved.model, saved.alibabaRealtimeMode, saved.alibabaWorkspaceId))) { "profile_save_failed" }
+            saved.credentials + ("apiKey" to value.trim()), saved.endpoint, saved.model, saved.alibabaRealtimeMode, saved.alibabaWorkspaceId, saved.xaiSpeechMode, saved.xaiTextModel))) { "profile_save_failed" }
     }
 
     fun configuration(context: Context, provider: app.yuxino.mimi.android.provider.ServiceProvider? = null): app.yuxino.mimi.android.provider.ServiceConfiguration {
@@ -200,8 +201,14 @@ object SettingsStore {
     fun textTranslationProvider(context: Context): TextTranslationProvider =
         activeProfileId(context)?.let { profileTextTranslationProvider(context, it) } ?: TextTranslationProvider.BUILTIN
 
-    fun originalTextOnly(context: Context): Boolean =
+    fun translationSelectionLocked(context: Context): Boolean =
         configuration(context).usesIndependentTextTranslation && textTranslationProvider(context) == TextTranslationProvider.NONE
+
+    fun originalTextOnly(context: Context): Boolean {
+        val speech = configuration(context)
+        return translationSelectionLocked(context) || speech.provider == app.yuxino.mimi.android.provider.ServiceProvider.XAI &&
+            speech.xaiSpeechMode == "asrMt" && targetLang(context) == "original"
+    }
 
     fun useChatMockTranslation(context: Context): Boolean = textTranslationProvider(context) == TextTranslationProvider.CHAT_MOCK
     fun qwenMtModel(context: Context): String = activeProfileId(context)?.let { profileQwenMtModel(context, it) } ?: "lite"
@@ -215,7 +222,7 @@ object SettingsStore {
         val translation = if (speech.usesIndependentTextTranslation)
             contents.translations[contents.selectedTranslation] ?: TranslationConfiguration(provider = contents.selectedTranslation)
             else TranslationConfiguration(provider = TextTranslationProvider.BUILTIN)
-        val (source, target) = speech.provider.normalize(sourceLang(context), targetLang(context), translation.provider, speech.alibabaRealtimeMode)
+        val (source, target) = speech.provider.normalize(sourceLang(context), targetLang(context), translation.provider, speech.alibabaRealtimeMode, speech.xaiSpeechMode)
         return buildRuntimeConfiguration(speech, translation, source, target, contents.qwenMtModel)
     }
 
@@ -229,13 +236,13 @@ object SettingsStore {
     fun setBaseUrl(context: Context, provider: String, value: String) {
         val saved = configuration(context, app.yuxino.mimi.android.provider.ServiceProvider.fromId(provider))
         check(saveConfiguration(context, app.yuxino.mimi.android.provider.ServiceConfiguration(saved.provider, saved.credentials,
-            value.trim(), saved.model, saved.alibabaRealtimeMode, saved.alibabaWorkspaceId))) { "profile_save_failed" }
+            value.trim(), saved.model, saved.alibabaRealtimeMode, saved.alibabaWorkspaceId, saved.xaiSpeechMode, saved.xaiTextModel))) { "profile_save_failed" }
     }
     fun model(context: Context, provider: String): String = configuration(context, app.yuxino.mimi.android.provider.ServiceProvider.fromId(provider)).model
     fun setModel(context: Context, provider: String, value: String) {
         val saved = configuration(context, app.yuxino.mimi.android.provider.ServiceProvider.fromId(provider))
         check(saveConfiguration(context, app.yuxino.mimi.android.provider.ServiceConfiguration(saved.provider, saved.credentials,
-            saved.endpoint, value.trim(), saved.alibabaRealtimeMode, saved.alibabaWorkspaceId))) { "profile_save_failed" }
+            saved.endpoint, value.trim(), saved.alibabaRealtimeMode, saved.alibabaWorkspaceId, saved.xaiSpeechMode, saved.xaiTextModel))) { "profile_save_failed" }
     }
 
     /** Overlay window opacity, 20..100 (percent). */

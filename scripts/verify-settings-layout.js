@@ -1,6 +1,38 @@
 // Browser geometry regression. Serve the repository with npm run dev, then
 // import this function from an ego-browser nodejs round with its managed Page.
 // Platform bridges and device state are fixtures, not native-device evidence.
+export async function verifyXaiSettingsLayout(page, baseUrl = "http://127.0.0.1:1420") {
+  await page.goto(new URL("/scripts/fixtures/settings-layout.html", baseUrl).href);
+  await page.waitForFunction(() => window.layoutReady === true);
+  await page.cdp("Page.bringToFront", {});
+  await page.cdp("Emulation.setFocusEmulationEnabled", { enabled: true });
+  const failures = [];
+  let checked = 0;
+  for (const width of [520, 952]) for (const language of ["en", "zh", "zh-TW", "ja", "de", "fr", "ko", "th"]) for (const theme of ["light", "dark"]) for (const mode of ["voice", "asrMt"]) {
+    await page.cdp("Emulation.setDeviceMetricsOverride", { width, height: 1000, deviceScaleFactor: 1, mobile: false });
+    await page.cdp("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: theme }] });
+    const issues = await page.evaluate(async next => {
+      await window.applyLayoutCase({ ...next, platform: "macos", state: "idle", editor: true, provider: "xAIRealtime", profileName: "xAI", profileOverrides: { xaiSpeechMode: next.mode, xaiTextModel: "grok-custom-text-model-".repeat(10) } });
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const issues = [];
+      if (document.documentElement.scrollWidth > innerWidth + 1) issues.push("page overflow");
+      const section = document.querySelector(".xai-speech-settings");
+      if (!section) return ["missing xAI speech mode"];
+      const model = section.querySelector("input, textarea");
+      if (Boolean(model) !== (next.mode === "asrMt")) issues.push("wrong model visibility");
+      for (const control of section.querySelectorAll("button, input, textarea")) {
+        const bounds = control.getBoundingClientRect();
+        if (bounds.width && (bounds.left < 0 || bounds.right > innerWidth + 1)) issues.push("control outside viewport");
+        if (control.tagName === "BUTTON" && !control.disabled && getComputedStyle(control).cursor !== "pointer") issues.push("button cursor");
+      }
+      return issues;
+    }, { width, language, theme, mode });
+    checked += 1;
+    if (issues.length) failures.push({ width, language, theme, mode, issues });
+  }
+  return { checked, failures };
+}
+
 export async function verifyProfileActionsLayout(page, baseUrl = "http://127.0.0.1:1420", { platforms = ["macos", "windows", "linux"], states = ["idle", "paused", "confirmation"], widths = [520, 828, 952, 1600], languages = ["en", "zh", "zh-TW", "ja", "de", "fr", "ko", "th"], themes = ["light", "dark"] } = {}) {
   await page.goto(new URL("/scripts/fixtures/settings-layout.html", baseUrl).href);
   await page.waitForFunction(() => window.layoutReady === true);

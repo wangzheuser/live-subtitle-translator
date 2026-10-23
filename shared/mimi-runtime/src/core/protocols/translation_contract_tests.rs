@@ -45,6 +45,54 @@ fn contract() -> Value {
 }
 
 #[test]
+fn xai_streaming_transcript_fixtures_use_the_shared_authoritative_chunk_boundaries() {
+    use super::xai_stt::{decode, TranscriptAssembler};
+    let fixtures = contract();
+    let cases = fixtures["xaiStreamingTranscripts"].as_array().unwrap();
+    assert!(!cases.is_empty());
+    for case in cases {
+        let mut assembler = TranscriptAssembler::default();
+        let outputs: Vec<Value> = case["frames"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|frame| {
+                let output = assembler
+                    .apply(decode(&frame.to_string()).unwrap())
+                    .unwrap();
+                output.map_or(Value::Null, |output| serde_json::json!({
+                "sequence": output.sequence, "text": output.text, "isFinal": output.is_final,
+            }))
+            })
+            .collect();
+        assert_eq!(
+            serde_json::json!(outputs),
+            case["expectedOutputs"],
+            "{}",
+            case["id"]
+        );
+    }
+}
+
+#[test]
+fn xai_streaming_language_catalog_matches_both_native_and_frontend_selections() {
+    let catalog: Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../provider-language-catalogs.json"
+    )))
+    .unwrap();
+    let capabilities = crate::core::provider::XAISpeechMode::AsrMt.capabilities();
+    assert_eq!(
+        serde_json::to_value(capabilities.source_languages).unwrap(),
+        catalog["xAIStt"]["sourceLanguages"]
+    );
+    assert_eq!(capabilities.input_sample_rate_hz, 16_000);
+    assert!(capabilities
+        .target_languages
+        .contains(&TargetLanguage::Original));
+}
+
+#[test]
 fn custom_recognition_completion_contracts_preserve_authoritative_empty_finals() {
     use super::custom_speech::TurnSequencer;
     for case in contract()["customRecognitionCompletions"]

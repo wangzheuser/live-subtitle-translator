@@ -8,7 +8,7 @@ use crate::core::network_proxy::{ProxyConfig, ProxyConfigError};
 use crate::core::protocols::qwen_mt::QwenMTModel;
 use crate::core::provider::{
     alibaba_workspace_id_is_valid, AlibabaRealtimeMode, ProviderCapabilities, ProviderKind,
-    TextTranslation,
+    TextTranslation, XAISpeechMode,
 };
 use std::fmt;
 use thiserror::Error;
@@ -42,6 +42,8 @@ impl fmt::Debug for TextTranslationProbeConfiguration {
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum LiveTranslationConfigurationError {
+    #[error("Invalid xAI speech mode or text model.")]
+    InvalidXAISpeech,
     #[error("{0}")]
     Credentials(#[from] ProviderCredentialsError),
     #[error("The selected service does not support this source language.")]
@@ -67,6 +69,10 @@ pub struct LiveTranslationConfiguration {
     pub alibaba_realtime_mode: AlibabaRealtimeMode,
     #[serde(default)]
     pub alibaba_workspace_id: String,
+    #[serde(default)]
+    pub xai_speech_mode: XAISpeechMode,
+    #[serde(default = "crate::core::provider::default_xai_text_model")]
+    pub xai_text_model: String,
     pub credentials: ProviderCredentials,
     pub text_credentials: Option<TextTranslationCredentials>,
     pub source_language: SourceLanguage,
@@ -84,6 +90,8 @@ impl fmt::Debug for LiveTranslationConfiguration {
             .field("provider", &self.provider)
             .field("qwen_mt_model", &self.qwen_mt_model)
             .field("alibaba_realtime_mode", &self.alibaba_realtime_mode)
+            .field("xai_speech_mode", &self.xai_speech_mode)
+            .field("xai_text_model", &self.xai_text_model)
             .field("credentials", &"[REDACTED]")
             .field("text_credentials", &"[REDACTED]")
             .field("source_language", &self.source_language)
@@ -99,6 +107,13 @@ impl LiveTranslationConfiguration {
     /// Display the selected models without retaining credentials in native UI state.
     /// Model identifiers come from the same protocol constants as the factory.
     pub fn model_names(&self) -> Vec<String> {
+        if self.uses_xai_asr() {
+            let mut names = vec![crate::core::protocols::xai_stt::MODEL.to_owned()];
+            if self.target_language.translates_audio() {
+                names.push(self.xai_text_model.clone());
+            }
+            return names;
+        }
         use crate::core::protocols::{
             audio3::Audio3ASREndpoint, gemini_live::GeminiLiveEndpoint,
             openai_realtime::OpenAIRealtimeEndpoint, xai_realtime::XAIRealtimeEndpoint,
@@ -198,6 +213,8 @@ impl LiveTranslationConfiguration {
             qwen_mt_model: Default::default(),
             alibaba_realtime_mode: Default::default(),
             alibaba_workspace_id: String::new(),
+            xai_speech_mode: Default::default(),
+            xai_text_model: crate::core::provider::default_xai_text_model(),
             credentials: ProviderCredentials::api_key(api_key),
             text_credentials: None,
             source_language,
@@ -220,6 +237,8 @@ impl LiveTranslationConfiguration {
             qwen_mt_model: Default::default(),
             alibaba_realtime_mode: Default::default(),
             alibaba_workspace_id: String::new(),
+            xai_speech_mode: Default::default(),
+            xai_text_model: crate::core::provider::default_xai_text_model(),
             credentials,
             text_credentials: None,
             source_language,
@@ -262,6 +281,49 @@ impl LiveTranslationConfiguration {
         self
     }
 
+    pub fn with_xai_speech(mut self, mode: XAISpeechMode, model: impl Into<String>) -> Self {
+        self.xai_speech_mode = mode;
+        self.xai_text_model = model.into();
+        self
+    }
+
+    pub fn uses_xai_asr(&self) -> bool {
+        self.provider == ProviderKind::XAIRealtime && self.xai_speech_mode == XAISpeechMode::AsrMt
+    }
+
+    /// Both xAI stages intentionally use this profile's xAI key. No second
+    /// credential slot, other profile or environment fallback is consulted.
+    pub fn xai_text_probe_configuration(
+        &self,
+    ) -> Result<TextTranslationProbeConfiguration, LiveTranslationConfigurationError> {
+        if !self.uses_xai_asr() {
+            return Err(LiveTranslationConfigurationError::InvalidXAISpeech);
+        }
+        let credentials = self.credentials.validated_for(self.provider)?;
+        let api_key = credentials
+            .direct_api_key()
+            .ok_or(LiveTranslationConfigurationError::InvalidXAISpeech)?;
+        let model = crate::core::protocols::openai_compatible::validate_model(&self.xai_text_model)
+            .map_err(|_| LiveTranslationConfigurationError::InvalidXAISpeech)?;
+        Ok(TextTranslationProbeConfiguration {
+            credentials: TextTranslationProbeCredentials::Independent(
+                TextTranslationCredentials::OpenAICompatible {
+                    endpoint: crate::core::provider::XAI_TEXT_ENDPOINT.to_owned(),
+                    api_key: api_key.to_owned(),
+                    model,
+                },
+            ),
+            qwen_mt_model: self.qwen_mt_model,
+            source_language: self.source_language,
+            target_language: if self.target_language.translates_audio() {
+                self.target_language
+            } else {
+                TargetLanguage::SimplifiedChinese
+            },
+            network_proxy: self.text_network_proxy.clone(),
+        })
+    }
+
     /// Legacy mode values remain readable, but every new session uses Turbo.
     /// Provider-specific transports and independent text destinations remain
     /// resolved by the provider facade.
@@ -270,6 +332,9 @@ impl LiveTranslationConfiguration {
     }
 
     pub fn capabilities(&self) -> ProviderCapabilities {
+        if self.uses_xai_asr() {
+            return self.xai_speech_mode.capabilities();
+        }
         if self.provider == ProviderKind::AlibabaCloud
             && self.alibaba_realtime_mode != AlibabaRealtimeMode::Disabled
         {
@@ -292,6 +357,15 @@ impl LiveTranslationConfiguration {
 
     /// Returns a trimmed, validated copy of the configuration.
     pub fn validated(&self) -> Result<Self, LiveTranslationConfigurationError> {
+        if self.provider != ProviderKind::XAIRealtime
+            && (self.xai_speech_mode != XAISpeechMode::Voice
+                || self.xai_text_model != crate::core::provider::DEFAULT_XAI_TEXT_MODEL)
+        {
+            return Err(LiveTranslationConfigurationError::InvalidXAISpeech);
+        }
+        let xai_text_model =
+            crate::core::protocols::openai_compatible::validate_model(&self.xai_text_model)
+                .map_err(|_| LiveTranslationConfigurationError::InvalidXAISpeech)?;
         if self.alibaba_realtime_mode != AlibabaRealtimeMode::Disabled {
             if self.provider != ProviderKind::AlibabaCloud {
                 return Err(LiveTranslationConfigurationError::UnsupportedAlibabaRealtime);
@@ -361,6 +435,8 @@ impl LiveTranslationConfiguration {
             qwen_mt_model: self.qwen_mt_model,
             alibaba_realtime_mode: self.alibaba_realtime_mode,
             alibaba_workspace_id: self.alibaba_workspace_id.trim().to_string(),
+            xai_speech_mode: self.xai_speech_mode,
+            xai_text_model,
             credentials,
             text_credentials,
             source_language: self.source_language,
@@ -374,6 +450,57 @@ impl LiveTranslationConfiguration {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn xai_streaming_uses_its_profile_key_model_and_independent_text_route() {
+        use super::*;
+        let legacy = LiveTranslationConfiguration::for_provider(
+            ProviderKind::XAIRealtime,
+            "synthetic-xai-key",
+            SourceLanguage::Automatic,
+            TargetLanguage::SimplifiedChinese,
+            TranslationMode::Turbo,
+        );
+        assert!(!legacy.uses_xai_asr());
+        assert_eq!(legacy.model_names(), ["grok-voice-latest"]);
+        let streaming = legacy.with_xai_speech(XAISpeechMode::AsrMt, "custom-xai-text-model");
+        let streaming = streaming.validated().unwrap();
+        assert_eq!(streaming.capabilities().input_sample_rate_hz, 16_000);
+        assert_eq!(streaming.model_names()[1], "custom-xai-text-model");
+        let (speech, text) = streaming.network_endpoints().unwrap();
+        assert_eq!(speech, "wss://api.x.ai/v1/stt");
+        assert_eq!(
+            text.as_deref(),
+            Some(crate::core::provider::XAI_TEXT_ENDPOINT)
+        );
+        let probe = streaming.xai_text_probe_configuration().unwrap();
+        let TextTranslationProbeCredentials::Independent(
+            TextTranslationCredentials::OpenAICompatible {
+                endpoint,
+                model,
+                api_key,
+            },
+        ) = probe.credentials
+        else {
+            panic!("xAI must use its text endpoint");
+        };
+        assert_eq!(endpoint, crate::core::provider::XAI_TEXT_ENDPOINT);
+        assert_eq!(model, "custom-xai-text-model");
+        assert_eq!(api_key, "synthetic-xai-key");
+        let mut original = streaming;
+        original.target_language = TargetLanguage::Original;
+        assert!(original.network_endpoints().unwrap().1.is_none());
+        assert_eq!(original.model_names().len(), 1);
+        assert_eq!(
+            original
+                .xai_text_probe_configuration()
+                .unwrap()
+                .target_language,
+            TargetLanguage::SimplifiedChinese
+        );
+        original.provider = ProviderKind::AlibabaCloud;
+        assert!(original.validated().is_err());
+    }
+
     #[test]
     fn experimental_realtime_configuration_requires_workspace_and_has_one_model() {
         use super::*;

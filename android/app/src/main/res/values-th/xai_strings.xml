@@ -1,0 +1,9 @@
+<resources>
+    <string name="xai_mode">การรู้จำและการแปล</string>
+    <string name="xai_asr_mt">รู้จำแบบสตรีม + แปลข้อความ</string>
+    <string name="xai_voice">Grok Voice</string>
+    <string name="xai_text_model">โมเดลแปลข้อความ</string>
+    <string name="xai_help">ส่งข้อความที่รู้จำแบบสตรีมไปแปลด้วยโมเดลข้อความ Grok ที่เลือก ทั้งสองขั้นตอนใช้ xAI API Key เดียวกัน Grok Voice จะแปลเป็นช่วงหลังจากหยุดพูด</string>
+    <string name="xai_check_speech">ตรวจสอบการรู้จำเสียง</string>
+    <string name="xai_model_invalid">กรอก ID โมเดลข้อความไม่เกิน 256 ไบต์ โดยไม่มีอักขระควบคุม</string>
+</resources>

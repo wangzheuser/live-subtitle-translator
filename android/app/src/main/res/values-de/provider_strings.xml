@@ -8,7 +8,7 @@
     <string name="guide_detail_volcano">Doubao Simultaneous Interpretation 2.0 liefert Originaltext und Übersetzung in Echtzeit.\nDer Übersetzungsdienst kann nicht separat gewechselt werden.</string>
     <string name="guide_detail_tencent">Tencent Cloud erkennt und übersetzt Sprache in Echtzeit.\nDer Übersetzungsdienst kann nicht separat gewechselt werden.</string>
     <string name="guide_detail_baidu">Baidu erkennt und übersetzt Sprache in Echtzeit.\nDer Übersetzungsdienst kann nicht separat gewechselt werden.</string>
-    <string name="guide_detail_xai">Grok Voice übersetzt abschnittsweise, sobald Sprechpausen erkannt werden.\nDer Übersetzungsdienst kann nicht separat gewechselt werden.</string>
+    <string name="guide_detail_xai">xAI-Spracherkennung mit wählbarem Grok-Textmodell zur Übersetzung.\nAlternativ übersetzt Grok Voice nach Sprechpausen.</string>
     <string name="guide_help_dashscope">Aktivieren Sie Model Studio und erstellen Sie einen API-Schlüssel. Simultanübersetzung benötigt zusätzlich eine Beijing-Workspace-ID.</string>
     <string name="guide_help_openai">Ein OpenAI-API-Projekt und einen Schlüssel mit Realtime-Zugriff erstellen. ChatGPT-Abos enthalten keine API-Nutzung.</string>
     <string name="guide_help_gemini">Einen Gemini-API-Schlüssel in Google AI Studio erstellen und die Live-API-Verfügbarkeit für das Projekt prüfen.</string>
@@ -16,7 +16,7 @@
     <string name="guide_help_volcano">Konto verifizieren und Simultaneous Interpretation 2.0 in der neuen Doubao-Voice-Konsole aktivieren. Mimi verwendet den neuen API-Schlüssel, nicht die alte AppID mit Zugriffstoken.</string>
     <string name="guide_help_tencent">Echtzeit-Sprachübersetzung benötigt die AppID des Kontos und ein SecretID-/SecretKey-Paar desselben Kontos. AppID unter Kontoinformationen nachsehen, nicht UIN; das Schlüsselpaar unter CAM-API-Schlüssel. Dienst in der ASR-Konsole aktivieren. Ein einzelner Hunyuan-Modellschlüssel reicht für diese API nicht aus. Nutzungsabhängige Abrechnung muss ausdrücklich aktiviert werden.</string>
     <string name="guide_help_baidu">In Baidu AI Cloud eine Machine-Translation-App mit Echtzeit-Sprachübersetzung erstellen. AppKey ist der API Key der App, nicht der Secret Key.</string>
-    <string name="guide_help_xai">Einen API-Schlüssel in der xAI-Konsole erstellen und Echtzeit-Sprachzugriff sowie verfügbares Guthaben prüfen.</string>
+    <string name="guide_help_xai">API-Schlüssel in der xAI-Konsole erstellen. Guthaben und Zugriff auf die gewählten Sprach- und Textmodelle prüfen.</string>
     <string name="profiles_alibaba_mode">Erkennung und Übersetzung</string>
     <string name="profiles_alibaba_asr_mt">ASR + MT</string>
     <string name="profiles_alibaba_live">Simultanübersetzung</string>

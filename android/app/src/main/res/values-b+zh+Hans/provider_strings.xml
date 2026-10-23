@@ -8,7 +8,7 @@
     <string name="guide_detail_volcano">使用豆包同声传译 2.0，实时输出原文和译文。\n翻译服务不可单独更换。</string>
     <string name="guide_detail_tencent">实时识别语音并翻译，均由腾讯云完成。\n翻译服务不可单独更换。</string>
     <string name="guide_detail_baidu">实时识别语音并翻译，均由百度完成。\n翻译服务不可单独更换。</string>
-    <string name="guide_detail_xai">使用 Grok Voice，检测到说话停顿后分段生成译文。\n翻译服务不可单独更换。</string>
+    <string name="guide_detail_xai">可使用 xAI 流式识别与自选 Grok 文字模型翻译。\n也可选择在说话停顿后分段翻译的 Grok Voice。</string>
     <string name="guide_help_dashscope">在百炼开通模型服务并创建 API Key。同声传译还需北京业务空间 ID。</string>
     <string name="guide_help_openai">在 OpenAI API 平台创建项目与 API Key，确认可使用 Realtime 模型。ChatGPT 订阅不包含 API 用量。</string>
     <string name="guide_help_gemini">在 Google AI Studio 的项目里创建 Gemini API Key，确认项目可使用 Live API。</string>
@@ -16,7 +16,7 @@
     <string name="guide_help_volcano">在新版豆包语音控制台实名认证、开通同声传译 2.0，再创建 API Key。Mimi 使用新版 API Key，不使用旧版 AppID / Access Token。</string>
     <string name="guide_help_tencent">实时语音翻译需要账号 AppID 和同一账号的 SecretID、SecretKey。AppID 在账号信息页，注意不是 UIN；密钥对在访问管理的 API 密钥页。还需在 ASR 控制台开通服务。混元大模型的单个 API Key 不能用于此接口。后付费需自行开通。</string>
     <string name="guide_help_baidu">在百度智能云机器翻译中创建应用，勾选实时语音翻译权限。AppKey 填应用的 API Key，不是 Secret Key。</string>
-    <string name="guide_help_xai">在 xAI 控制台创建 API Key，并确认账号有实时语音服务额度与访问权限。</string>
+    <string name="guide_help_xai">在 xAI 控制台创建 API Key，确认账号有可用额度，并已开通所选语音识别和文字模型。</string>
     <string name="profiles_alibaba_mode">识别与翻译</string>
     <string name="profiles_alibaba_asr_mt">ASR + MT</string>
     <string name="profiles_alibaba_live">同声传译</string>

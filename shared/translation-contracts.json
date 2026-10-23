@@ -16000,6 +16000,8 @@
     {"id": "openrouter-mandatory", "endpoint": "https://openrouter.ai/api/v1", "model": "google/gemini-3.5-flash", "expected": {}},
     {"id": "openrouter-reasoner", "endpoint": "https://openrouter.ai/api/v1", "model": "deepseek/deepseek-r1", "expected": {}},
     {"id": "openrouter-unknown", "endpoint": "https://openrouter.ai/api/v1", "model": "synthetic/synthetic-model", "expected": {}},
+    {"id": "xai-grok43-nonthinking", "endpoint": "https://api.x.ai/v1", "model": "grok-4.3", "expected": {"reasoning_effort": "none"}},
+    {"id": "xai-unknown-model-no-invented-options", "endpoint": "https://api.x.ai/v1", "model": "custom-xai-text-model", "expected": {}},
     {"id": "local-chatmock", "endpoint": "http://127.0.0.1:8000/v1", "model": "gpt-5.6-sol", "expected": {}}
   ],
   "alibabaRealtimeLanguages": {
@@ -16295,6 +16297,291 @@
           "Synthetic withdrawn preview."
         ]
       }
+    }
+  ],
+  "xaiStreamingTranscripts": [
+    {
+      "id": "chunk-finals-before-any-pause",
+      "frames": [
+        {
+          "type": "transcript.created"
+        },
+        {
+          "type": "transcript.partial",
+          "text": "Synthetic first",
+          "start": 0,
+          "duration": 0.5,
+          "is_final": false,
+          "speech_final": false,
+          "channel_index": 0
+        },
+        {
+          "type": "transcript.partial",
+          "text": "Synthetic first.",
+          "start": 0,
+          "duration": 1,
+          "is_final": true,
+          "speech_final": false,
+          "channel_index": 0
+        },
+        {
+          "type": "transcript.partial",
+          "text": "Synthetic second",
+          "start": 1,
+          "duration": 0.5,
+          "is_final": false,
+          "speech_final": false,
+          "channel_index": 0
+        },
+        {
+          "type": "transcript.partial",
+          "text": "Synthetic second.",
+          "start": 1,
+          "duration": 1,
+          "is_final": true,
+          "speech_final": false,
+          "channel_index": 0
+        }
+      ],
+      "expectedOutputs": [
+        null,
+        {
+          "sequence": 1,
+          "text": "Synthetic first",
+          "isFinal": false
+        },
+        {
+          "sequence": 1,
+          "text": "Synthetic first.",
+          "isFinal": true
+        },
+        {
+          "sequence": 2,
+          "text": "Synthetic second",
+          "isFinal": false
+        },
+        {
+          "sequence": 2,
+          "text": "Synthetic second.",
+          "isFinal": true
+        }
+      ]
+    },
+    {
+      "id": "speech-and-session-summaries-do-not-repeat-chunk-finals",
+      "frames": [
+        {
+          "type": "transcript.partial",
+          "text": "First.",
+          "start": 0,
+          "duration": 1,
+          "is_final": true,
+          "speech_final": false,
+          "channel_index": 0
+        },
+        {
+          "type": "transcript.partial",
+          "text": "Second.",
+          "start": 1,
+          "duration": 1,
+          "is_final": true,
+          "speech_final": false,
+          "channel_index": 0
+        },
+        {
+          "type": "transcript.partial",
+          "text": "First. Second.",
+          "start": 0,
+          "duration": 2,
+          "is_final": true,
+          "speech_final": true,
+          "channel_index": 0
+        },
+        {
+          "type": "transcript.done",
+          "text": "First. Second.",
+          "duration": 2
+        }
+      ],
+      "expectedOutputs": [
+        {
+          "sequence": 1,
+          "text": "First.",
+          "isFinal": true
+        },
+        {
+          "sequence": 2,
+          "text": "Second.",
+          "isFinal": true
+        },
+        null,
+        null
+      ]
+    },
+    {
+      "id": "empty-final-clears-the-current-draft",
+      "frames": [
+        {
+          "type": "transcript.partial",
+          "text": "Synthetic draft",
+          "start": 0,
+          "duration": 0.5,
+          "is_final": false,
+          "speech_final": false,
+          "channel_index": 0
+        },
+        {
+          "type": "transcript.partial",
+          "text": "",
+          "start": 0,
+          "duration": 1,
+          "is_final": true,
+          "speech_final": false,
+          "channel_index": 0
+        },
+        {
+          "type": "transcript.partial",
+          "text": "Next.",
+          "start": 1,
+          "duration": 1,
+          "is_final": true,
+          "speech_final": false,
+          "channel_index": 0
+        },
+        {
+          "type": "transcript.partial",
+          "text": "Next.",
+          "start": 1,
+          "duration": 1,
+          "is_final": true,
+          "speech_final": true,
+          "channel_index": 0
+        }
+      ],
+      "expectedOutputs": [
+        {
+          "sequence": 1,
+          "text": "Synthetic draft",
+          "isFinal": false
+        },
+        {
+          "sequence": 1,
+          "text": "",
+          "isFinal": true
+        },
+        {
+          "sequence": 2,
+          "text": "Next.",
+          "isFinal": true
+        },
+        null
+      ]
+    },
+    {
+      "id": "same-text-at-new-time-keeps-distinct-sequence",
+      "frames": [
+        {
+          "type": "transcript.partial",
+          "text": "Again.",
+          "start": 0,
+          "duration": 1,
+          "is_final": true,
+          "speech_final": false,
+          "channel_index": 0
+        },
+        {
+          "type": "transcript.partial",
+          "text": "Again.",
+          "start": 0,
+          "duration": 1,
+          "is_final": true,
+          "speech_final": true,
+          "channel_index": 0
+        },
+        {
+          "type": "transcript.partial",
+          "text": "Again.",
+          "start": 2,
+          "duration": 1,
+          "is_final": true,
+          "speech_final": false,
+          "channel_index": 0
+        },
+        {
+          "type": "transcript.partial",
+          "text": "Again.",
+          "start": 2,
+          "duration": 1,
+          "is_final": true,
+          "speech_final": true,
+          "channel_index": 0
+        },
+        {
+          "type": "transcript.done",
+          "text": "Again. Again.",
+          "duration": 3
+        }
+      ],
+      "expectedOutputs": [
+        {
+          "sequence": 1,
+          "text": "Again.",
+          "isFinal": true
+        },
+        null,
+        {
+          "sequence": 2,
+          "text": "Again.",
+          "isFinal": true
+        },
+        null,
+        null
+      ]
+    },
+    {
+      "id": "summaries-contribute-only-uncommitted-suffix",
+      "frames": [
+        {
+          "type": "transcript.partial",
+          "text": "First.",
+          "start": 0,
+          "duration": 1,
+          "is_final": true,
+          "speech_final": false,
+          "channel_index": 0
+        },
+        {
+          "type": "transcript.partial",
+          "text": "First. Tail.",
+          "start": 0,
+          "duration": 2,
+          "is_final": true,
+          "speech_final": true,
+          "channel_index": 0
+        },
+        {
+          "type": "transcript.done",
+          "text": "First. Tail. Last.",
+          "duration": 3
+        }
+      ],
+      "expectedOutputs": [
+        {
+          "sequence": 1,
+          "text": "First.",
+          "isFinal": true
+        },
+        {
+          "sequence": 2,
+          "text": "Tail.",
+          "isFinal": true
+        },
+        {
+          "sequence": 3,
+          "text": "Last.",
+          "isFinal": true
+        }
+      ]
     }
   ]
 }

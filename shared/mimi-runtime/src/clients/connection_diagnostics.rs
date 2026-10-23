@@ -169,6 +169,17 @@ pub async fn check_speech_service(
     let started = Instant::now();
     initialize_probe_tls();
     let result = match configuration.provider {
+        ProviderKind::XAIRealtime if configuration.uses_xai_asr() => {
+            match (
+                ProviderNetwork::resolve(&configuration.network_proxy),
+                ProviderNetwork::resolve(&configuration.text_network_proxy),
+            ) {
+                (Ok(speech), Ok(text)) => {
+                    probe_xai_speech(configuration, include_translation, speech, text).await
+                }
+                _ => Err(ConnectionCheckReason::InvalidConfiguration),
+            }
+        }
         ProviderKind::AlibabaCloud | ProviderKind::DeepLX
             if configuration.alibaba_realtime_mode
                 == crate::core::provider::AlibabaRealtimeMode::Disabled =>
@@ -189,6 +200,79 @@ pub async fn check_speech_service(
         }
     };
     timed_diagnostic(result, started)
+}
+
+/// Native Android adapters supply their platform trust and proxy snapshots;
+/// the STT handshake and text request remain in this shared implementation.
+pub async fn check_xai_speech_with_network(
+    configuration: &LiveTranslationConfiguration,
+    include_translation: bool,
+    speech_network: ProviderNetwork,
+    text_network: ProviderNetwork,
+) -> ConnectionDiagnostic {
+    let started = Instant::now();
+    let result = probe_xai_speech(
+        configuration,
+        include_translation,
+        speech_network,
+        text_network,
+    )
+    .await;
+    timed_diagnostic(result, started)
+}
+
+async fn probe_xai_speech(
+    configuration: &LiveTranslationConfiguration,
+    include_translation: bool,
+    speech_network: ProviderNetwork,
+    text_network: ProviderNetwork,
+) -> Result<(), ConnectionCheckReason> {
+    if !configuration.uses_xai_asr() {
+        return Err(ConnectionCheckReason::InvalidConfiguration);
+    }
+    let key = configuration
+        .credentials
+        .direct_api_key()
+        .ok_or(ConnectionCheckReason::InvalidConfiguration)?;
+    let mut asr = RecognitionClient::xai(key, configuration.source_language)
+        .map_err(|error| recognition_reason(&error))?;
+    asr.set_network(speech_network)
+        .map_err(|_| ConnectionCheckReason::InvalidConfiguration)?;
+    let (events, _receiver) = provider_event_channel();
+    asr.set_event_sender(events).await;
+    let task_id = uuid::Uuid::new_v4().simple().to_string();
+    let result = tokio::time::timeout(PROBE_TIMEOUT, async {
+        asr.connect_for_probe(&task_id)
+            .await
+            .map_err(|error| recognition_reason(&error))?;
+        if include_translation {
+            let probe = configuration
+                .xai_text_probe_configuration()
+                .map_err(|_| ConnectionCheckReason::InvalidConfiguration)?;
+            let TextTranslationProbeCredentials::Independent(credentials) = &probe.credentials
+            else {
+                return Err(ConnectionCheckReason::InvalidConfiguration);
+            };
+            let (source, phrase) = fixed_test_phrase(probe.target_language);
+            let translation = probe_independent_text_translation(
+                credentials,
+                &text_network,
+                source,
+                probe.target_language,
+                phrase,
+            )
+            .await?;
+            if translation.trim().is_empty() {
+                return Err(ConnectionCheckReason::ServiceRejected);
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|_| ConnectionCheckReason::Timeout)
+    .and_then(|result| result);
+    asr.disconnect().await;
+    result
 }
 
 #[cfg(test)]

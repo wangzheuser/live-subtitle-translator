@@ -4706,3 +4706,41 @@
   page and removed the temporary verifier, logs and downloaded duplicate assets
   after retaining evidence. Previous-version DMGs were already absent after
   packaging; current canonical packages and reusable build caches remain.
+
+
+### 2026-10-24 — xAI streaming recognition and selectable Grok text translation
+
+- Candidate: `feat/xai-streaming-text-translation`, working tree based on
+  `6b7f235c44b439a3e07c2000ab09a62b077fc9b0`. Native builds were dirty
+  development trees, not exact clean-commit artifacts. New xAI profiles use
+  streaming STT plus a selectable Grok text model; legacy profiles retain Voice.
+- Canonical `./scripts/check.sh` passed, including strict Rust checks, direct
+  shared contracts, JNI crate tests, and 153 frontend files / 2,706 tests.
+  Android's complete `:app:testDebugUnitTest` passed: 37 suites / 260 tests,
+  including actual host JNI and the shared streaming transcript fixtures.
+  A later correction to automatic-language help passed the related frontend
+  check (43 files / 920 tests); final shared setup copy passed generation checks.
+- Real localhost WebSocket + HTTP tests exercised the new recognizer through
+  the existing bounded translation queue. Chunk finals reached HTTP and confirmed
+  pairs before speech-final or Stop; cumulative summaries did not duplicate
+  requests; clear/reconnect retained increasing source IDs. Original mode made
+  no HTTP requests. These are synthetic protocol contracts, not xAI acceptance.
+- Ego Lite checked 64 combinations of eight locales, light/dark themes, 520/952
+  widths and both modes. Screenshot review found a cramped Japanese credential
+  heading; the scoped action-row repair was checked again at both widths.
+- Signed `/Applications/mimi-dev.app` watch/UI-only preview visibly verified
+  new-profile defaults, model editing and retention across mode switches,
+  empty-model validation, separate missing-key checks and Original selection.
+  Native inspection caught an incorrect explicit-language help message; the
+  corrected automatic/hint explanation was verified in that same window.
+- With the user's approval, the production app quit normally for native QA.
+  Afterwards the development app was rebuilt and opened in ordinary embedded
+  mode (`MIMI_UI_TEST=0`, `MIMI_AUTO_START=0`), showed idle, and quit normally.
+  Its stable designated requirement was preserved; UI-only xAI profiles did not
+  enter its saved catalog. The original production app was reopened and remained
+  idle. No capture, recording, permission reset or credential import was enabled.
+- No saved development xAI profile was available. Live xAI latency, translation
+  quality, prolonged playback and physical Windows/Linux/Android acceptance
+  remain pending. Next check: compare a continuous speech sample and the same
+  sample with pauses using an explicitly configured xAI development account.
+  Keep the delivery PR and issue #313 open; no merge or release was requested.

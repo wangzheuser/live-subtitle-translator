@@ -15,7 +15,7 @@ Choose a service, get its credentials, and set it up in Mimi. You only need to e
 | Use DeepL or another text translator | [Alibaba Cloud’s ASR + MT mode](#alibaba-cloud) lets you change the translator independently |
 | Process locally on a Mac | [Apple Speech](#apple-speech) recognizes speech; [Apple Translation](#apple-translation) translates text. Requires Apple silicon, macOS 26+, and the language packs |
 | Use your own recognition endpoint | [Custom recognition](#custom-recognition), with translation configured separately; the service must support the matching realtime speech protocol |
-| Use your xAI account | [xAI Grok](#xai-grok) translates segments after pauses in speech |
+| Use your xAI account | [xAI Grok](#xai-grok) streaming recognition with a selectable Grok text model |
 
 Choose based on the languages you need, your accounts, and your budget. [Text translators](#text-translation) such as DeepL and Index-Translate only process text; they cannot listen to audio by themselves.
 
@@ -194,13 +194,15 @@ This service connects to **Azure OpenAI**, not an Azure Speech resource. A norma
 
 ## xAI Grok
 
-Links: [xAI Console](https://console.x.ai/) · [Official quickstart](https://docs.x.ai/developers/quickstart) · [Voice API](https://docs.x.ai/developers/model-capabilities/audio/speech-to-speech)
+Links: [xAI Console](https://console.x.ai/) · [Official quickstart](https://docs.x.ai/developers/quickstart) · [Streaming STT](https://docs.x.ai/developers/model-capabilities/audio/speech-to-text) · [Grok Voice](https://docs.x.ai/developers/model-capabilities/audio/speech-to-speech)
 
 1. Sign in to xAI Console and select or create a team.
-2. Check the team's API usage, billing settings, and Voice model access, then create an API key.
-3. Add **xAI Grok** in Mimi, enter the **API Key**, and save.
+2. Check the team's API usage, billing settings, and access to streaming speech recognition and the chosen text model, then create an API key.
+3. Add **xAI Grok** in Mimi, keep **Streaming recognition + text translation**, enter the **API Key**, and choose your **Text model**. Save and check recognition and translation separately.
 
-Mimi currently uses `grok-voice-latest` with `grok-transcribe` for original text, providing turn-based speech translation. Enter only the team's xAI API key here. Check allowances and charges in the console and [xAI API pricing](https://docs.x.ai/developers/pricing); a consumer subscription alone does not establish API availability.
+This mode uses xAI's streaming speech recognition (`grok-voice-transcribe-2.0`) and sends confirmed speech segments to the chosen Grok text model. Both stages use this configuration's xAI API key. The default text model is `grok-4.3`; enter an actual Chat Completions model ID available to your team. Original-only captions skip text translation.
+
+Existing configurations retain **Grok Voice**, which translates after speech pauses using `grok-voice-latest`. Change the mode explicitly to use streaming recognition and text translation. Check allowances and charges in the console and [xAI API pricing](https://docs.x.ai/developers/pricing); a consumer subscription alone does not establish API availability.
 
 <a id="apple-speech"></a>
 
@@ -350,7 +352,7 @@ This table describes the desktop app's default and optional request paths. Model
 | Baidu Translate | Realtime speech translation at `/ws/realtime_speech_trans` | Built-in service endpoint; the request does not specify a public model ID |
 | OpenAI Realtime | Translation: `gpt-realtime-translate`; original transcription: `gpt-realtime-whisper` | Fixed built-in models using the dedicated Realtime translation endpoint |
 | Azure OpenAI | Translation: your deployment of `gpt-realtime-translate`; original text: your compatible realtime transcription deployment | Enter both actual deployment names; Mimi does not choose the transcription model for you |
-| xAI Grok | Voice: `grok-voice-latest`; original transcription: `grok-transcribe` | Fixed built-in models; turn-based translation |
+| xAI Grok | Streaming recognition: `grok-voice-transcribe-2.0`; text: `grok-4.3` by default, editable | Same xAI key for both stages; legacy Grok Voice remains available |
 | Apple Speech | macOS `SpeechTranscriber` with downloaded language packs; text translation is configured separately | Select a local language pack; there is no cloud model ID |
 | Custom DashScope / OpenAI Realtime recognition | Recognition uses the model ID you enter; text translation is configured separately | Enter the endpoint, model, and recognition key yourself |
 

@@ -57,7 +57,8 @@ internal class ServiceProfileRepository(private val disk: ProfilePersistence) {
             }
             return ProfileContents(ServiceConfiguration(entry.profile.provider, credentials,
                 speech.getString("endpoint"), speech.getString("model"), speech.optString("alibabaRealtimeMode", "asrMt"),
-                speech.optString("alibabaWorkspaceId")),
+                speech.optString("alibabaWorkspaceId"), speech.optString("xaiSpeechMode", "voice"),
+                speech.optString("xaiTextModel", "grok-4.3")),
                 TextTranslationProvider.fromStorageId(entry.details.getString("selectedTranslation")), translations,
                 entry.details.getString("qwenMtModel"))
         } catch (_: Exception) {
@@ -126,7 +127,8 @@ internal class ServiceProfileRepository(private val disk: ProfilePersistence) {
         if (!disk.writeSecret(revision, secrets) || disk.readSecret(revision) != secrets) return null
         val speech = contents.speech
         val details = JSONObject().put("speech", JSONObject().put("endpoint", speech.endpoint).put("model", speech.model)
-            .put("alibabaRealtimeMode", speech.alibabaRealtimeMode).put("alibabaWorkspaceId", speech.alibabaWorkspaceId))
+            .put("alibabaRealtimeMode", speech.alibabaRealtimeMode).put("alibabaWorkspaceId", speech.alibabaWorkspaceId)
+            .put("xaiSpeechMode", speech.xaiSpeechMode).put("xaiTextModel", speech.xaiTextModel))
             .put("selectedTranslation", contents.selectedTranslation.storageId).put("qwenMtModel", contents.qwenMtModel)
             .put("translations", JSONObject().apply { contents.translations.forEach { (provider, value) ->
                 put(provider.storageId, JSONObject().put("endpoint", value.endpoint).put("model", value.model).put("localHttp", value.allowLocalHttp))

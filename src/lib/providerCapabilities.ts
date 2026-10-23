@@ -28,6 +28,7 @@ const ALIBABA_TRANSLATION_SOURCES: readonly SourceLanguage[] = [
 ];
 export const OPENAI_TRANSLATION_TARGETS = languageCatalogs.openAIRealtime.targetLanguages as readonly TargetLanguage[];
 export const GEMINI_TRANSLATION_TARGETS = languageCatalogs.googleGeminiLive.targetLanguages as readonly TargetLanguage[];
+export const XAI_STT_RECOGNITION_SOURCES = languageCatalogs.xAIStt.sourceLanguages as readonly SourceLanguage[];
 export const XAI_RECOGNITION_SOURCES = languageCatalogs.xAIRealtime.sourceLanguages as readonly SourceLanguage[];
 const ALIBABA_TARGETS: readonly TargetLanguage[] = ["original", ...QWEN_MT_LITE_TRANSLATION_LANGUAGE_CODES];
 const CUSTOM_CONFIGURABLE_TARGETS: readonly TargetLanguage[] = ["original", ...TARGET_LANGUAGE_CODES];
@@ -128,6 +129,10 @@ export function usesAlibabaRealtime(profile: ServiceProfile): boolean {
   return profile.provider === "alibabaCloud" && profile.alibabaRealtimeMode === "liveTranslate";
 }
 
+export function usesXaiAsr(profile: ServiceProfile): boolean {
+  return profile.provider === "xAIRealtime" && profile.xaiSpeechMode === "asrMt";
+}
+
 export function textTranslationForProfile(profile: ServiceProfile): TextTranslation {
   if (usesAlibabaRealtime(profile)) return "followService";
   return profile.textTranslation ?? (profile.provider === "deepLX" ? "deepLX" : "followService");
@@ -167,6 +172,7 @@ export function capabilitiesForProfile(
   profile: ServiceProfile,
   targetLanguage: TargetLanguage = "zh",
 ): ProviderCapabilities {
+  if (usesXaiAsr(profile)) return { sourceLanguages: XAI_STT_RECOGNITION_SOURCES, targetLanguages: CUSTOM_CONFIGURABLE_TARGETS, translationModes: ["turbo"] };
   if (usesAlibabaRealtime(profile)) return { sourceLanguages: ["auto"], targetLanguages: ["original", ...languageCatalogs.alibabaRealtime.targetLanguages as TargetLanguage[]], translationModes: ["turbo"] };
   if (textTranslationForProfile(profile) === "apple" && (isStandaloneAsrProvider(profile.provider) || ["alibabaCloud", "deepLX"].includes(profile.provider))) {
     // Only the native runtime can certify Apple's catalog. An unavailable or
@@ -226,6 +232,7 @@ function capabilitiesForSettings(
     native.provider === profile.provider &&
     native.textTranslation === textTranslationForProfile(profile) &&
     native.targetLanguage === target &&
+    (profile.provider !== "xAIRealtime" || (native.xaiSpeechMode ?? "voice") === (profile.xaiSpeechMode ?? "voice")) &&
     (profile.provider !== "alibabaCloud" || textTranslationForProfile(profile) !== "followService" || (native.qwenMtModel ?? "lite") === (profile.qwenMtModel ?? "lite")) &&
     Array.isArray(native.sourceLanguages) && (profile.provider === "appleSpeech" || appleTranslation || native.sourceLanguages.length > 0) &&
     Array.isArray(native.targetLanguages) && native.targetLanguages.length > 0 &&

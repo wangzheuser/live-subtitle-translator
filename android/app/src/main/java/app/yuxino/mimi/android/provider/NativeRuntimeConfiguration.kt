@@ -8,12 +8,12 @@ internal object NativeRuntimeConfiguration {
     @JvmStatic external fun exchangeRaw(request: String): String
     @JvmStatic external fun pcmRaw(handle: Long, pcm: ByteArray): Boolean
     fun exchange(request: JSONObject): JSONObject = JSONObject(exchangeRaw(request.toString()))
-    fun capabilities(provider: String, route: String, target: String, alibabaRealtimeMode: String = "asrMt"): JSONObject = exchange(
+    fun capabilities(provider: String, route: String, target: String, alibabaRealtimeMode: String = "asrMt", xaiSpeechMode: String = "voice"): JSONObject = exchange(
         JSONObject().put("operation", "capabilities").put("provider", provider).put("route", route).put("target", target)
-            .put("alibabaRealtimeMode", wireMode(provider, alibabaRealtimeMode)))
-    fun normalize(provider: String, route: String, source: String, target: String, alibabaRealtimeMode: String = "asrMt"): JSONObject = exchange(
+            .put("alibabaRealtimeMode", wireMode(provider, alibabaRealtimeMode)).put("xaiSpeechMode", xaiSpeechMode))
+    fun normalize(provider: String, route: String, source: String, target: String, alibabaRealtimeMode: String = "asrMt", xaiSpeechMode: String = "voice"): JSONObject = exchange(
         JSONObject().put("operation", "normalize").put("provider", provider).put("route", route).put("source", source).put("target", target)
-            .put("alibabaRealtimeMode", wireMode(provider, alibabaRealtimeMode)))
+            .put("alibabaRealtimeMode", wireMode(provider, alibabaRealtimeMode)).put("xaiSpeechMode", xaiSpeechMode))
     private fun wireMode(provider: String, mode: String): String =
         if (provider == "alibabaCloud" && mode == "liveTranslate") "liveTranslate" else "disabled"
     fun endpoints(configuration: JSONObject): JSONObject = exchange(

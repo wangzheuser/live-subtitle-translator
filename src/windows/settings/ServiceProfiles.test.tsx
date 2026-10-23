@@ -2320,3 +2320,51 @@ it("keeps first-time setup available after failed creation and restores the chos
   expect(host.querySelector(".service-detail")).toBeNull();
   expect(host.querySelector(".provider-picker__heading button.settings-link")).toBeNull();
 });
+
+it("preserves legacy xAI Voice until mode is explicitly changed, then exposes its saved text model", async () => {
+  const xai: ServiceProfile = { id: "xai", name: "xAI", provider: "xAIRealtime", credentialState: "present" };
+  const snapshot = { ...settings, profiles: [xai], activeProfileId: xai.id };
+  actions.updateProfile.mockResolvedValue({ ...snapshot, profiles: [{ ...xai, xaiSpeechMode: "asrMt", xaiTextModel: "grok-4.3" }] });
+  await render(snapshot);
+  expect(host.querySelector('.xai-speech-settings [role="combobox"]')?.textContent).toBe("Grok Voice");
+  expect(host.querySelector('#profile-xai-model-xai')).toBeNull();
+  expect(host.querySelectorAll('.connection-check button')).toHaveLength(1);
+  await act(async () => host.querySelector<HTMLButtonElement>('.xai-speech-settings [role="combobox"]')!.click());
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(node => node.textContent === "Streaming recognition + text translation")!.click());
+  expect(actions.updateProfile).toHaveBeenCalledExactlyOnceWith(xai.id, undefined, { xaiSpeechMode: "asrMt" });
+  await render({ ...snapshot, profiles: [{ ...xai, xaiSpeechMode: "asrMt", xaiTextModel: "grok-4.3" }] });
+  expect(host.querySelector<HTMLInputElement>('#profile-xai-model-xai')?.value).toBe("grok-4.3");
+  expect(host.querySelectorAll('.connection-check button')).toHaveLength(2);
+  expect(host.querySelectorAll('.service-proxies .network-proxy-form')).toHaveLength(2);
+});
+
+it("checks xAI recognition and text independently with the same unsaved key", async () => {
+  const xai: ServiceProfile = { id: "xai", name: "xAI", provider: "xAIRealtime", credentialState: "present", xaiSpeechMode: "asrMt", xaiTextModel: "custom-text-model" };
+  vi.mocked(testProfileConnection).mockResolvedValue({ credential: "present", service: "available", reason: null, elapsedMs: 90 });
+  await render({ ...settings, profiles: [xai], activeProfileId: xai.id });
+  await change('#profile-api-key-xai-apiKey', "synthetic-unsaved-xai-key");
+  await click(I18N.settings.checkSpeechRecognition);
+  expect(testProfileConnection).toHaveBeenLastCalledWith(xai.id, "speech", { kind: "apiKey", apiKey: "synthetic-unsaved-xai-key" });
+  await click(I18N.settings.checkTextTranslation);
+  expect(testProfileConnection).toHaveBeenLastCalledWith(xai.id, "text", { kind: "apiKey", apiKey: "synthetic-unsaved-xai-key" });
+  expect(actions.saveProfileCredentials).not.toHaveBeenCalled();
+});
+
+it("retains a rejected xAI text model draft and retries only that metadata field", async () => {
+  vi.useFakeTimers();
+  const xai: ServiceProfile = { id: "xai", name: "xAI", provider: "xAIRealtime", credentialState: "present", xaiSpeechMode: "asrMt", xaiTextModel: "grok-4.3" };
+  const snapshot = { ...settings, profiles: [xai], activeProfileId: xai.id };
+  actions.updateProfile.mockRejectedValueOnce(new Error("profile-write-failed")).mockResolvedValue({ ...snapshot, profiles: [{ ...xai, xaiTextModel: "custom-text-model" }] });
+  await render(snapshot);
+  await change('#profile-xai-model-xai', "");
+  await act(async () => vi.advanceTimersByTimeAsync(350));
+  expect(actions.updateProfile).not.toHaveBeenCalled();
+  expect(host.querySelector('.xai-speech-settings [role="alert"]')?.textContent).toBe(I18N.settings.openAICompatibleModelInvalid);
+  await change('#profile-xai-model-xai', "custom-text-model");
+  await act(async () => vi.advanceTimersByTimeAsync(350));
+  expect(host.querySelector<HTMLInputElement>('#profile-xai-model-xai')?.value).toBe("custom-text-model");
+  expect(host.querySelector('.xai-speech-settings [role="alert"]')).not.toBeNull();
+  await click(I18N.settings.retryUpdate);
+  expect(actions.updateProfile).toHaveBeenLastCalledWith(xai.id, undefined, { xaiTextModel: "custom-text-model" });
+  expect(actions.saveProfileCredentials).not.toHaveBeenCalled();
+});

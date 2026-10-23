@@ -5,6 +5,7 @@ use super::audio3_client::{Audio3ASRClient, Audio3ASRClientError};
 use super::custom_speech_client::{CustomSpeechClient, CustomSpeechClientError};
 use super::provider_events::ProviderEventSender;
 use super::provider_network::{ProviderNetwork, ProviderNetworkError};
+use super::xai_stt_client::{XaiSttClient, XaiSttClientError};
 use crate::core::models::SourceLanguage;
 use crate::core::pending_pcm::PendingPcmGate;
 use crate::core::provider::ProviderKind;
@@ -19,6 +20,8 @@ pub enum RecognitionClientError {
     Alibaba(#[from] Audio3ASRClientError),
     #[error("{0}")]
     Custom(#[from] CustomSpeechClientError),
+    #[error("{0}")]
+    Xai(#[from] XaiSttClientError),
 }
 
 impl RecognitionClientError {
@@ -26,7 +29,8 @@ impl RecognitionClientError {
         matches!(
             self,
             Self::Custom(CustomSpeechClientError::AuthenticationFailed)
-        ) || matches!(self, Self::Alibaba(Audio3ASRClientError::Task(label)) if label.contains(".authentication."))
+        ) || matches!(self, Self::Xai(XaiSttClientError::AuthenticationFailed))
+            || matches!(self, Self::Alibaba(Audio3ASRClientError::Task(label)) if label.contains(".authentication."))
     }
 
     pub fn is_timeout(&self) -> bool {
@@ -35,13 +39,15 @@ impl RecognitionClientError {
         }
         matches!(
             self,
-            Self::Custom(
-                CustomSpeechClientError::SetupTimeout | CustomSpeechClientError::HealthTimeout
-            ) | Self::Alibaba(
-                Audio3ASRClientError::ConnectionTimedOut
-                    | Audio3ASRClientError::TaskSetupTimedOut
-                    | Audio3ASRClientError::HealthCheckTimedOut
-            )
+            Self::Xai(XaiSttClientError::SetupTimeout | XaiSttClientError::HealthTimeout)
+                | Self::Custom(
+                    CustomSpeechClientError::SetupTimeout | CustomSpeechClientError::HealthTimeout
+                )
+                | Self::Alibaba(
+                    Audio3ASRClientError::ConnectionTimedOut
+                        | Audio3ASRClientError::TaskSetupTimedOut
+                        | Audio3ASRClientError::HealthCheckTimedOut
+                )
         ) || matches!(self, Self::Alibaba(Audio3ASRClientError::Task(label)) if label.contains(".timeout."))
     }
 
@@ -52,19 +58,23 @@ impl RecognitionClientError {
         }
         matches!(
             self,
-            Self::Custom(
-                CustomSpeechClientError::InvalidEndpoint | CustomSpeechClientError::InvalidModel
-            ) | Self::Alibaba(
-                Audio3ASRClientError::InvalidCustomEndpoint
-                    | Audio3ASRClientError::InvalidCustomModel
-            )
+            Self::Xai(XaiSttClientError::UnsupportedLanguage)
+                | Self::Custom(
+                    CustomSpeechClientError::InvalidEndpoint
+                        | CustomSpeechClientError::InvalidModel
+                )
+                | Self::Alibaba(
+                    Audio3ASRClientError::InvalidCustomEndpoint
+                        | Audio3ASRClientError::InvalidCustomModel
+                )
         )
     }
 
     pub fn is_missing_credentials(&self) -> bool {
         matches!(
             self,
-            Self::Custom(CustomSpeechClientError::MissingAPIKey)
+            Self::Xai(XaiSttClientError::MissingAPIKey)
+                | Self::Custom(CustomSpeechClientError::MissingAPIKey)
                 | Self::Alibaba(Audio3ASRClientError::MissingAPIKey)
         )
     }
@@ -72,9 +82,10 @@ impl RecognitionClientError {
     pub fn is_unreachable(&self) -> bool {
         matches!(
             self,
-            Self::Custom(
-                CustomSpeechClientError::Unreachable | CustomSpeechClientError::NotConnected
-            )
+            Self::Xai(XaiSttClientError::Unreachable | XaiSttClientError::NotConnected)
+                | Self::Custom(
+                    CustomSpeechClientError::Unreachable | CustomSpeechClientError::NotConnected
+                )
         ) || matches!(self, Self::Alibaba(error) if error.is_unreachable())
     }
 }
@@ -84,6 +95,7 @@ pub enum RecognitionClient {
     Apple(AppleSpeechClient),
     Audio3(Audio3ASRClient),
     OpenAI(CustomSpeechClient),
+    Xai(XaiSttClient),
 }
 
 impl RecognitionClient {
@@ -92,6 +104,7 @@ impl RecognitionClient {
             Self::Apple(_) => None,
             Self::Audio3(client) => Some(client.network_endpoint()),
             Self::OpenAI(client) => Some(client.network_endpoint()),
+            Self::Xai(client) => Some(client.network_endpoint()),
         }
     }
 
@@ -127,6 +140,10 @@ impl RecognitionClient {
         Ok(Self::Audio3(Audio3ASRClient::new(api_key, source)?))
     }
 
+    pub fn xai(api_key: &str, source: SourceLanguage) -> Result<Self, RecognitionClientError> {
+        Ok(Self::Xai(XaiSttClient::new(api_key, source)?))
+    }
+
     pub fn custom(
         provider: ProviderKind,
         endpoint: &str,
@@ -150,6 +167,7 @@ impl RecognitionClient {
             Self::Apple(_) => Ok(()),
             Self::Audio3(client) => client.set_network(network),
             Self::OpenAI(client) => client.set_network(network),
+            Self::Xai(client) => client.set_network(network),
         }
     }
 
@@ -158,6 +176,7 @@ impl RecognitionClient {
             Self::Apple(_) => {}
             Self::Audio3(client) => client.set_audio_pending_gate(gate),
             Self::OpenAI(client) => client.set_audio_pending_gate(gate),
+            Self::Xai(client) => client.set_audio_pending_gate(gate),
         }
     }
 
@@ -166,6 +185,7 @@ impl RecognitionClient {
             Self::Apple(client) => client.set_event_sender(events),
             Self::Audio3(client) => client.set_event_sender(events).await,
             Self::OpenAI(client) => client.set_event_sender(events).await,
+            Self::Xai(client) => client.set_event_sender(events).await,
         }
     }
 
@@ -174,6 +194,7 @@ impl RecognitionClient {
             Self::Apple(client) => client.connect().await,
             Self::Audio3(client) => client.connect(task_id).await.map_err(Into::into),
             Self::OpenAI(client) => client.connect(task_id).await.map_err(Into::into),
+            Self::Xai(client) => client.connect(task_id).await.map_err(Into::into),
         }
     }
 
@@ -182,6 +203,7 @@ impl RecognitionClient {
             Self::Apple(client) => client.connect().await,
             Self::Audio3(client) => client.connect_for_probe(task_id).await.map_err(Into::into),
             Self::OpenAI(client) => client.connect_for_probe(task_id).await.map_err(Into::into),
+            Self::Xai(client) => client.connect_for_probe(task_id).await.map_err(Into::into),
         }
     }
 
@@ -190,6 +212,7 @@ impl RecognitionClient {
             Self::Apple(client) => client.send_audio(pcm).await,
             Self::Audio3(client) => client.send_audio(pcm).await.map_err(Into::into),
             Self::OpenAI(client) => client.send_audio(pcm).await.map_err(Into::into),
+            Self::Xai(client) => client.send_audio(pcm).await.map_err(Into::into),
         }
     }
 
@@ -198,6 +221,7 @@ impl RecognitionClient {
             Self::Apple(client) => client.ping(),
             Self::Audio3(client) => client.ping(timeout).await.map_err(Into::into),
             Self::OpenAI(client) => client.ping(timeout).await.map_err(Into::into),
+            Self::Xai(client) => client.ping(timeout).await.map_err(Into::into),
         }
     }
 
@@ -206,6 +230,7 @@ impl RecognitionClient {
             Self::Apple(client) => client.finish(timeout).await,
             Self::Audio3(client) => client.finish(timeout).await,
             Self::OpenAI(client) => client.finish(timeout).await,
+            Self::Xai(client) => client.finish(timeout).await,
         }
     }
 
@@ -214,6 +239,7 @@ impl RecognitionClient {
             Self::Apple(client) => client.disconnect().await,
             Self::Audio3(client) => client.disconnect().await,
             Self::OpenAI(client) => client.disconnect().await,
+            Self::Xai(client) => client.disconnect().await,
         }
     }
 
@@ -222,6 +248,7 @@ impl RecognitionClient {
             Self::Apple(client) => client.clear_content(),
             Self::Audio3(client) => client.clear_content().await,
             Self::OpenAI(client) => client.clear_content().await,
+            Self::Xai(client) => client.clear_content().await,
         }
     }
 
@@ -230,6 +257,7 @@ impl RecognitionClient {
             Self::Apple(client) => client.content_revision(),
             Self::Audio3(client) => client.content_revision(),
             Self::OpenAI(client) => client.content_revision(),
+            Self::Xai(client) => client.content_revision(),
         }
     }
 }

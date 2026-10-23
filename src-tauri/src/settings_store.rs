@@ -1378,6 +1378,7 @@ impl SettingsStore {
         )
     }
 
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub fn update_profile_options_with_realtime(
         &self,
@@ -1393,8 +1394,43 @@ impl SettingsStore {
         alibaba_realtime_mode: Option<crate::core::provider::AlibabaRealtimeMode>,
         alibaba_workspace_id: Option<&str>,
     ) -> Result<ServiceProfile, String> {
+        self.update_profile_options_with_xai(
+            profile_id,
+            name,
+            speech_network_proxy,
+            text_network_proxy,
+            text_translation_name,
+            speech_recognition_name,
+            custom_speech_languages_patch,
+            language_preset_patch,
+            qwen_mt_model,
+            alibaba_realtime_mode,
+            alibaba_workspace_id,
+            None,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_profile_options_with_xai(
+        &self,
+        profile_id: &str,
+        name: Option<&str>,
+        speech_network_proxy: Option<ProxyConfig>,
+        text_network_proxy: Option<ProxyConfig>,
+        text_translation_name: Option<TextTranslationName>,
+        speech_recognition_name: Option<&str>,
+        custom_speech_languages_patch: Option<CustomSpeechLanguagesPatch>,
+        language_preset_patch: Option<crate::core::provider::ProfileLanguagePresetPatch>,
+        qwen_mt_model: Option<crate::core::protocols::qwen_mt::QwenMTModel>,
+        alibaba_realtime_mode: Option<crate::core::provider::AlibabaRealtimeMode>,
+        alibaba_workspace_id: Option<&str>,
+        xai_speech_mode: Option<crate::core::provider::XAISpeechMode>,
+        xai_text_model: Option<&str>,
+    ) -> Result<ServiceProfile, String> {
         let normalize_profile = (custom_speech_languages_patch.is_some()
-            || alibaba_realtime_mode.is_some())
+            || alibaba_realtime_mode.is_some()
+            || xai_speech_mode.is_some())
         .then_some(profile_id);
         self.mutate_catalog_with_normalization(normalize_profile, |catalog| {
             let current = catalog
@@ -1418,6 +1454,17 @@ impl SettingsStore {
                 }
                 updated
                     .set_alibaba_realtime(mode, workspace)
+                    .map_err(|error| error.to_string())?;
+            }
+            if xai_speech_mode.is_some() || xai_text_model.is_some() {
+                if current.provider != ProviderKind::XAIRealtime {
+                    return Err("provider-mismatch".into());
+                }
+                updated
+                    .set_xai_speech(
+                        xai_speech_mode.unwrap_or(current.xai_speech_mode),
+                        xai_text_model.unwrap_or(&current.xai_text_model),
+                    )
                     .map_err(|error| error.to_string())?;
             }
             if let Some(model) = qwen_mt_model {
@@ -2829,12 +2876,17 @@ impl SettingsStore {
             }
         };
         let prefs = self.preferences();
-        let target_language = if speech_only && profile.provider.supports_text_translation() {
+        let target_language = if speech_only
+            && (profile.provider.supports_text_translation()
+                || (profile.provider == ProviderKind::XAIRealtime
+                    && profile.xai_speech_mode == crate::core::provider::XAISpeechMode::AsrMt))
+        {
             TargetLanguage::Original
         } else {
             prefs.target_language
         };
         let capabilities = if provider.is_custom_speech()
+            || provider == ProviderKind::XAIRealtime
             || profile.alibaba_realtime_mode != crate::core::provider::AlibabaRealtimeMode::Disabled
         {
             profile.capabilities(TargetLanguage::Original)
@@ -2854,6 +2906,7 @@ impl SettingsStore {
             normalized.translation_mode,
         )
         .with_alibaba_realtime(profile.alibaba_realtime_mode, &profile.alibaba_workspace_id)
+        .with_xai_speech(profile.xai_speech_mode, &profile.xai_text_model)
         .with_network_proxy(
             profile
                 .speech_network_proxy
@@ -2874,6 +2927,12 @@ impl SettingsStore {
         use crate::core::configuration::TextTranslationProbeCredentials;
         use crate::core::credentials::ProviderCredentialsError as Error;
 
+        if profile.provider == ProviderKind::XAIRealtime
+            && profile.xai_speech_mode == crate::core::provider::XAISpeechMode::AsrMt
+        {
+            let speech = self.configuration_for_speech_draft_probe(profile, draft, true)?;
+            return self.xai_text_probe(profile, &speech.credentials);
+        }
         if !profile.provider.supports_text_translation() {
             return Err(Error::ProviderMismatch.to_string());
         }
@@ -3039,6 +3098,14 @@ impl SettingsStore {
             .map_err(|error| error.to_string());
         }
         self.retry_profile_credential_errors(profile, true, false);
+        if profile.provider == ProviderKind::XAIRealtime
+            && profile.xai_speech_mode == crate::core::provider::XAISpeechMode::AsrMt
+        {
+            let credentials = self
+                .credentials_for_profile(profile)?
+                .ok_or("custom_speech_credentials_missing")?;
+            return self.configuration_for_speech_draft_probe(profile, &credentials, true);
+        }
         if !profile.provider.supports_text_translation() {
             return self.configuration_for_profile_probe(profile);
         }
@@ -3060,6 +3127,7 @@ impl SettingsStore {
         };
         let prefs = self.preferences();
         let capabilities = if provider.is_custom_speech()
+            || provider == ProviderKind::XAIRealtime
             || profile.alibaba_realtime_mode != crate::core::provider::AlibabaRealtimeMode::Disabled
         {
             profile.capabilities(TargetLanguage::Original)
@@ -3079,6 +3147,7 @@ impl SettingsStore {
             normalized.translation_mode,
         )
         .with_alibaba_realtime(profile.alibaba_realtime_mode, &profile.alibaba_workspace_id)
+        .with_xai_speech(profile.xai_speech_mode, &profile.xai_text_model)
         .with_network_proxy(
             profile
                 .speech_network_proxy
@@ -3096,6 +3165,14 @@ impl SettingsStore {
         profile: &ServiceProfile,
     ) -> Result<crate::core::configuration::TextTranslationProbeConfiguration, String> {
         use crate::core::configuration::TextTranslationProbeCredentials;
+        if profile.provider == ProviderKind::XAIRealtime
+            && profile.xai_speech_mode == crate::core::provider::XAISpeechMode::AsrMt
+        {
+            let credentials = self
+                .credentials_for_profile(profile)?
+                .ok_or("text_translation_credentials_missing")?;
+            return self.xai_text_probe(profile, &credentials);
+        }
         if !profile.provider.supports_text_translation()
             || (profile.provider.is_standalone_asr()
                 && profile.text_translation() == TextTranslation::FollowService)
@@ -3145,6 +3222,34 @@ impl SettingsStore {
             TextTranslationProbeCredentials::Independent(credentials)
         };
         self.text_probe_with_credentials(profile, credentials)
+    }
+
+    fn xai_text_probe(
+        &self,
+        profile: &ServiceProfile,
+        credentials: &ProviderCredentials,
+    ) -> Result<crate::core::configuration::TextTranslationProbeConfiguration, String> {
+        let prefs = self.preferences();
+        LiveTranslationConfiguration::with_credentials(
+            profile.provider,
+            credentials.clone(),
+            prefs.source_language,
+            prefs.target_language,
+            prefs.translation_mode,
+        )
+        .with_xai_speech(profile.xai_speech_mode, &profile.xai_text_model)
+        .with_stage_network_proxies(
+            profile
+                .speech_network_proxy
+                .clone()
+                .unwrap_or_else(|| prefs.network_proxy.clone()),
+            profile
+                .text_network_proxy
+                .clone()
+                .unwrap_or(prefs.network_proxy),
+        )
+        .xai_text_probe_configuration()
+        .map_err(|error| error.to_string())
     }
 
     fn text_probe_with_credentials(
@@ -3277,6 +3382,7 @@ impl SettingsStore {
         )
         .with_qwen_mt_model(profile.qwen_mt_model)
         .with_alibaba_realtime(profile.alibaba_realtime_mode, &profile.alibaba_workspace_id)
+        .with_xai_speech(profile.xai_speech_mode, &profile.xai_text_model)
         .with_stage_network_proxies(
             profile
                 .speech_network_proxy
@@ -3895,6 +4001,186 @@ mod read_only_manual_probe_tests {
 
 #[cfg(test)]
 mod tests {
+    fn save_xai_options(
+        store: &SettingsStore,
+        id: &str,
+        mode: Option<crate::core::provider::XAISpeechMode>,
+        model: Option<&str>,
+    ) -> Result<ServiceProfile, String> {
+        store.update_profile_options_with_xai(
+            id, None, None, None, None, None, None, None, None, None, None, mode, model,
+        )
+    }
+
+    #[test]
+    fn xai_modes_and_text_model_persist_without_changing_the_shared_key() {
+        use crate::core::provider::XAISpeechMode;
+        let directory = tempfile::tempdir().unwrap();
+        let fake = FakeSecretStore::default();
+        let store = fresh_store(directory.path(), &fake);
+        let profile = store
+            .create_profile_for_setup(ProviderKind::XAIRealtime, "xAI")
+            .unwrap();
+        assert_eq!(profile.xai_speech_mode, XAISpeechMode::AsrMt);
+        assert_eq!(
+            profile.xai_text_model,
+            crate::core::provider::DEFAULT_XAI_TEXT_MODEL
+        );
+        store
+            .save_api_key(&profile.id, "synthetic-xai-key")
+            .unwrap();
+        store.select_profile(&profile.id).unwrap();
+        let key_before = fake.value(PROFILE_KEYCHAIN_SERVICE, &credential_account(&profile));
+        store
+            .save_preferences(|prefs| prefs.target_language = TargetLanguage::Original)
+            .unwrap();
+        let voice = save_xai_options(
+            &store,
+            &profile.id,
+            Some(XAISpeechMode::Voice),
+            Some(" custom-xai-model "),
+        )
+        .unwrap();
+        assert_eq!(voice.xai_text_model, "custom-xai-model");
+        assert_ne!(
+            store.preferences().target_language,
+            TargetLanguage::Original
+        );
+        assert!(!store.configuration().unwrap().uses_xai_asr());
+        let streaming =
+            save_xai_options(&store, &profile.id, Some(XAISpeechMode::AsrMt), None).unwrap();
+        store
+            .save_preferences(|prefs| prefs.target_language = TargetLanguage::Original)
+            .unwrap();
+        let configuration = store.configuration().unwrap();
+        assert!(configuration.uses_xai_asr());
+        assert_eq!(configuration.target_language, TargetLanguage::Original);
+        assert_eq!(configuration.xai_text_model, "custom-xai-model");
+        assert_eq!(
+            store
+                .configuration_for_speech_probe(&streaming)
+                .unwrap()
+                .target_language,
+            TargetLanguage::Original
+        );
+        assert_eq!(
+            fake.value(PROFILE_KEYCHAIN_SERVICE, &credential_account(&profile)),
+            key_before
+        );
+        drop(store);
+        let reopened = fresh_store(directory.path(), &fake);
+        let profile = reopened.profile(&profile.id).unwrap();
+        assert_eq!(profile.xai_speech_mode, XAISpeechMode::AsrMt);
+        assert_eq!(profile.xai_text_model, "custom-xai-model");
+        assert!(reopened.configuration().unwrap().uses_xai_asr());
+    }
+
+    #[test]
+    fn xai_checks_share_one_key_with_independent_stage_proxies_and_drafts_do_not_persist() {
+        use crate::core::configuration::TextTranslationProbeCredentials;
+        use crate::core::network_proxy::ProxyMode;
+        let directory = tempfile::tempdir().unwrap();
+        let fake = FakeSecretStore::default();
+        let store = fresh_store(directory.path(), &fake);
+        let profile = store
+            .create_profile_for_setup(ProviderKind::XAIRealtime, "xAI")
+            .unwrap();
+        let profile = store
+            .update_profile_options_with_xai(
+                &profile.id,
+                None,
+                Some(ProxyConfig {
+                    mode: ProxyMode::Direct,
+                    url: None,
+                }),
+                Some(ProxyConfig {
+                    mode: ProxyMode::Custom,
+                    url: Some("http://127.0.0.1:8080".into()),
+                }),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some("custom-xai-model"),
+            )
+            .unwrap();
+        let catalog_before = std::fs::read(directory.path().join(PROFILE_CATALOG_FILE)).unwrap();
+        let draft = ProviderCredentials::api_key("synthetic-unsaved-xai");
+        let speech = store
+            .configuration_for_speech_draft_probe(&profile, &draft, true)
+            .unwrap();
+        assert!(speech.uses_xai_asr());
+        assert_eq!(speech.target_language, TargetLanguage::Original);
+        assert_eq!(speech.network_proxy.mode, ProxyMode::Direct);
+        let text = store
+            .configuration_for_text_draft_probe(&profile, &draft)
+            .unwrap();
+        assert_eq!(text.network_proxy.mode, ProxyMode::Custom);
+        let TextTranslationProbeCredentials::Independent(
+            TextTranslationCredentials::OpenAICompatible {
+                api_key,
+                model,
+                endpoint,
+            },
+        ) = text.credentials
+        else {
+            panic!("xAI text check route");
+        };
+        assert_eq!(api_key, "synthetic-unsaved-xai");
+        assert_eq!(model, "custom-xai-model");
+        assert_eq!(endpoint, crate::core::provider::XAI_TEXT_ENDPOINT);
+        assert_eq!(
+            std::fs::read(directory.path().join(PROFILE_CATALOG_FILE)).unwrap(),
+            catalog_before
+        );
+        assert!(store.credentials_for_profile(&profile).unwrap().is_none());
+        store
+            .save_api_key(&profile.id, "synthetic-saved-xai")
+            .unwrap();
+        let TextTranslationProbeCredentials::Independent(
+            TextTranslationCredentials::OpenAICompatible { api_key, .. },
+        ) = store
+            .configuration_for_text_probe(&profile)
+            .unwrap()
+            .credentials
+        else {
+            panic!("xAI saved text check route");
+        };
+        assert_eq!(api_key, "synthetic-saved-xai");
+    }
+
+    #[test]
+    fn xai_metadata_rejections_do_not_change_catalog_or_credentials() {
+        use crate::core::provider::XAISpeechMode;
+        let directory = tempfile::tempdir().unwrap();
+        let fake = FakeSecretStore::default();
+        let store = fresh_store(directory.path(), &fake);
+        let profile = store
+            .create_profile_for_setup(ProviderKind::XAIRealtime, "xAI")
+            .unwrap();
+        let before = std::fs::read(directory.path().join(PROFILE_CATALOG_FILE)).unwrap();
+        assert!(save_xai_options(&store, &profile.id, None, Some("bad\nmodel")).is_err());
+        assert_eq!(
+            std::fs::read(directory.path().join(PROFILE_CATALOG_FILE)).unwrap(),
+            before
+        );
+        assert!(save_xai_options(
+            &store,
+            DEFAULT_ALIBABA_PROFILE_ID,
+            Some(XAISpeechMode::Voice),
+            None
+        )
+        .is_err());
+        assert_eq!(
+            std::fs::read(directory.path().join(PROFILE_CATALOG_FILE)).unwrap(),
+            before
+        );
+    }
+
     #[test]
     fn new_alibaba_setup_defaults_to_livetranslate_and_survives_restart() {
         use crate::core::provider::AlibabaRealtimeMode;

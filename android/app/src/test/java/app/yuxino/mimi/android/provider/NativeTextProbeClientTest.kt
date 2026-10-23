@@ -52,6 +52,24 @@ class NativeTextProbeClientTest {
         assertEquals(listOf("create_text_probe", "text_probe_poll", "text_probe_cancel"), operations)
     }
 
+    @Test fun speechProbeUsesItsOwnNativeOperationsAndReleasesOnlyItsHandle() {
+        val operations = mutableListOf<String>()
+        val configuration = JSONObject().put("xaiSpeechMode", "asrMt")
+        val client = NativeTextProbeClient(exchange = { request ->
+            val operation = request.getString("operation"); operations += operation
+            when (operation) {
+                "create_speech_probe" -> { assertSame(configuration, request.getJSONObject("configuration")); JSONObject().put("handle", 43) }
+                "speech_probe_poll" -> { assertEquals(43, request.getLong("handle")); JSONObject().put("finished", true).put("result", diagnostic()) }
+                "speech_probe_cancel" -> { assertEquals(43, request.getLong("handle")); JSONObject() }
+                else -> error("unexpected operation")
+            }
+        }, networkSnapshot = { JSONObject() }, executor = Executor { it.run() }, speech = true)
+        val results = mutableListOf<TranslationResult>()
+        client.check(configuration, results::add)
+        assertEquals(listOf(TranslationResult.Success("", 321)), results)
+        assertEquals(listOf("create_speech_probe", "speech_probe_poll", "speech_probe_cancel"), operations)
+    }
+
     @Test fun cancelledQueuedDraftDoesNotCreateAnyNativeProbe() {
         val executor = QueueExecutor()
         val client = NativeTextProbeClient(exchange = { fail("Cancelled draft crossed JNI"); JSONObject() },

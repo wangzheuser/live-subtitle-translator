@@ -1,0 +1,9 @@
+<resources>
+    <string name="xai_mode">Speech and translation</string>
+    <string name="xai_asr_mt">Streaming recognition + text translation</string>
+    <string name="xai_voice">Grok Voice</string>
+    <string name="xai_text_model">Text translation model</string>
+    <string name="xai_help">Streaming recognition sends recognized text to your chosen Grok text model. Both stages use this xAI API key. Grok Voice translates after pauses in speech.</string>
+    <string name="xai_check_speech">Check recognition</string>
+    <string name="xai_model_invalid">Enter a text model ID, up to 256 bytes, without control characters.</string>
+</resources>

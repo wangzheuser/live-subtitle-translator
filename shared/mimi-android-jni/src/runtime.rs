@@ -20,7 +20,9 @@ use mimi_runtime::{
             live_translate::LiveTranslateServerEvent,
             volcano_engine::{VolcanoEngineEndpoint, VolcanoEngineServerEvent},
         },
-        provider::{AlibabaRealtimeMode, ProviderKind, ProviderPreferences, TextTranslation},
+        provider::{
+            AlibabaRealtimeMode, ProviderKind, ProviderPreferences, TextTranslation, XAISpeechMode,
+        },
         recovery::{
             advance_lifecycle_sequence_if_current, provider_error_is_retryable,
             provider_recovery_minimum_delay, MTBudgetContinuity, MTBudgetScope, RecoverySchedule,
@@ -599,6 +601,13 @@ struct TextProbeInput {
 fn text_probe_configuration(
     value: &Value,
 ) -> Result<mimi_runtime::core::configuration::TextTranslationProbeConfiguration, &'static str> {
+    if let Some(configuration) = value.get("sessionConfiguration") {
+        let configuration: LiveTranslationConfiguration =
+            serde_json::from_value(configuration.clone()).map_err(|_| "invalid_configuration")?;
+        return configuration
+            .xai_text_probe_configuration()
+            .map_err(|_| "invalid_configuration");
+    }
     let input: TextProbeInput =
         serde_json::from_value(value.clone()).map_err(|_| "invalid_configuration")?;
     Ok(
@@ -726,6 +735,24 @@ pub fn exchange(request: &str) -> Result<String, &'static str> {
                 "sessionFinishTimeoutMs":mimi_runtime::core::health::SESSION_FINISH_TIMEOUT.as_millis() as u64})
         }
         "volcano_decode" => volcano_decode(&value)?,
+        "xai_streaming_transcripts" => {
+            let frames = value["frames"]
+                .as_array()
+                .filter(|frames| frames.len() <= 256)
+                .ok_or("native_runtime_invalid_request")?;
+            let mut assembler =
+                mimi_runtime::core::protocols::xai_stt::TranscriptAssembler::default();
+            let mut outputs = Vec::with_capacity(frames.len());
+            for frame in frames {
+                let event = mimi_runtime::core::protocols::xai_stt::decode(&frame.to_string())
+                    .map_err(|_| "native_runtime_invalid_request")?;
+                let output = assembler
+                    .apply(event)
+                    .map_err(|_| "native_runtime_invalid_request")?;
+                outputs.push(output.map(|output| json!({"sequence":output.sequence,"text":output.text,"isFinal":output.is_final})));
+            }
+            json!({"outputs":outputs})
+        }
         "preview_content_changed" => json!(preview_content_changed(&value)?),
         "preview_candidate" => {
             let minimum = value["minimumCharacters"]
@@ -753,8 +780,27 @@ pub fn exchange(request: &str) -> Result<String, &'static str> {
                 .map_err(|_| "invalid_configuration")?;
             json!({"textEndpoint":endpoint})
         }
-        "create_text_probe" => {
-            let configuration = text_probe_configuration(&value["configuration"])?;
+        "create_text_probe" | "create_speech_probe" => {
+            let speech = value["operation"] == "create_speech_probe";
+            let speech_configuration = if speech {
+                let configuration: LiveTranslationConfiguration =
+                    serde_json::from_value(value["configuration"].clone())
+                        .map_err(|_| "invalid_configuration")?;
+                let configuration = configuration
+                    .validated()
+                    .map_err(|_| "invalid_configuration")?;
+                if !configuration.uses_xai_asr() {
+                    return Err("invalid_configuration");
+                }
+                Some(configuration)
+            } else {
+                None
+            };
+            let configuration = if speech {
+                None
+            } else {
+                Some(text_probe_configuration(&value["configuration"])?)
+            };
             let networks: Networks = serde_json::from_value(value["network"].clone())
                 .map_err(|_| "native_network_invalid")?;
             let roots = networks
@@ -762,7 +808,10 @@ pub fn exchange(request: &str) -> Result<String, &'static str> {
                 .iter()
                 .map(|root| STANDARD.decode(root).map_err(|_| "native_network_invalid"))
                 .collect::<Result<Vec<_>, _>>()?;
-            let network = ProviderNetwork::resolve(&networks.text_proxy)
+            let speech_network = ProviderNetwork::resolve(&networks.speech_proxy)
+                .and_then(|network| network.with_trust_roots(roots.clone()))
+                .map_err(|_| "native_network_invalid")?;
+            let text_network = ProviderNetwork::resolve(&networks.text_proxy)
                 .and_then(|network| network.with_trust_roots(roots))
                 .map_err(|_| "native_network_invalid")?;
             let mut registry = probes().lock().map_err(|_| "native_runtime_failed")?;
@@ -777,18 +826,27 @@ pub fn exchange(request: &str) -> Result<String, &'static str> {
             });
             let worker = probe.clone();
             *probe.task.lock().unwrap() = Some(executor().spawn(async move {
-                let result =
-                    mimi_runtime::clients::connection_diagnostics::check_text_service_with_network(
+                let result = if let Some(configuration) = speech_configuration {
+                    mimi_runtime::clients::connection_diagnostics::check_xai_speech_with_network(
                         &configuration,
-                        network,
+                        false,
+                        speech_network,
+                        text_network,
                     )
-                    .await;
+                    .await
+                } else {
+                    mimi_runtime::clients::connection_diagnostics::check_text_service_with_network(
+                        &configuration.expect("text probe configuration"),
+                        text_network,
+                    )
+                    .await
+                };
                 *worker.result.lock().unwrap() = Some(result);
             }));
             registry.insert(id, probe);
             json!({"handle":id})
         }
-        "text_probe_poll" => {
+        "text_probe_poll" | "speech_probe_poll" => {
             let id = value["handle"]
                 .as_u64()
                 .ok_or("native_runtime_invalid_request")?;
@@ -797,7 +855,7 @@ pub fn exchange(request: &str) -> Result<String, &'static str> {
             let result = probe.result.lock().unwrap();
             json!({"finished":result.is_some(),"result":*result})
         }
-        "text_probe_cancel" => {
+        "text_probe_cancel" | "speech_probe_cancel" => {
             let id = value["handle"]
                 .as_u64()
                 .ok_or("native_runtime_invalid_request")?;
@@ -834,9 +892,21 @@ pub fn exchange(request: &str) -> Result<String, &'static str> {
             if mode != AlibabaRealtimeMode::Disabled && provider != ProviderKind::AlibabaCloud {
                 return Err("invalid_configuration");
             }
+            let xai_mode: XAISpeechMode = value
+                .get("xaiSpeechMode")
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|_| "invalid_configuration")?
+                .unwrap_or_default();
+            if xai_mode != XAISpeechMode::Voice && provider != ProviderKind::XAIRealtime {
+                return Err("invalid_configuration");
+            }
             let capabilities_for_target = |target| {
                 if mode != AlibabaRealtimeMode::Disabled {
                     mode.capabilities()
+                } else if provider == ProviderKind::XAIRealtime {
+                    xai_mode.capabilities()
                 } else {
                     provider.capabilities_for_route(route, target)
                 }

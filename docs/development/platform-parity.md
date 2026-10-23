@@ -16,6 +16,15 @@ regressions; production capture and the text connection-check button use Rust.
 `shared/translation-contracts.json` and `shared/realtime-display-contracts.json`
 provide common synthetic wire and display cases.
 
+## xAI recognition and text translation
+
+Desktop and Android expose the same xAI speech mode and editable Grok text model.
+New profiles use xAI streaming STT plus the existing bounded text pipeline;
+profiles saved without a mode retain Grok Voice. Both xAI stages intentionally
+use that profile's xAI key, with separate proxy snapshots and connection checks.
+Original-only captions skip the text request. This does not enable arbitrary
+text-service replacement for the integrated Grok Voice route.
+
 ## Native audio target differences
 
 | Platform | Selected system-audio target | Identity |

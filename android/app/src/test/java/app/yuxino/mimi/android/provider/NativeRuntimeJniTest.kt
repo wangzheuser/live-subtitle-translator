@@ -26,6 +26,71 @@ import kotlin.concurrent.thread
 
 /** Actual JNI checks use synthetic credentials; live transport fixtures stay on loopback. */
 class NativeRuntimeJniTest {
+    @Test fun xaiStreamingTranscriptContractsUseTheSharedAssemblerAcrossActualJni() {
+        val cases = JSONObject(requireNotNull(javaClass.getResourceAsStream("/translation-contracts.json"))
+            .bufferedReader().use { it.readText() }).getJSONArray("xaiStreamingTranscripts")
+        for (index in 0 until cases.length()) {
+            val case = cases.getJSONObject(index)
+            val outputs = NativeRuntimeConfiguration.exchange(JSONObject().put("operation", "xai_streaming_transcripts")
+                .put("frames", case.getJSONArray("frames"))).getJSONArray("outputs")
+            val expected = case.getJSONArray("expectedOutputs")
+            assertEquals(case.getString("id"), expected.length(), outputs.length())
+            for (frame in 0 until expected.length()) {
+                assertEquals(case.getString("id"), expected.isNull(frame), outputs.isNull(frame))
+                if (!expected.isNull(frame)) {
+                    val wanted = expected.getJSONObject(frame); val actual = outputs.getJSONObject(frame)
+                    assertEquals(case.getString("id"), wanted.getLong("sequence"), actual.getLong("sequence"))
+                    assertEquals(case.getString("id"), wanted.getString("text"), actual.getString("text"))
+                    assertEquals(case.getString("id"), wanted.getBoolean("isFinal"), actual.getBoolean("isFinal"))
+                }
+            }
+        }
+    }
+
+    @Test fun xaiStreamingModeAndLegacyVoiceUseTheirActualSharedFactoriesAcrossJni() {
+        val streaming = configuration(ServiceProvider.XAI).put("xaiSpeechMode", "asrMt")
+            .put("xaiTextModel", "grok-custom-text").put("sourceLanguage", "en")
+        val endpoints = NativeRuntimeConfiguration.endpoints(streaming)
+        assertEquals("wss://api.x.ai/v1/stt", endpoints.getString("speechEndpoint"))
+        assertEquals("https://api.x.ai/v1/chat/completions", endpoints.getString("textEndpoint"))
+        val models = endpoints.getJSONArray("modelNames")
+        assertEquals(listOf("grok-voice-transcribe-2.0", "grok-custom-text"), (0 until models.length()).map(models::getString))
+        assertFalse(endpoints.toString().contains("synthetic-apiKey"))
+        val handle = create(streaming)
+        try { assertEquals("connecting", NativeRuntimeConfiguration.poll(handle).getString("connectionStatus")) }
+        finally { NativeRuntimeConfiguration.command("stop", handle) }
+
+        val original = JSONObject(streaming.toString()).put("targetLanguage", "original")
+        assertTrue(NativeRuntimeConfiguration.endpoints(original).isNull("textEndpoint"))
+        val textProbe = NativeRuntimeConfiguration.exchange(JSONObject().put("operation", "text_probe_endpoint")
+            .put("configuration", JSONObject().put("sessionConfiguration", original)))
+        assertEquals("https://api.x.ai/v1/chat/completions", textProbe.getString("textEndpoint"))
+        assertFalse(textProbe.has("speechEndpoint"))
+
+        val legacy = configuration(ServiceProvider.XAI).apply { remove("xaiSpeechMode"); remove("xaiTextModel") }
+        val voice = NativeRuntimeConfiguration.endpoints(legacy)
+        assertEquals("wss://api.x.ai/v1/realtime", voice.getString("speechEndpoint"))
+        assertTrue(voice.isNull("textEndpoint"))
+        assertTrue(voice.getJSONArray("modelNames").toString().contains("grok-voice-latest"))
+    }
+
+    @Test fun xaiModeCapabilitiesAndNormalizationStayInTheSharedCatalogAcrossJni() {
+        val voice = NativeRuntimeConfiguration.capabilities("xAIRealtime", "followService", "zh")
+        assertEquals(24_000, voice.getInt("sampleRateHz"))
+        val streaming = NativeRuntimeConfiguration.capabilities("xAIRealtime", "followService", "zh", xaiSpeechMode = "asrMt")
+        assertEquals(16_000, streaming.getInt("sampleRateHz"))
+        val targets = streaming.getJSONArray("targetLanguages")
+        assertTrue((0 until targets.length()).map(targets::getString).contains("original"))
+        assertTrue(streaming.getJSONArray("sourceLanguages").toString().contains("auto"))
+        assertEquals("original", NativeRuntimeConfiguration.normalize("xAIRealtime", "followService", "en", "original",
+            xaiSpeechMode = "asrMt").getString("targetLanguage"))
+        for (invalid in listOf("", "unknown")) {
+            assertThrows(IllegalArgumentException::class.java) {
+                NativeRuntimeConfiguration.capabilities("xAIRealtime", "followService", "zh", xaiSpeechMode = invalid)
+            }
+        }
+    }
+
     @Test fun qwenCompletionContractsPreventPartialConfirmationsAcrossActualJni() {
         val cases = JSONObject(requireNotNull(javaClass.getResourceAsStream("/translation-contracts.json"))
             .bufferedReader().use { it.readText() }).getJSONArray("qwenCompletionResponses")

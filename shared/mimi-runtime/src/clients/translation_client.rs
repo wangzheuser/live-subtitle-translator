@@ -197,6 +197,11 @@ impl TranslationClient {
                 .map_err(TranslationClientError::AzureOpenAI);
             }
             ProviderKind::XAIRealtime => {
+                if configuration.uses_xai_asr() {
+                    return HighQualityTranslationClient::new_xai(configuration, events)
+                        .map(Self::HighQuality)
+                        .map_err(TranslationClientError::MT);
+                }
                 return XAIRealtimeClient::new(
                     direct_api_key(&credentials)?,
                     configuration.target_language,

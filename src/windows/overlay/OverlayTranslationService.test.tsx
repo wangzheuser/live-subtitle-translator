@@ -85,3 +85,9 @@ it.each(["customDashScopeASR", "customOpenAIASR"] as const)(
     expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(`Speech recognition: ${speechRecognitionName}`);
   },
 );
+
+it("keeps one xAI provider badge for recognition and translation using the same service", async () => {
+  await render({ provider: "xAIRealtime", textTranslation: "followService", xaiSpeechMode: "asrMt", xaiTextModel: "grok-4.3" });
+  expect(host.querySelectorAll('.overlay-service__stage')).toHaveLength(1);
+  expect(host.querySelector('[data-stage="combined"] [data-provider="xAIRealtime"]')).not.toBeNull();
+});

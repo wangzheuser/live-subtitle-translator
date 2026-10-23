@@ -146,9 +146,14 @@ captured PCM; it must not request microphone access for a system-only session.
 
 Translation resources are separate from SpeechTranscriber resources. A global
 installed-language result does not establish that the current translation session
-is ready. The installed-only bridge awaits session readiness and forbids downloads;
-only the explicit settings preparation action opens Apple's confirmation UI.
-Leaving that UI before preparing must keep the pair unready and allow retry.
+is ready. Before reporting missing resources, the installed-only bridge can make
+one preparation attempt on the same session and recheck readiness. It must verify
+`canRequestDownloads == false` first, keep cancellation active across each await,
+and preserve service errors instead of relabeling them as missing assets. Only
+the explicit settings preparation action opens Apple's confirmation UI. Leaving
+that UI before preparing must keep the pair unready and allow retry. Do not infer
+that application updates revoke authorization from a report that this button
+restores translation; verify a signed same-identity restart/update separately.
 
 Treat language aliases and scripts at the owning adapter boundary. A Simplified
 Chinese selection must not fall back to a Traditional Chinese recognition locale

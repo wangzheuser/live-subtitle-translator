@@ -4550,3 +4550,33 @@
   review harness and closed its page/server; kept canonical build caches and
   review evidence. Next check: signed native Retry/layout acceptance when
   foreground testing will not interrupt the user.
+
+## 2026-10-23 — Apple installed-only readiness recovery
+
+- Source: `c38877bb` plus this entry's commit. The user reports that Apple
+  translation can require the settings preparation action again after an update.
+  Source inspection confirmed immediate rejection of an initially unready native
+  session and a separate probe session discarded before actual translation.
+  This does not establish that an update removed resources or authorization.
+- Status and translation now use the same installed-only readiness routine:
+  require no download capability, try one preparation when initially unready,
+  and recheck readiness. Translation retains that exact session. Missing assets
+  still need explicit settings preparation; cancellation, unknown availability
+  and other native errors remain distinct and the existing deadlines stay intact.
+- An injected cold-session regression failed against the previous readiness
+  behavior, then passed with recovery. Native tests cover installed/supported
+  inventory, ready fast paths, persistent missing resources, `notInstalled`,
+  generic errors, forbidden downloads and cancellation before/during/after work.
+  Native lifetime, readiness and weak-link checks passed without model queries.
+- Final `./scripts/check.sh` passed: strict compile/lint checks, 667 desktop,
+  106 core, 843 runtime, 24 JNI-adapter and 2,676 frontend tests, plus production
+  frontend build and script safety checks. The first sandboxed attempt stopped
+  at the local test-server permission boundary; the permitted background run
+  passed. Independent source review found no further actionable issue.
+- No installed app, signing identity, permission, language pack, playback or
+  audio capture was changed. The existing production process remained running.
+  There was no UI change or additional screenshot claim. This is synthetic
+  native-boundary and automated build evidence; the user's same-identity
+  restart/update case remains unverified while foreground testing would interrupt
+  video viewing. Next check: repeat that exact update/start case without pressing
+  Prepare, then compare readiness and translation timing before and after.

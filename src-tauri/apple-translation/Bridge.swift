@@ -122,8 +122,15 @@ private final class TranslationRequests: @unchecked Sendable {
     }
 }
 
+private protocol InstalledTranslationSession: Sendable {
+    var canRequestDownloads: Bool { get }
+    func isReady() async -> Bool
+    func prepare() async throws
+    func cancel()
+}
+
 @available(macOS 26.0, *)
-private final class TranslationSessionHandle: @unchecked Sendable {
+private final class TranslationSessionHandle: InstalledTranslationSession, @unchecked Sendable {
     // Translation's SDK class predates Sendable annotations. Each handle owns
     // exactly one operation; the only concurrent access is the framework's
     // explicit cancel operation. No second translation shares this session.
@@ -136,6 +143,51 @@ private final class TranslationSessionHandle: @unchecked Sendable {
         try await session.translate(text)
     }
     func prepare() async throws { try await session.prepareTranslation() }
+}
+
+@available(macOS 26.0, *)
+private func installedTranslationStatus(
+    _ availability: LanguageAvailability.Status,
+    session: any InstalledTranslationSession,
+    checkCancellation: @Sendable () throws -> Void
+) async throws -> LanguageAvailability.Status {
+    try Task.checkCancellation()
+    try checkCancellation()
+    guard !session.canRequestDownloads else { throw TranslationBridgeError.failed }
+    switch availability {
+    case .unsupported: return .unsupported
+    case .installed, .supported: break
+    @unknown default: throw TranslationBridgeError.failed
+    }
+    return try await withTaskCancellationHandler {
+        try Task.checkCancellation()
+        try checkCancellation()
+        let ready = await session.isReady()
+        try Task.checkCancellation()
+        try checkCancellation()
+        if ready { return .installed }
+        // Give an initially unready session one initialization attempt before
+        // reporting missing resources. It cannot request downloads or display
+        // consent UI; Rust retains the request's existing deadline.
+        do {
+            try await session.prepare()
+        } catch {
+            try Task.checkCancellation()
+            try checkCancellation()
+            switch error {
+            case TranslationError.notInstalled: return .supported
+            default: throw error
+            }
+        }
+        try Task.checkCancellation()
+        try checkCancellation()
+        let prepared = await session.isReady()
+        try Task.checkCancellation()
+        try checkCancellation()
+        return prepared ? .installed : .supported
+    } onCancel: {
+        session.cancel()
+    }
 }
 
 @available(macOS 26.0, *)
@@ -237,20 +289,13 @@ private final class TranslationWork {
         }
     }
 
-    nonisolated private func status(_ source: Locale.Language, _ target: Locale.Language) async -> LanguageAvailability.Status {
+    nonisolated private func status(_ source: Locale.Language, _ target: Locale.Language, request: TranslationRequest) async throws -> LanguageAvailability.Status {
         let availability = await LanguageAvailability().status(from: source, to: target)
-        guard availability == .installed else { return availability }
-        // The global inventory can report installed while an installed-only
-        // session still rejects translation. Check session readiness too, so
-        // settings offers preparation when the pair still needs approval or
-        // resources instead of promising that it is already usable.
+        try request.checkCancellation()
+        guard availability != .unsupported else { return .unsupported }
         let session = TranslationSessionHandle(TranslationSession(installedSource: source, target: target))
         defer { session.cancel() }
-        return await withTaskCancellationHandler {
-            await session.isReady() ? .installed : .supported
-        } onCancel: {
-            session.cancel()
-        }
+        return try await installedTranslationStatus(availability, session: session) { try request.checkCancellation() }
     }
 
     nonisolated private func supportedLanguageIDs() async -> [String] {
@@ -276,7 +321,7 @@ private final class TranslationWork {
                 request.send(["event": "capabilities", "available": !languages.isEmpty, "languages": languages])
             case let .status(source, target):
                 let (source, target) = pair(source, target)
-                let value = await status(source, target)
+                let value = try await status(source, target, request: request)
                 try request.checkCancellation()
                 let name: String
                 switch value {
@@ -288,7 +333,7 @@ private final class TranslationWork {
                 request.send(["event": "status", "status": name])
             case let .prepare(source, target, uiLanguage):
                 let (source, target) = pair(source, target)
-                switch await status(source, target) {
+                switch try await status(source, target, request: request) {
                 case .installed: break
                 case .supported:
                     try request.checkCancellation()
@@ -297,23 +342,23 @@ private final class TranslationWork {
                 @unknown default: throw TranslationBridgeError.failed
                 }
                 try request.checkCancellation()
-                guard await status(source, target) == .installed else { throw TranslationBridgeError.assetsMissing }
+                guard try await status(source, target, request: request) == .installed else { throw TranslationBridgeError.assetsMissing }
                 request.send(["event": "prepared"])
             case let .translate(source, target, text):
                 let (source, target) = pair(source, target)
-                switch await status(source, target) {
+                let availability = await LanguageAvailability().status(from: source, to: target)
+                try request.checkCancellation()
+                guard availability != .unsupported else { throw TranslationBridgeError.unsupportedLanguage }
+                // One installed-only session owns both readiness and the
+                // translation, so cancelling a probe cannot retire its state.
+                let session = TranslationSessionHandle(TranslationSession(installedSource: source, target: target))
+                sessions[request.identifier] = session
+                switch try await installedTranslationStatus(availability, session: session, checkCancellation: { try request.checkCancellation() }) {
                 case .installed: break
                 case .supported: throw TranslationBridgeError.assetsMissing
                 case .unsupported: throw TranslationBridgeError.unsupportedLanguage
                 @unknown default: throw TranslationBridgeError.failed
                 }
-                try request.checkCancellation()
-                // This initializer cannot request downloads, even if resources
-                // are removed between the readiness check and translation.
-                let session = TranslationSessionHandle(TranslationSession(installedSource: source, target: target))
-                sessions[request.identifier] = session
-                guard !session.canRequestDownloads else { throw TranslationBridgeError.failed }
-                guard await session.isReady() else { throw TranslationBridgeError.assetsMissing }
                 try request.checkCancellation()
                 let result = try await session.translate(text)
                 try request.checkCancellation()
@@ -360,7 +405,7 @@ private final class TranslationWork {
             try request.checkCancellation()
             try await handle.prepare()
             try request.checkCancellation()
-            guard await status(source, target) == .installed else { throw TranslationBridgeError.assetsMissing }
+            guard try await status(source, target, request: request) == .installed else { throw TranslationBridgeError.assetsMissing }
             completePreparation(request.identifier, result: .success(()))
         } catch {
             completePreparation(request.identifier, result: .failure(error))
@@ -470,6 +515,139 @@ private let testCallback: MimiTranslationCallback = { _, bytes, length in
     guard let bytes else { return 0 }
     TestCallbacks.shared.append(Data(bytes: bytes, count: length))
     return 1
+}
+
+private final class TestInstalledTranslationSession: InstalledTranslationSession, @unchecked Sendable {
+    let canRequestDownloads: Bool
+    private let lock = NSLock()
+    private var readiness: [Bool]
+    private var operations: [String] = []
+    private let prepareError: (any Error)?
+    private let onReady: @Sendable (Int) -> Void
+    private let onPrepare: @Sendable () -> Void
+
+    init(_ readiness: [Bool], canRequestDownloads: Bool = false, prepareError: (any Error)? = nil,
+         onReady: @escaping @Sendable (Int) -> Void = { _ in }, onPrepare: @escaping @Sendable () -> Void = {}) {
+        self.readiness = readiness
+        self.canRequestDownloads = canRequestDownloads
+        self.prepareError = prepareError
+        self.onReady = onReady
+        self.onPrepare = onPrepare
+    }
+
+    var calls: [String] { lock.withLock { operations } }
+    func isReady() async -> Bool {
+        let (ready, check) = lock.withLock {
+            operations.append("ready")
+            return (readiness.isEmpty ? false : readiness.removeFirst(), operations.filter { $0 == "ready" }.count)
+        }
+        onReady(check)
+        return ready
+    }
+    func prepare() async throws {
+        lock.withLock { operations.append("prepare") }
+        onPrepare()
+        if let prepareError { throw prepareError }
+    }
+    func cancel() { lock.withLock { operations.append("cancel") } }
+}
+
+private final class TestTranslationCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    func cancel() { lock.withLock { cancelled = true } }
+    func check() throws {
+        if lock.withLock({ cancelled }) { throw TranslationBridgeError.cancelled }
+    }
+}
+
+private enum TestTranslationFailure: Error { case serviceUnavailable }
+
+@available(macOS 26.0, *)
+@MainActor
+func runTranslationReadinessTests() async throws {
+    // A cold installed-only session may need initialization even when global
+    // inventory has not caught up after launch. Neither path can show UI.
+    for availability in [LanguageAvailability.Status.installed, .supported] {
+        let cold = TestInstalledTranslationSession([false, true])
+        let status = try await installedTranslationStatus(availability, session: cold, checkCancellation: {})
+        precondition(status == .installed, "Cold installed sessions must recover without settings preparation")
+        precondition(cold.calls == ["ready", "prepare", "ready"])
+
+        let ready = TestInstalledTranslationSession([true])
+        let readyStatus = try await installedTranslationStatus(availability, session: ready, checkCancellation: {})
+        precondition(readyStatus == .installed)
+        precondition(ready.calls == ["ready"], "Ready sessions must not prepare again")
+    }
+
+    let missing = TestInstalledTranslationSession([false, false])
+    let missingStatus = try await installedTranslationStatus(.installed, session: missing, checkCancellation: {})
+    precondition(missingStatus == .supported)
+    precondition(missing.calls == ["ready", "prepare", "ready"], "Preparation must have a single bounded attempt")
+
+    let removed = TestInstalledTranslationSession([false], prepareError: TranslationError.notInstalled)
+    let removedStatus = try await installedTranslationStatus(.supported, session: removed, checkCancellation: {})
+    precondition(removedStatus == .supported)
+    precondition(removed.calls == ["ready", "prepare"])
+
+    let failed = TestInstalledTranslationSession([false], prepareError: TestTranslationFailure.serviceUnavailable)
+    do {
+        _ = try await installedTranslationStatus(.installed, session: failed, checkCancellation: {})
+        preconditionFailure("Service failures must not be reported as missing assets")
+    } catch TestTranslationFailure.serviceUnavailable {}
+    precondition(failed.calls == ["ready", "prepare"])
+
+    let unsupported = TestInstalledTranslationSession([true])
+    let unsupportedStatus = try await installedTranslationStatus(.unsupported, session: unsupported, checkCancellation: {})
+    precondition(unsupportedStatus == .unsupported && unsupported.calls.isEmpty)
+
+    let downloading = TestInstalledTranslationSession([true], canRequestDownloads: true)
+    do {
+        _ = try await installedTranslationStatus(.installed, session: downloading, checkCancellation: {})
+        preconditionFailure("Automatic recovery must reject sessions that can request downloads")
+    } catch TranslationBridgeError.failed {}
+    precondition(downloading.calls.isEmpty)
+
+    let cancelled = TestTranslationCancellation()
+    cancelled.cancel()
+    let unused = TestInstalledTranslationSession([true])
+    do {
+        _ = try await installedTranslationStatus(.installed, session: unused, checkCancellation: { try cancelled.check() })
+        preconditionFailure("Cancelled requests must not begin native work")
+    } catch TranslationBridgeError.cancelled {}
+    precondition(unused.calls.isEmpty)
+
+    for cancelDuringPrepare in [false, true] {
+        let cancellation = TestTranslationCancellation()
+        let interrupted = TestInstalledTranslationSession([false, true],
+            onReady: { _ in if !cancelDuringPrepare { cancellation.cancel() } },
+            onPrepare: { if cancelDuringPrepare { cancellation.cancel() } })
+        do {
+            _ = try await installedTranslationStatus(.installed, session: interrupted, checkCancellation: { try cancellation.check() })
+            preconditionFailure("Cancellation must be rechecked after every native await")
+        } catch TranslationBridgeError.cancelled {}
+        precondition(interrupted.calls == (cancelDuringPrepare ? ["ready", "prepare"] : ["ready"]))
+    }
+
+    let finalCancellation = TestTranslationCancellation()
+    let finalCheck = TestInstalledTranslationSession([false, true], onReady: { check in
+        if check == 2 { finalCancellation.cancel() }
+    })
+    do {
+        _ = try await installedTranslationStatus(.installed, session: finalCheck, checkCancellation: { try finalCancellation.check() })
+        preconditionFailure("A cancelled final readiness check must not publish installation")
+    } catch TranslationBridgeError.cancelled {}
+    precondition(finalCheck.calls == ["ready", "prepare", "ready"])
+
+    let taskCancelled = TestInstalledTranslationSession([false], onReady: { _ in
+        withUnsafeCurrentTask { task in task?.cancel() }
+    })
+    let task = Task { try await installedTranslationStatus(.installed, session: taskCancelled, checkCancellation: {}) }
+    do {
+        _ = try await task.value
+        preconditionFailure("Task cancellation must stop preparation and cancel its native session")
+    } catch is CancellationError {}
+    precondition(taskCancelled.calls == ["ready", "cancel"])
 }
 
 // These tests exercise the native lifetime boundary without initializing a

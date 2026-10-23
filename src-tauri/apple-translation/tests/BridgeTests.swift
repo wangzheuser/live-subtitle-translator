@@ -57,9 +57,13 @@ private struct BridgeTests {
     static func main() async throws {
         try runTranslationBridgeInvariantTests()
         print("native_invariants=passed")
+        if #available(macOS 26.0, *) {
+            try await runTranslationReadinessTests()
+            print("native_readiness=passed")
+        }
         guard CommandLine.arguments.contains("--probe-installed") else { return }
-        // Opt-in synthetic proof only. No preparation call is reachable from
-        // this executable, so unsupported/uninstalled pairs cannot download.
+        // Opt-in synthetic proof only. No interactive or download-capable
+        // preparation is reachable, so uninstalled pairs cannot download.
         let capabilities = try await reply { mimiAppleTranslationQuery($0, probeCallback) }
         print("capabilities_event=\(capabilities.event) available=\(capabilities.available ?? false) languages=\(capabilities.languages?.count ?? 0)")
         guard capabilities.available == true else { return }

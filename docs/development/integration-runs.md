@@ -4789,3 +4789,28 @@
   credentials were preserved. No real provider request, capture or recording
   occurred. Live xAI latency/quality, full in-place updates and physical
   Windows/Linux/Android acceptance remain pending.
+- [PR #315](https://github.com/yuxino/Mimi/pull/315) merged as `cc0cd1e8`;
+  its tree matches tested `07956eb6`. Both PR checks passed. Tag
+  [desktop/release CI](https://github.com/yuxino/Mimi/actions/runs/40066687480)
+  and [Android CI](https://github.com/yuxino/Mimi/actions/runs/40066687420)
+  passed, including macOS dual-architecture revalidation, Windows installation
+  and portable UI smoke, Linux packages, signed Android APK, ARM64 native UI
+  smoke and final release staging.
+- [v1.6.9](https://github.com/yuxino/Mimi/releases/tag/v1.6.9) is public Latest.
+  Complete draft downloads passed all 17 API sizes/digests, 16 checksum entries,
+  five independent updater signatures and an actual tampered-archive rejection.
+  The four macOS downloads match the locally prepared files. APK identity,
+  version, pinned signer, four shared ABIs and 16 KB alignment passed. Source,
+  release and updater bilingual notes match.
+- Anonymous reads of all 17 public assets returned HTTP 200 with matching
+  sizes/digests. Tag-specific, canonical Latest and the exact configured lowercase
+  updater URL returned identical v1.6.9 bytes. Ego Lite visibly confirmed Latest,
+  the exact source, both languages, all uploaded download links and the native
+  Contributors avatar for the reporter's suggestion. Its task space was closed.
+- [The reporter was invited to test](https://github.com/yuxino/Mimi/issues/313#issuecomment-6380650017)
+  with the mode, independent text-service and model instructions. Issue #313
+  remains open for real xAI feedback; the provider/device/update limitations
+  above remain unchanged. Both merged task branches were retired after checking
+  latest main, open PRs and active worktrees. Inspected duplicate/obsolete build
+  entries reclaimed about 1 GiB; current canonical build dependencies and
+  installed apps were preserved. Necessary evidence is retained outside Git.

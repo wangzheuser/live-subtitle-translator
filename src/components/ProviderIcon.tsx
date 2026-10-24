@@ -26,6 +26,7 @@ const PROVIDER_ASSETS: Record<Exclude<IconProvider, "openAICompatible" | "chatMo
   tencentCloud,
   baiduTranslate,
   xAIRealtime: xAI,
+  xAI,
   deepL,
   deepLX,
   appleSpeech: apple,

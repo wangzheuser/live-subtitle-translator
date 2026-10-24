@@ -91,6 +91,7 @@ object SettingsStore {
             val legacy = LegacyServiceProfiles.read(get(context).all)
             check(repository.migrate(legacy.profiles, legacy.activeId)) { "profile_migration_failed" }
         }
+        check(repository.migrateXaiAsrTranslations()) { "profile_migration_failed" }
         // Retry retirement after an interrupted migration. The catalog is already durable.
         val old = get(context)
         val keys = old.all.keys.filter(LegacyServiceProfiles::ownsKey)
@@ -112,10 +113,10 @@ object SettingsStore {
     fun profileConfiguration(context: Context, id: String): app.yuxino.mimi.android.provider.ServiceConfiguration =
         repository(context).contents(id).speech
     fun profileTextTranslationProvider(context: Context, id: String): TextTranslationProvider =
-        repository(context).contents(id).selectedTranslation
+        repository(context).contents(id).withIndependentXaiTranslation().selectedTranslation
     fun profileQwenMtModel(context: Context, id: String): String = repository(context).contents(id).qwenMtModel
     fun profileTranslationConfiguration(context: Context, id: String, provider: TextTranslationProvider? = null): TranslationConfiguration {
-        val contents = repository(context).contents(id)
+        val contents = repository(context).contents(id).withIndependentXaiTranslation()
         val selected = provider ?: contents.selectedTranslation
         return contents.translations[selected] ?: TranslationConfiguration(provider = selected)
     }
@@ -137,15 +138,19 @@ object SettingsStore {
             require(config.alibabaRealtimeMode in listOf("asrMt", "liveTranslate")) { "speech_mode" }
             require(config.xaiSpeechMode in listOf("voice", "asrMt")) { "speech_mode" }
             val repository = repository(context)
-            val prior = id?.let(repository::contents)
+            val savedPrior = id?.let(repository::contents)
+            val prior = if (config.provider == app.yuxino.mimi.android.provider.ServiceProvider.XAI && config.usesIndependentTextTranslation)
+                savedPrior?.withIndependentXaiTranslation() else savedPrior
             val selected = if (translationEnabled == false) TextTranslationProvider.BUILTIN else translation?.provider
-                ?: prior?.selectedTranslation ?: TextTranslationProvider.BUILTIN
+                ?: prior?.selectedTranslation ?: if (config.provider == app.yuxino.mimi.android.provider.ServiceProvider.XAI && config.usesIndependentTextTranslation)
+                    TextTranslationProvider.XAI else TextTranslationProvider.BUILTIN
             if (config.usesIndependentTextTranslation && translation != null && selected !in setOf(TextTranslationProvider.BUILTIN, TextTranslationProvider.NONE)) {
                 validateTranslationConfiguration(translation)
             }
             val drafts = prior?.translations.orEmpty().toMutableMap()
             if (translation != null && translation.provider !in setOf(TextTranslationProvider.BUILTIN, TextTranslationProvider.NONE)) drafts[translation.provider] = translation
-            repository.save(id, name, ProfileContents(config, selected, drafts, qwenMtModel ?: prior?.qwenMtModel ?: "lite"), activate)
+            repository.save(id, name, ProfileContents(config, selected, drafts, qwenMtModel ?: prior?.qwenMtModel ?: "lite",
+                prior?.xaiIndependentTranslationMigrated ?: true), activate)
         } catch (_: Exception) { null }
     }
 
@@ -202,12 +207,11 @@ object SettingsStore {
         activeProfileId(context)?.let { profileTextTranslationProvider(context, it) } ?: TextTranslationProvider.BUILTIN
 
     fun translationSelectionLocked(context: Context): Boolean =
-        configuration(context).usesIndependentTextTranslation && textTranslationProvider(context) == TextTranslationProvider.NONE
+        configuration(context).originalOnly(textTranslationProvider(context))
 
     fun originalTextOnly(context: Context): Boolean {
         val speech = configuration(context)
-        return translationSelectionLocked(context) || speech.provider == app.yuxino.mimi.android.provider.ServiceProvider.XAI &&
-            speech.xaiSpeechMode == "asrMt" && targetLang(context) == "original"
+        return translationSelectionLocked(context) || speech.usesIndependentTextTranslation && targetLang(context) == "original"
     }
 
     fun useChatMockTranslation(context: Context): Boolean = textTranslationProvider(context) == TextTranslationProvider.CHAT_MOCK

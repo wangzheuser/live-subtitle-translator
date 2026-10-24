@@ -273,3 +273,32 @@ it("discards read results and cleans native subscriptions that arrive after unmo
   await render();
   expect(input().value).toBe("");
 });
+
+
+it("disables saved-value reveal for an unselected route while allowing a local replacement draft", async () => {
+  await render({ field: "token", textTranslation: "xAI", allowSavedReveal: false });
+  expect(eye().disabled).toBe(true);
+  await clickEye();
+  expect(profileRevealCredential).not.toHaveBeenCalled();
+  expect(input().value).toBe("");
+  expect(input().placeholder).toBe("••••••••");
+  await type("synthetic-local-draft");
+  expect(eye().disabled).toBe(false);
+  await clickEye();
+  expect(input().type).toBe("text");
+  expect(input().value).toBe("synthetic-local-draft");
+  expect(profileRevealCredential).not.toHaveBeenCalled();
+});
+
+it("discards an in-flight reveal when saved-route reveal permission is removed", async () => {
+  let complete!: (value: string | null) => void;
+  vi.mocked(profileRevealCredential).mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+  await render({ field: "token", textTranslation: "xAI" });
+  await clickEye();
+  await render({ field: "token", textTranslation: "xAI", allowSavedReveal: false });
+  await act(async () => complete("synthetic-old-secret"));
+  expect(input().value).toBe("");
+  expect(input().type).toBe("password");
+  expect(eye().disabled).toBe(true);
+  expect(host.textContent).not.toContain("synthetic-old-secret");
+});

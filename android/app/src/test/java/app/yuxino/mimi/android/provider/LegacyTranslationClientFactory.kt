@@ -5,5 +5,5 @@ fun createTranslationClient(config: TranslationConfiguration): TranslationClient
     TextTranslationProvider.CHAT_MOCK, TextTranslationProvider.OPENAI_COMPATIBLE -> OpenAITranslationClient(config)
     TextTranslationProvider.DEEPL -> DeepLTranslationClient(config)
     TextTranslationProvider.DEEPLX -> DeepLXTranslationClient(config)
-    TextTranslationProvider.BUILTIN, TextTranslationProvider.NONE -> throw IllegalArgumentException("translation_provider")
+    TextTranslationProvider.BUILTIN, TextTranslationProvider.NONE, TextTranslationProvider.XAI -> throw IllegalArgumentException("translation_provider")
 }

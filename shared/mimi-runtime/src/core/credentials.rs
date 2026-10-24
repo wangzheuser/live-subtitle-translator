@@ -63,11 +63,13 @@ impl CredentialRevealField {
                     || profile.provider.is_custom_speech()
             }
             Self::AsrApiKey => {
-                profile.provider.supports_text_translation()
-                    && profile.provider != ProviderKind::AppleSpeech
+                matches!(
+                    profile.provider,
+                    ProviderKind::AlibabaCloud | ProviderKind::DeepLX
+                ) || profile.provider.is_custom_speech()
             }
             Self::Token => {
-                profile.provider.supports_text_translation()
+                profile.supports_text_translation_configuration()
                     && !matches!(
                         profile.text_translation(),
                         TextTranslation::FollowService | TextTranslation::Apple
@@ -162,6 +164,11 @@ pub enum ProviderCredentials {
 pub enum TextTranslationCredentials {
     /// Local translation stores no private destination or credential.
     Apple,
+    #[serde(rename = "xAI")]
+    XAI {
+        api_key: String,
+        model: String,
+    },
     DeepL {
         api_key: String,
     },
@@ -201,9 +208,13 @@ impl TextTranslationCredentials {
         token_update: Option<&str>,
         model: &str,
     ) -> Result<Self, ProviderCredentialsError> {
+        if route == TextTranslation::XAI && !endpoint.trim().is_empty() {
+            return Err(ProviderCredentialsError::InvalidField);
+        }
         let saved = saved.filter(|value| value.translation() == route);
         let (old_endpoint, old_model, old_key) = match saved {
             Some(Self::DeepL { api_key }) => ("", "", api_key.as_str()),
+            Some(Self::XAI { api_key, model }) => ("", model.as_str(), api_key.as_str()),
             Some(Self::DeepLX { endpoint, token }) => (endpoint.as_str(), "", token.as_str()),
             Some(
                 Self::OpenAICompatible {
@@ -243,6 +254,10 @@ impl TextTranslationCredentials {
             model
         };
         match route {
+            TextTranslation::XAI => Self::XAI {
+                api_key: key.into(),
+                model: model.into(),
+            },
             TextTranslation::Apple => Self::Apple,
             TextTranslation::DeepL => Self::DeepL {
                 api_key: key.into(),
@@ -270,6 +285,7 @@ impl TextTranslationCredentials {
 
     pub const fn translation(&self) -> TextTranslation {
         match self {
+            Self::XAI { .. } => TextTranslation::XAI,
             Self::Apple => TextTranslation::Apple,
             Self::DeepL { .. } => TextTranslation::DeepL,
             Self::DeepLX { .. } => TextTranslation::DeepLX,
@@ -292,6 +308,11 @@ impl TextTranslationCredentials {
             Ok(value.to_owned())
         };
         match self {
+            Self::XAI { api_key, model } => Ok(Self::XAI {
+                api_key: required(api_key)?,
+                model: crate::core::protocols::openai_compatible::validate_model(model)
+                    .map_err(|_| ProviderCredentialsError::InvalidOpenAICompatibleModel)?,
+            }),
             Self::Apple => Ok(Self::Apple),
             Self::DeepL { api_key } => Ok(Self::DeepL {
                 api_key: required(api_key)?,
@@ -544,28 +565,28 @@ impl ProviderCredentials {
                 app_key
             }
             (Field::Token, Self::DeepL { api_key, .. })
-                if profile.provider.supports_text_translation()
+                if profile.supports_text_translation_configuration()
                     && profile.text_translation() == TextTranslation::DeepL
                     && expected_text_translation == Some(TextTranslation::DeepL) =>
             {
                 api_key
             }
             (Field::Token, Self::DeepLX { token, .. })
-                if profile.provider.supports_text_translation()
+                if profile.supports_text_translation_configuration()
                     && profile.text_translation() == TextTranslation::DeepLX
                     && expected_text_translation == Some(TextTranslation::DeepLX) =>
             {
                 token
             }
             (Field::Token, Self::OpenAICompatible { api_key, .. })
-                if profile.provider.supports_text_translation()
+                if profile.supports_text_translation_configuration()
                     && profile.text_translation() == TextTranslation::OpenAICompatible
                     && expected_text_translation == Some(TextTranslation::OpenAICompatible) =>
             {
                 api_key
             }
             (Field::Token, Self::ChatMock { api_key, .. })
-                if profile.provider.supports_text_translation()
+                if profile.supports_text_translation_configuration()
                     && profile.text_translation() == TextTranslation::ChatMock
                     && expected_text_translation == Some(TextTranslation::ChatMock) =>
             {

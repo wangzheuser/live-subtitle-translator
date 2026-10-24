@@ -80,7 +80,7 @@ class DeepLTranslationProtocolTest {
             assertEquals("", validateTranslationConfiguration(config))
             rejects("translation_provider") { createTranslationClient(config) }
         }
-        assertEquals(setOf("builtin", "none", "chatMock", "openaiCompatible", "deepL", "deepLX"), TextTranslationProvider.entries.map { it.storageId }.toSet())
+        assertEquals(setOf("builtin", "none", "chatMock", "openaiCompatible", "xAI", "deepL", "deepLX"), TextTranslationProvider.entries.map { it.storageId }.toSet())
         assertTrue(createTranslationClient(TranslationConfiguration(provider = TextTranslationProvider.DEEPL)) is DeepLTranslationClient)
         assertTrue(createTranslationClient(TranslationConfiguration(provider = TextTranslationProvider.DEEPLX)) is DeepLXTranslationClient)
         assertTrue(createTranslationClient(TranslationConfiguration()) is OpenAITranslationClient)

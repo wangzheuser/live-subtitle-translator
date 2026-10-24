@@ -58,7 +58,7 @@ internal object LegacyServiceProfiles {
                 if (provider == ServiceProvider.DASHSCOPE) string("alibaba_workspace_id") else "")
             ServiceProfile("legacy-${provider.id}", provider.title, provider) to if (provider == ServiceProvider.DASHSCOPE)
                 ProfileContents(speech, selected, drafts, normalizeQwenMTModel(string("qwen_mt_model_dashscope")))
-                else ProfileContents(speech)
+                else ProfileContents(speech, xaiIndependentTranslationMigrated = provider != ServiceProvider.XAI)
         }
         return Migration(profiles, profiles.firstOrNull { it.first.provider.id == activeProvider }?.first?.id)
     }

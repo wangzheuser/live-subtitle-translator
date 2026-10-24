@@ -537,8 +537,21 @@ it("keeps legacy xAI Voice separate from ASR + text and rejects a stale native m
   expect(languageCatalogs.xAIStt.sourceLanguages).toEqual(["auto", ...Array.from(codes.matchAll(/"([^"]+)"/g), match => match[1])]);
   expect(capabilitiesForProfile(asr).targetLanguages).toEqual(["original", ...TARGET_LANGUAGE_CODES]);
   const settings = { profiles: [asr], activeProfileId: asr.id, sourceLanguage: "auto", targetLanguage: "zh",
-    languageCapabilities: { profileId: asr.id, provider: asr.provider, textTranslation: "followService", targetLanguage: "zh",
+    languageCapabilities: { profileId: asr.id, provider: asr.provider, textTranslation: "xAI", targetLanguage: "zh",
       xaiSpeechMode: "voice", sourceLanguages: ["auto"], targetLanguages: ["en"] } } satisfies Pick<SettingsSnapshot, "profiles" | "activeProfileId" | "sourceLanguage" | "targetLanguage" | "languageCapabilities">;
   expect(targetLanguagesForSettings(settings)).toContain("original");
   expect(targetLanguagesForSettings({ ...settings, languageCapabilities: { ...settings.languageCapabilities, xaiSpeechMode: "asrMt", targetLanguages: ["original", "zh"] } })).toEqual(["original", "zh"]);
+});
+
+
+it("combines xAI recognition with each independent route and makes followService original-only", () => {
+  const profile = { id: "xai", name: "xAI", provider: "xAIRealtime", xaiSpeechMode: "asrMt", credentialState: "missing", speechCredentialState: "present", textCredentialState: "missing" } as const;
+  expect(capabilitiesForProfile({ ...profile, textTranslation: "followService" }).targetLanguages).toEqual(["original"]);
+  expect(capabilitiesForProfile({ ...profile, textTranslation: "deepL" }).targetLanguages).toEqual(["original", ...languageCatalogs.deepL.targetLanguages]);
+  expect(capabilitiesForProfile({ ...profile, textTranslation: "deepL" }).sourceLanguages).toEqual(languageCatalogs.xAIStt.sourceLanguages.filter(code => code === "auto" || (languageCatalogs.deepL.sourceLanguages as readonly string[]).includes(code)));
+  expect(capabilitiesForProfile({ ...profile, textTranslation: "deepL" }, "original").sourceLanguages).toEqual(languageCatalogs.xAIStt.sourceLanguages);
+  expect(capabilitiesForProfile({ ...profile, textTranslation: "xAI" }).targetLanguages).toEqual(["original", ...TARGET_LANGUAGE_CODES]);
+  expect(credentialStateForTarget(profile, "original")).toBe("present");
+  expect(credentialStateForTarget(profile, "zh")).toBe("missing");
+  expect(textTranslationForProfile({ ...profile, xaiSpeechMode: "voice", textTranslation: "deepL" })).toBe("followService");
 });

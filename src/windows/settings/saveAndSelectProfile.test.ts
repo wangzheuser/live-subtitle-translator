@@ -66,3 +66,11 @@ it("saves an unfinished LiveTranslate key without activating or falling back to 
   expect(await saveAndSelectProfile("new", credentials, async () => saved, select)).toBe(saved);
   expect(select).not.toHaveBeenCalled();
 });
+
+
+it("saves each independent xAI stage without activating an incomplete configuration", async () => {
+  const saved = { ...snapshot("old"), targetLanguage: "zh", profiles: [{ id: "new", name: "New", provider: "xAIRealtime", xaiSpeechMode: "asrMt", textTranslation: "xAI", credentialState: "missing", speechCredentialState: "present", textCredentialState: "missing" }] } as SettingsSnapshot;
+  const select = vi.fn();
+  expect(await saveAndSelectProfile("new", credentials, async () => saved, select)).toBe(saved);
+  expect(select).not.toHaveBeenCalled();
+});

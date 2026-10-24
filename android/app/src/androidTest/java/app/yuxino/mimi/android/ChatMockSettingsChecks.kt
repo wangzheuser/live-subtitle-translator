@@ -235,7 +235,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
         val speechKey = field<TextInputEditText>(editor, "credential-apiKey")
         val translationKey = field<TextInputEditText>(editor, "translation-key")
         onUi {
-            check(mode.selectedItemPosition == 0 && mode.count == 6) { "Built-in translation must remain the default among six text choices" }
+            check(mode.selectedItemPosition == 0 && mode.count == 7) { "Built-in translation must remain the default among seven text choices" }
             check((0 until mode.count).map { mode.getItemAtPosition(it).toString() } ==
                 listOf(TextTranslationProvider.BUILTIN, TextTranslationProvider.DEEPL, TextTranslationProvider.DEEPLX,
                     TextTranslationProvider.CHAT_MOCK, TextTranslationProvider.OPENAI_COMPATIBLE, TextTranslationProvider.NONE)

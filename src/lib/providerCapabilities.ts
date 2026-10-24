@@ -134,12 +134,20 @@ export function usesXaiAsr(profile: ServiceProfile): boolean {
 }
 
 export function textTranslationForProfile(profile: ServiceProfile): TextTranslation {
-  if (usesAlibabaRealtime(profile)) return "followService";
-  return profile.textTranslation ?? (profile.provider === "deepLX" ? "deepLX" : "followService");
+  if (usesAlibabaRealtime(profile) || (profile.provider === "xAIRealtime" && !usesXaiAsr(profile))) return "followService";
+  return profile.textTranslation ?? (usesXaiAsr(profile) ? "xAI" : profile.provider === "deepLX" ? "deepLX" : "followService");
 }
 
 export function isChatCompletionsTranslation(translation: TextTranslation): translation is "openAICompatible" | "chatMock" {
   return translation === "openAICompatible" || translation === "chatMock";
+}
+
+export function isLanguageModelTranslation(translation: TextTranslation): translation is "openAICompatible" | "chatMock" | "xAI" {
+  return isChatCompletionsTranslation(translation) || translation === "xAI";
+}
+
+export function isIndependentAsrProfile(profile: ServiceProfile): boolean {
+  return isStandaloneAsrProvider(profile.provider) || usesXaiAsr(profile);
 }
 
 export function isCustomSpeechProvider(provider: ServiceProvider): boolean {
@@ -158,7 +166,7 @@ export function isStandaloneAsrProvider(provider: ServiceProvider): boolean {
 }
 
 export function credentialStateForTarget(profile: ServiceProfile | undefined, target: TargetLanguage): CredentialState {
-  return profile && isStandaloneAsrProvider(profile.provider) && target === "original"
+  return profile && isIndependentAsrProfile(profile) && target === "original"
     ? profile.speechCredentialState ?? profile.credentialState : profile?.credentialState ?? "missing";
 }
 
@@ -172,21 +180,22 @@ export function capabilitiesForProfile(
   profile: ServiceProfile,
   targetLanguage: TargetLanguage = "zh",
 ): ProviderCapabilities {
-  if (usesXaiAsr(profile)) return { sourceLanguages: XAI_STT_RECOGNITION_SOURCES, targetLanguages: CUSTOM_CONFIGURABLE_TARGETS, translationModes: ["turbo"] };
   if (usesAlibabaRealtime(profile)) return { sourceLanguages: ["auto"], targetLanguages: ["original", ...languageCatalogs.alibabaRealtime.targetLanguages as TargetLanguage[]], translationModes: ["turbo"] };
-  if (textTranslationForProfile(profile) === "apple" && (isStandaloneAsrProvider(profile.provider) || ["alibabaCloud", "deepLX"].includes(profile.provider))) {
+  if (textTranslationForProfile(profile) === "apple" && (isIndependentAsrProfile(profile) || ["alibabaCloud", "deepLX"].includes(profile.provider))) {
     // Only the native runtime can certify Apple's catalog. An unavailable or
     // not-yet-loaded catalog must not borrow a cloud provider's language list.
     return {
-      sourceLanguages: targetLanguage === "original" ? declaredCustomSources(profile, profile.provider === "appleSpeech" ? [] : isCustomSpeechProvider(profile.provider) ? CUSTOM_CONFIGURABLE_SOURCES : ALIBABA_RECOGNITION_SOURCES) : [],
+      sourceLanguages: targetLanguage === "original" ? declaredCustomSources(profile, profile.provider === "appleSpeech" ? [] : usesXaiAsr(profile) ? XAI_STT_RECOGNITION_SOURCES : isCustomSpeechProvider(profile.provider) ? CUSTOM_CONFIGURABLE_SOURCES : ALIBABA_RECOGNITION_SOURCES) : [],
       targetLanguages: ["original"],
       translationModes: ["turbo"],
     };
   }
-  if (isStandaloneAsrProvider(profile.provider)) {
-    const capabilities = capabilitiesForProvider(profile.provider);
+  if (isIndependentAsrProfile(profile)) {
+    const capabilities: ProviderCapabilities = usesXaiAsr(profile)
+      ? { sourceLanguages: XAI_STT_RECOGNITION_SOURCES, targetLanguages: ["original"], translationModes: ["turbo"] }
+      : capabilitiesForProvider(profile.provider);
     const route = textTranslationForProfile(profile);
-    const generic = isChatCompletionsTranslation(route);
+    const generic = isLanguageModelTranslation(route);
     return { ...capabilities,
       sourceLanguages: declaredCustomSources(profile, targetLanguage === "original" || route === "followService" || generic || route === "apple" ? capabilities.sourceLanguages : intersectTranslationSources(capabilities.sourceLanguages, route)),
       targetLanguages: route === "followService" ? capabilities.targetLanguages : generic ? CUSTOM_CONFIGURABLE_TARGETS : route === "apple" ? ["original"] : textTranslationTargetLanguages(route, true),
@@ -196,7 +205,7 @@ export function capabilitiesForProfile(
     return capabilitiesForProvider(profile.provider);
   }
   const route = textTranslationForProfile(profile);
-  if (isChatCompletionsTranslation(route)) return { sourceLanguages: ALIBABA_RECOGNITION_SOURCES, targetLanguages: CUSTOM_CONFIGURABLE_TARGETS, translationModes: TRANSLATION_MODE_CASES };
+  if (isLanguageModelTranslation(route)) return { sourceLanguages: ALIBABA_RECOGNITION_SOURCES, targetLanguages: CUSTOM_CONFIGURABLE_TARGETS, translationModes: TRANSLATION_MODE_CASES };
   if (route === "deepL") return { sourceLanguages: targetLanguage === "original" ? ALIBABA_RECOGNITION_SOURCES : intersectTranslationSources(ALIBABA_RECOGNITION_SOURCES, route), targetLanguages: textTranslationTargetLanguages(route, true), translationModes: TRANSLATION_MODE_CASES };
   if (route === "deepLX") return PROVIDER_CAPABILITIES.deepLX;
   if (profile.qwenMtModel === "flash" || profile.qwenMtModel === "plus") return { sourceLanguages: ALIBABA_RECOGNITION_SOURCES, targetLanguages: ["original", ...languageCatalogs.qwenMtFlash.targetLanguages as TargetLanguage[]], translationModes: TRANSLATION_MODE_CASES };

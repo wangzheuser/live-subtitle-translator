@@ -141,14 +141,8 @@ class ServiceSettingsActivity : AppCompatActivity() {
             editorDraft?.speechValues?.get(field.id)?.let { pair.second.setText(it) }
             inputs[field.id]=pair
         }
-        if (provider == ServiceProvider.DASHSCOPE && !storageUnavailable) {
-            translationSettings = runCatching { TextTranslationSettings(this, profileId, editorDraft?.translation) }.getOrElse {
-                storageUnavailable = true; status.setText(R.string.guide_storage_unavailable); status.visibility = View.VISIBLE; null
-            }
-            translationSettings?.let { content.addView(it.view, LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(12) }) }
-        }
         if (provider == ServiceProvider.XAI) {
-            xaiSettings = XaiSpeechSettings(this, saved, editorDraft, ::xaiProbeConfiguration)
+            xaiSettings = XaiSpeechSettings(this, saved, editorDraft, ::xaiProbeConfiguration, ::updateSpeechMode)
             content.addView(xaiSettings!!.view, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
             inputs.values.forEach { (_, edit) -> edit.addTextChangedListener(object : android.text.TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -156,11 +150,17 @@ class ServiceSettingsActivity : AppCompatActivity() {
                 override fun afterTextChanged(s: android.text.Editable?) = Unit
             }) }
         }
+        if (provider in listOf(ServiceProvider.DASHSCOPE, ServiceProvider.XAI) && !storageUnavailable) {
+            translationSettings = runCatching { TextTranslationSettings(this, profileId, editorDraft?.translation, provider) }.getOrElse {
+                storageUnavailable = true; status.setText(R.string.guide_storage_unavailable); status.visibility = View.VISIBLE; null
+            }
+            translationSettings?.let { content.addView(it.view, LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(12) }) }
+        }
         alibabaMode?.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) { updateAlibabaMode() }
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) { updateSpeechMode() }
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
         }
-        updateAlibabaMode()
+        updateSpeechMode()
         scroll.addView(content); root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
         val footer=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(24),dp(8),dp(24),dp(12)) }
         footer.addView(MaterialButton(this).apply {
@@ -204,7 +204,7 @@ class ServiceSettingsActivity : AppCompatActivity() {
                 // An unavailable credential store must not erase the previous
                 // route drafts; all storage/session guards still disable saves.
                 translationSettings?.editorDraft() ?: draftHolder.restore(profileId, provider)?.translation,
-                xaiSettings?.selectedPosition, xaiSettings?.textModel,
+                xaiSettings?.selectedPosition,
             ))
         }
         translationSettings?.dispose()
@@ -232,15 +232,15 @@ class ServiceSettingsActivity : AppCompatActivity() {
         try { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) }
         catch (_: android.content.ActivityNotFoundException) { Toast.makeText(this, R.string.guide_no_browser, Toast.LENGTH_SHORT).show() }
     }
-    private fun updateAlibabaMode() {
+    private fun updateSpeechMode() {
         val live = alibabaMode?.selectedItemPosition == 1
         workspaceInput?.let { ServiceSettingsUi.fieldVisible(it.first, live) }
-        translationSettings?.view?.visibility = if (live) View.GONE else View.VISIBLE
-        if (live) translationSettings?.dispose()
+        val integrated = live || provider == ServiceProvider.XAI && xaiSettings?.speechMode == "voice"
+        translationSettings?.view?.visibility = if (integrated) View.GONE else View.VISIBLE
+        if (integrated) translationSettings?.dispose()
     }
-    private fun xaiProbeConfiguration(speechOnly: Boolean): org.json.JSONObject? {
+    private fun xaiProbeConfiguration(): org.json.JSONObject? {
         if (storageUnavailable || MimiService.isRunning || MimiService.isStopping || xaiSettings == null) return null
-        if (!speechOnly && xaiSettings?.validate() != true) return null
         var valid = true
         val values = provider.fields.associate { field ->
             val (layout, edit) = inputs.getValue(field.id)
@@ -251,19 +251,20 @@ class ServiceSettingsActivity : AppCompatActivity() {
         }
         if (!valid) return null
         val config = ServiceConfiguration(provider, values, saved.endpoint, saved.model,
-            xaiSpeechMode = xaiSettings!!.speechMode, xaiTextModel = xaiSettings!!.textModel)
+            xaiSpeechMode = xaiSettings!!.speechMode, xaiTextModel = saved.xaiTextModel)
         return runCatching {
-            val (source, target) = provider.normalize(SettingsStore.sourceLang(this), if (speechOnly) "original" else SettingsStore.targetLang(this),
+            val (source, _) = provider.normalize(SettingsStore.sourceLang(this), "original", TextTranslationProvider.NONE,
                 xaiSpeechMode = config.xaiSpeechMode)
-            buildXaiProbeConfiguration(config, saved.xaiTextModel, source, target, speechOnly)
+            buildXaiProbeConfiguration(config, source)
         }.getOrElse { status.setText(R.string.service_invalid); status.visibility = View.VISIBLE; null }
     }
     private fun save() {
         status.visibility=View.VISIBLE
         if(storageUnavailable) return
         val live = alibabaMode?.selectedItemPosition == 1
-        val textTranslation = translationSettings?.draft(validate = !live)
-        if(translationSettings != null && textTranslation == null) { status.visibility=View.GONE; return }
+        val voice = provider == ServiceProvider.XAI && xaiSettings?.speechMode == "voice"
+        val textTranslation = if (voice) null else translationSettings?.draft(validate = !live)
+        if(!voice && translationSettings != null && textTranslation == null) { status.visibility=View.GONE; return }
         if((MimiService.isRunning || MimiService.isStopping)) { status.setText(R.string.service_stop_first); Toast.makeText(this,R.string.service_stop_first,Toast.LENGTH_SHORT).show(); return }
         var valid=true
         val profileName = nameInput.text.toString().trim()
@@ -279,13 +280,12 @@ class ServiceSettingsActivity : AppCompatActivity() {
             field.id to value
         }
         if(!valid) { status.visibility = View.GONE; return }
-        if (xaiSettings?.validate() == false) { status.visibility = View.GONE; return }
         // The shared factory owns speech models and endpoints. Retain old overrides
         // for compatibility without offering editable fields that the runtime ignores.
         val config=ServiceConfiguration(provider, values, saved.endpoint, saved.model,
             alibabaRealtimeMode = if (live) "liveTranslate" else "asrMt", alibabaWorkspaceId = workspace,
             xaiSpeechMode = xaiSettings?.speechMode ?: saved.xaiSpeechMode,
-            xaiTextModel = xaiSettings?.textModel ?: saved.xaiTextModel)
+            xaiTextModel = saved.xaiTextModel)
         val (source, target) = runCatching {
             provider.normalize(SettingsStore.sourceLang(this), SettingsStore.targetLang(this), textTranslation?.provider ?: TextTranslationProvider.BUILTIN, config.alibabaRealtimeMode, config.xaiSpeechMode)
         }.getOrElse { status.text = getString(R.string.guide_storage_unavailable); return }
@@ -295,7 +295,8 @@ class ServiceSettingsActivity : AppCompatActivity() {
                 textTranslation ?: TranslationConfiguration(provider = TextTranslationProvider.BUILTIN),
                 source, target, translationSettings?.qwenMtModel ?: "lite"))
         } catch (_:Exception) { status.text=getString(R.string.service_invalid); return }
-        val savedId = runCatching { SettingsStore.saveProfile(this, profileId, profileName, config, textTranslation, translationSettings?.enabled, translationSettings?.qwenMtModel, activate = false) }.getOrNull()
+        val savedId = runCatching { SettingsStore.saveProfile(this, profileId, profileName, config, textTranslation,
+            if (voice) null else translationSettings?.enabled, translationSettings?.qwenMtModel, activate = false) }.getOrNull()
         if (savedId == null) {
             status.text=getString(R.string.guide_storage_unavailable); return
         }

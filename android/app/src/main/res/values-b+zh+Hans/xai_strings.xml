@@ -2,8 +2,10 @@
     <string name="xai_mode">识别与翻译</string>
     <string name="xai_asr_mt">流式识别 + 文字翻译</string>
     <string name="xai_voice">Grok Voice</string>
-    <string name="xai_text_model">文字翻译模型</string>
-    <string name="xai_help">流式识别将识别文字交给所选 Grok 文字模型翻译，两步使用同一个 xAI API Key。Grok Voice 在讲话停顿后分段翻译。</string>
+    <string name="xai_help">流式识别可搭配下方任意文字翻译服务。Grok Voice 在讲话停顿后分段翻译。</string>
     <string name="xai_check_speech">检查语音识别</string>
-    <string name="xai_model_invalid">请输入有效文字模型 ID，最多 256 字节，不含控制字符。</string>
+    <string name="translation_xai">xAI Grok</string>
+    <string name="translation_help_xai">选择 Grok 文字模型并单独填写 xAI API Key，可搭配任意识别服务。</string>
+    <string name="translation_help_xai_original">只显示识别原文，不调用文字翻译服务。</string>
+    <string name="translation_xai_original">xAI（仅原文）</string>
 </resources>

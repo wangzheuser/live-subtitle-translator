@@ -3,11 +3,11 @@ import { profileErrorMessage } from "../../lib/connectionDiagnostics";
 import { I18N } from "../../lib/i18n";
 import type { ServiceProfile, TextTranslationNameDraft } from "../../lib/types";
 
-export type NameDraftKey = "profile" | "recognition" | "xaiModel" | `translation:${TextTranslationNameDraft["route"]}`;
+export type NameDraftKey = "profile" | "recognition" | `translation:${TextTranslationNameDraft["route"]}`;
 type NameError = { message: string; retry: boolean } | null;
-type Options = { readOnly: boolean; allowEmpty: boolean; requiredMessage?: string; onSave: (name: string) => Promise<unknown> };
+type Options = { readOnly: boolean; allowEmpty: boolean; onSave: (name: string) => Promise<unknown> };
 
-/** Nonsecret editable metadata lives here; credentials remain owned by their editor. */
+/** Only display metadata lives here; credentials remain owned by their editor. */
 export class NameDraft {
   draft: string;
   confirmed: string;
@@ -121,7 +121,7 @@ export class NameDraft {
     if (this.inFlight) { this.flushRequested = true; return; }
     const name = this.draft.trim();
     if (!options.allowEmpty && !name) {
-      this.publish(this.draft, { message: options.requiredMessage ?? I18N.settings.nameRequired, retry: false });
+      this.publish(this.draft, { message: I18N.settings.nameRequired, retry: false });
       return;
     }
     if (name === this.confirmed || this.failedRevision === this.revision) return;
@@ -198,7 +198,6 @@ export class NameDraftOwner {
       if (!profile) { this.discard(id); continue; }
       for (const [key, draft] of fields) {
         const value = key === "profile" ? profile.name : key === "recognition" ? profile.speechRecognitionName ?? ""
-          : key === "xaiModel" ? profile.xaiTextModel ?? "grok-4.3"
           : profile.textTranslationNames?.[key.slice("translation:".length) as TextTranslationNameDraft["route"]] ?? "";
         draft.receive(value);
       }

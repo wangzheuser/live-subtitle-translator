@@ -905,6 +905,9 @@ pub fn exchange(request: &str) -> Result<String, &'static str> {
             let capabilities_for_target = |target| {
                 if mode != AlibabaRealtimeMode::Disabled {
                     mode.capabilities()
+                } else if provider == ProviderKind::XAIRealtime && xai_mode == XAISpeechMode::AsrMt
+                {
+                    mimi_runtime::core::provider::xai_asr_capabilities(route, target)
                 } else if provider == ProviderKind::XAIRealtime {
                     xai_mode.capabilities()
                 } else {
@@ -1061,6 +1064,75 @@ pub fn pcm(handle: u64, data: Vec<u8>) -> Result<bool, &'static str> {
 mod tests {
     use super::*;
     use std::time::Duration;
+    #[test]
+    fn typed_grok_probe_and_xai_asr_capabilities_follow_the_selected_text_route() {
+        let probe = json!({"credentials":{"kind":"xAI","apiKey":"synthetic-text-key","model":"selected-grok-model"},
+            "sourceLanguage":"en","targetLanguage":"ja","qwenMtModel":"lite"});
+        let response: Value = serde_json::from_str(
+            &exchange(
+                &json!({"operation":"text_probe_endpoint","configuration":probe}).to_string(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            response["textEndpoint"],
+            mimi_runtime::core::provider::XAI_TEXT_ENDPOINT
+        );
+        let capabilities = |route: &str| -> Value {
+            serde_json::from_str(&exchange(&json!({"operation":"capabilities","provider":"xAIRealtime","xaiSpeechMode":"asrMt","route":route,"target":"ja"}).to_string()).unwrap()).unwrap()
+        };
+        let grok = capabilities("xAI");
+        let deepl = capabilities("deepL");
+        assert_eq!(grok["sampleRateHz"], 16000);
+        let codes = |value: &Value| -> std::collections::BTreeSet<String> {
+            value["sourceLanguages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|code| code.as_str().unwrap().to_owned())
+                .collect()
+        };
+        let speech: std::collections::BTreeSet<String> = std::iter::once("auto")
+            .chain(
+                mimi_runtime::core::protocols::xai_stt::LANGUAGE_CODES
+                    .iter()
+                    .copied(),
+            )
+            .map(str::to_owned)
+            .collect();
+        let expected_deepl: std::collections::BTreeSet<String> = speech
+            .iter()
+            .filter(|code| {
+                code.as_str() == "auto"
+                    || mimi_runtime::core::protocols::deepl_languages::DEEPL_SOURCE_CODES
+                        .contains(&code.as_str())
+            })
+            .cloned()
+            .collect();
+        assert_eq!(codes(&grok), speech);
+        assert_eq!(codes(&deepl), expected_deepl);
+        let original: Value = serde_json::from_str(
+            &exchange(
+                &json!({
+                    "operation":"capabilities","provider":"xAIRealtime","xaiSpeechMode":"asrMt",
+                    "route":"deepL","target":"original"
+                })
+                .to_string(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(codes(&original), speech);
+        let probe=text_probe_configuration(&json!({"sessionConfiguration":{
+            "provider":"xAIRealtime","xaiSpeechMode":"asrMt","qwenMtModel":"lite","credentials":{"kind":"apiKey","apiKey":""},
+            "textCredentials":{"kind":"xAI","apiKey":"independent-key","model":"selected-model"},"sourceLanguage":"en","targetLanguage":"ja","translationMode":"turbo","networkProxy":{"mode":"direct"},"textNetworkProxy":{"mode":"direct"}
+        }})).unwrap();
+        assert!(
+            matches!(probe.credentials,mimi_runtime::core::configuration::TextTranslationProbeCredentials::Independent(mimi_runtime::core::credentials::TextTranslationCredentials::XAI {api_key,..}) if api_key=="independent-key")
+        );
+    }
+
     fn fixture(configuration: LiveTranslationConfiguration) -> Arc<Session> {
         let direct = ProxyConfig {
             mode: mimi_runtime::core::network_proxy::ProxyMode::Direct,

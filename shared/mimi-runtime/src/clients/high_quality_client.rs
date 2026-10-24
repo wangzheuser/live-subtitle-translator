@@ -264,6 +264,60 @@ enum TextTranslationClient {
     OpenAICompatible(crate::clients::openai_compatible_client::OpenAICompatibleClient),
 }
 impl TextTranslationClient {
+    fn independent(
+        configuration: &LiveTranslationConfiguration,
+    ) -> Result<Self, QwenMTClientError> {
+        let source = configuration.source_language;
+        let target = configuration.target_language;
+        if !target.translates_audio() {
+            return Ok(Self::Disabled);
+        }
+        match configuration
+            .text_credentials
+            .as_ref()
+            .ok_or(QwenMTClientError::MissingTextTranslation)?
+        {
+            TextTranslationCredentials::Apple => Ok(Self::Apple(
+                crate::clients::apple_translation_client::AppleTranslationClient::new(
+                    source, target,
+                )?,
+            )),
+            TextTranslationCredentials::DeepL { api_key } => Ok(Self::DeepL(
+                crate::clients::deepl_client::DeepLClient::new(api_key, source, target)
+                    .map_err(QwenMTClientError::DeepL)?,
+            )),
+            TextTranslationCredentials::DeepLX { endpoint, token } => Ok(Self::DeepLX(
+                crate::clients::deeplx_client::DeepLXClient::new(endpoint, token, source, target)
+                    .map_err(QwenMTClientError::DeepLX)?,
+            )),
+            TextTranslationCredentials::XAI { api_key, model } => Ok(Self::OpenAICompatible(
+                crate::clients::openai_compatible_client::OpenAICompatibleClient::new(
+                    crate::core::provider::XAI_TEXT_ENDPOINT,
+                    api_key,
+                    model,
+                    source,
+                    target,
+                )
+                .map_err(QwenMTClientError::OpenAICompatible)?,
+            )),
+            TextTranslationCredentials::OpenAICompatible {
+                endpoint,
+                model,
+                api_key,
+            }
+            | TextTranslationCredentials::ChatMock {
+                endpoint,
+                model,
+                api_key,
+            } => Ok(Self::OpenAICompatible(
+                crate::clients::openai_compatible_client::OpenAICompatibleClient::new(
+                    endpoint, api_key, model, source, target,
+                )
+                .map_err(QwenMTClientError::OpenAICompatible)?,
+            )),
+        }
+    }
+
     fn network_endpoint(&self) -> Option<url::Url> {
         match self {
             Self::Apple(_) | Self::Disabled => None,
@@ -611,37 +665,19 @@ impl HighQualityTranslationClient {
         ))
     }
 
-    /// xAI's two explicitly selected stages share this profile's xAI key.
-    pub fn new_xai(
+    /// All standalone recognizers consume the same independently typed text
+    /// destination. The speech credential never supplies a missing text key.
+    fn with_independent_text(
+        asr: RecognitionClient,
         configuration: &LiveTranslationConfiguration,
         events: ProviderEventSender,
     ) -> Result<Self, QwenMTClientError> {
-        let source = configuration.source_language;
-        let target = configuration.target_language;
-        let key = configuration
-            .credentials
-            .direct_api_key()
-            .ok_or(QwenMTClientError::MissingTextTranslation)?;
-        let asr = RecognitionClient::xai(key, source).map_err(recognition_error)?;
-        let mt = if target.translates_audio() {
-            TextTranslationClient::OpenAICompatible(
-                crate::clients::openai_compatible_client::OpenAICompatibleClient::new(
-                    crate::core::provider::XAI_TEXT_ENDPOINT,
-                    key,
-                    &configuration.xai_text_model,
-                    source,
-                    target,
-                )
-                .map_err(QwenMTClientError::OpenAICompatible)?,
-            )
-        } else {
-            TextTranslationClient::Disabled
-        };
+        let mt = TextTranslationClient::independent(configuration)?;
         Ok(Self::from_components(
             asr,
             mt,
-            source,
-            target,
+            configuration.source_language,
+            configuration.target_language,
             Duration::from_millis(250),
             Duration::from_millis(1_000),
             12,
@@ -650,67 +686,38 @@ impl HighQualityTranslationClient {
         ))
     }
 
-    /// Custom recognition never supplies a key to a built-in translation service.
+    pub fn new_xai(
+        configuration: &LiveTranslationConfiguration,
+        events: ProviderEventSender,
+    ) -> Result<Self, QwenMTClientError> {
+        let key = configuration
+            .credentials
+            .direct_api_key()
+            .ok_or(QwenMTClientError::MissingAPIKey)?;
+        let asr = RecognitionClient::xai(key, configuration.source_language)
+            .map_err(recognition_error)?;
+        Self::with_independent_text(asr, configuration, events)
+    }
+
+    pub fn new_alibaba_independent(
+        configuration: &LiveTranslationConfiguration,
+        events: ProviderEventSender,
+    ) -> Result<Self, QwenMTClientError> {
+        let key = configuration
+            .credentials
+            .alibaba_key()
+            .ok_or(QwenMTClientError::MissingAPIKey)?;
+        let asr = RecognitionClient::alibaba(key, configuration.source_language)
+            .map_err(recognition_error)?;
+        Self::with_independent_text(asr, configuration, events)
+    }
+
     pub fn new_custom(
         configuration: &LiveTranslationConfiguration,
         events: ProviderEventSender,
     ) -> Result<Self, QwenMTClientError> {
-        let source = configuration.source_language;
-        let target = configuration.target_language;
         let asr = RecognitionClient::standalone(configuration).map_err(recognition_error)?;
-        let mt = if !target.translates_audio() {
-            TextTranslationClient::Disabled
-        } else {
-            match configuration
-                .text_credentials
-                .as_ref()
-                .ok_or(QwenMTClientError::MissingTextTranslation)?
-            {
-                TextTranslationCredentials::Apple => TextTranslationClient::Apple(
-                    crate::clients::apple_translation_client::AppleTranslationClient::new(
-                        source, target,
-                    )?,
-                ),
-                TextTranslationCredentials::DeepL { api_key } => TextTranslationClient::DeepL(
-                    crate::clients::deepl_client::DeepLClient::new(api_key, source, target)
-                        .map_err(QwenMTClientError::DeepL)?,
-                ),
-                TextTranslationCredentials::DeepLX { endpoint, token } => {
-                    TextTranslationClient::DeepLX(
-                        crate::clients::deeplx_client::DeepLXClient::new(
-                            endpoint, token, source, target,
-                        )
-                        .map_err(QwenMTClientError::DeepLX)?,
-                    )
-                }
-                TextTranslationCredentials::OpenAICompatible {
-                    endpoint,
-                    model,
-                    api_key,
-                }
-                | TextTranslationCredentials::ChatMock {
-                    endpoint,
-                    model,
-                    api_key,
-                } => TextTranslationClient::OpenAICompatible(
-                    crate::clients::openai_compatible_client::OpenAICompatibleClient::new(
-                        endpoint, api_key, model, source, target,
-                    )
-                    .map_err(QwenMTClientError::OpenAICompatible)?,
-                ),
-            }
-        };
-        Ok(Self::from_components(
-            asr,
-            mt,
-            source,
-            target,
-            Duration::from_millis(250),
-            Duration::from_millis(1_000),
-            12,
-            false,
-            events,
-        ))
+        Self::with_independent_text(asr, configuration, events)
     }
 
     /// Connects the recognizer and resets all draft/final workers.
@@ -3129,6 +3136,196 @@ mod tests {
         )
     }
 
+    fn independent_route_configuration(
+        provider: ProviderKind,
+        target: TargetLanguage,
+    ) -> LiveTranslationConfiguration {
+        if provider.is_custom_speech() {
+            custom_configuration(provider, target)
+        } else {
+            let configuration = LiveTranslationConfiguration::for_provider(
+                provider,
+                "synthetic-speech-key",
+                SourceLanguage::English,
+                target,
+                TranslationMode::Turbo,
+            );
+            if provider == ProviderKind::XAIRealtime {
+                configuration.with_xai_speech(
+                    crate::core::provider::XAISpeechMode::AsrMt,
+                    "legacy-unused-model",
+                )
+            } else {
+                configuration
+            }
+        }
+    }
+
+    #[test]
+    fn independent_factory_freely_combines_recognizers_and_typed_text_destinations() {
+        use crate::clients::translation_client::TranslationClient;
+        for provider in [
+            ProviderKind::XAIRealtime,
+            ProviderKind::AlibabaCloud,
+            ProviderKind::CustomOpenAIASR,
+        ] {
+            for (credentials, expected) in [
+                (
+                    TextTranslationCredentials::DeepL {
+                        api_key: "synthetic-text:fx".into(),
+                    },
+                    "https://api-free.deepl.com/v2/translate",
+                ),
+                (
+                    TextTranslationCredentials::OpenAICompatible {
+                        endpoint: "http://127.0.0.1:1/v1".into(),
+                        model: "independent-model".into(),
+                        api_key: "independent-key".into(),
+                    },
+                    "http://127.0.0.1:1/v1/chat/completions",
+                ),
+                (
+                    TextTranslationCredentials::XAI {
+                        api_key: "independent-grok-key".into(),
+                        model: "selected-grok-model".into(),
+                    },
+                    crate::core::provider::XAI_TEXT_ENDPOINT,
+                ),
+            ] {
+                let configuration =
+                    independent_route_configuration(provider, TargetLanguage::Japanese)
+                        .with_text_credentials(credentials);
+                let (events, _) = provider_event_channel();
+                let TranslationClient::HighQuality(client) =
+                    TranslationClient::new_without_network(&configuration, events).unwrap()
+                else {
+                    panic!("expected independent pipeline");
+                };
+                assert_eq!(client.network_endpoints().1.unwrap().as_str(), expected);
+                if expected.contains("deepl") {
+                    assert!(matches!(
+                        client.mt.as_ref(),
+                        TextTranslationClient::DeepL(_)
+                    ));
+                } else {
+                    assert!(matches!(
+                        client.mt.as_ref(),
+                        TextTranslationClient::OpenAICompatible(_)
+                    ));
+                }
+            }
+        }
+        let configuration =
+            independent_route_configuration(ProviderKind::XAIRealtime, TargetLanguage::Japanese);
+        let (events, _) = provider_event_channel();
+        assert!(matches!(
+            HighQualityTranslationClient::new_xai(&configuration, events),
+            Err(QwenMTClientError::MissingTextTranslation)
+        ));
+        let configuration =
+            independent_route_configuration(ProviderKind::XAIRealtime, TargetLanguage::Original)
+                .with_text_credentials(TextTranslationCredentials::XAI {
+                    api_key: String::new(),
+                    model: String::new(),
+                })
+                .validated()
+                .unwrap();
+        assert!(configuration.text_credentials.is_none());
+        let (events, _) = provider_event_channel();
+        let client = HighQualityTranslationClient::new_xai(&configuration, events).unwrap();
+        assert!(matches!(
+            client.mt.as_ref(),
+            TextTranslationClient::Disabled
+        ));
+        assert!(client.network_endpoints().1.is_none());
+    }
+
+    #[tokio::test]
+    async fn fixed_typed_destinations_use_the_text_proxy_without_contacting_the_speech_route() {
+        use crate::clients::translation_client::TranslationClient;
+        use crate::core::network_proxy::{ProxyConfig, ProxyMode};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+        for (provider, credentials, authority) in [
+            (
+                ProviderKind::XAIRealtime,
+                TextTranslationCredentials::DeepL {
+                    api_key: "synthetic-text:fx".into(),
+                },
+                "api-free.deepl.com:443",
+            ),
+            (
+                ProviderKind::CustomOpenAIASR,
+                TextTranslationCredentials::XAI {
+                    api_key: "synthetic-grok-key".into(),
+                    model: "selected-grok-model".into(),
+                },
+                "api.x.ai:443",
+            ),
+            (
+                ProviderKind::AlibabaCloud,
+                TextTranslationCredentials::XAI {
+                    api_key: "synthetic-grok-key".into(),
+                    model: "selected-grok-model".into(),
+                },
+                "api.x.ai:443",
+            ),
+        ] {
+            let speech = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let text = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let configuration = independent_route_configuration(provider, TargetLanguage::Japanese)
+                .with_text_credentials(credentials)
+                .with_stage_network_proxies(
+                    ProxyConfig {
+                        mode: ProxyMode::Custom,
+                        url: Some(format!("http://{}", speech.local_addr().unwrap())),
+                    },
+                    ProxyConfig {
+                        mode: ProxyMode::Custom,
+                        url: Some(format!("http://{}", text.local_addr().unwrap())),
+                    },
+                );
+            let (events, _) = provider_event_channel();
+            let TranslationClient::HighQuality(client) =
+                TranslationClient::new(&configuration, events).unwrap()
+            else {
+                panic!("expected independent pipeline");
+            };
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = tokio::time::timeout(Duration::from_secs(3), text.accept())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let mut header = Vec::new();
+                while !header.ends_with(b"\r\n\r\n") {
+                    header.push(socket.read_u8().await.unwrap());
+                    assert!(header.len() < 8192);
+                }
+                let header = String::from_utf8(header).unwrap();
+                assert!(header.starts_with(&format!("CONNECT {authority} HTTP/1.1")));
+                assert!(!header.contains("synthetic-speech-key"));
+                socket
+                    .write_all(b"HTTP/1.1 502 Fixture\r\nContent-Length: 0\r\n\r\n")
+                    .await
+                    .unwrap();
+            });
+            client
+                .handle_asr_event(LiveTranslateServerEvent::SourceUtteranceFinal {
+                    utterance_id: 1,
+                    text: "Synthetic route selection".into(),
+                    language: Some("en".into()),
+                })
+                .await;
+            server.await.unwrap();
+            client.disconnect().await;
+            assert!(
+                tokio::time::timeout(Duration::from_millis(20), speech.accept())
+                    .await
+                    .is_err()
+            );
+        }
+    }
+
     async fn xai_loopback_read_http(socket: &mut tokio::net::TcpStream) -> serde_json::Value {
         use tokio::io::AsyncReadExt;
         let mut bytes = Vec::new();
@@ -3194,45 +3391,43 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::result_large_err)] // Tungstenite fixes the handshake callback error type.
     async fn xai_stt_chunks_reach_real_mt_before_speech_final_and_original_never_requests_http() {
-        use crate::clients::openai_compatible_client::OpenAICompatibleClient;
-        use crate::clients::xai_stt_client::XaiSttClient;
         use crate::core::network_proxy::{ProxyConfig, ProxyMode};
         use futures_util::{SinkExt, StreamExt};
         use serde_json::{json, Value};
         use tokio::io::AsyncWriteExt;
         use tokio::net::TcpListener;
         use tokio::sync::mpsc;
-        use tokio_tungstenite::{accept_async, tungstenite::Message};
+        use tokio_tungstenite::{accept_hdr_async, tungstenite::Message};
 
         for target in [TargetLanguage::Japanese, TargetLanguage::Original] {
             let speech = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let text = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let mut asr =
-                XaiSttClient::new("synthetic-speech-key", SourceLanguage::English).unwrap();
-            asr.set_loopback_for_test(speech.local_addr().unwrap());
-            // Deliberately keep a reachable, functional MT transport even for
-            // Original, proving the pipeline itself never calls it in that mode.
-            let mt = OpenAICompatibleClient::new(
-                &format!("http://{}/v1", text.local_addr().unwrap()),
-                "synthetic-text-key",
-                "synthetic-text-model",
-                SourceLanguage::English,
-                TargetLanguage::Japanese,
-            )
-            .unwrap();
-            let (events, mut receiver) = provider_event_channel();
-            let mut client = HighQualityTranslationClient::from_components(
-                RecognitionClient::Xai(asr),
-                TextTranslationClient::OpenAICompatible(mt),
+            let configuration = LiveTranslationConfiguration::for_provider(
+                ProviderKind::XAIRealtime,
+                "synthetic-speech-key",
                 SourceLanguage::English,
                 target,
-                Duration::from_secs(60),
-                Duration::from_secs(60),
-                12,
-                false,
-                events,
-            );
+                TranslationMode::Turbo,
+            )
+            .with_xai_speech(
+                crate::core::provider::XAISpeechMode::AsrMt,
+                "legacy-unused-model",
+            )
+            .with_text_credentials(TextTranslationCredentials::OpenAICompatible {
+                endpoint: format!("http://{}/v1", text.local_addr().unwrap()),
+                api_key: "synthetic-text-key".into(),
+                model: "synthetic-text-model".into(),
+            });
+            let (events, mut receiver) = provider_event_channel();
+            let mut client = HighQualityTranslationClient::new_xai(&configuration, events).unwrap();
+            let RecognitionClient::Xai(asr) = &mut client.asr_client else {
+                panic!("expected xAI ASR");
+            };
+            asr.set_loopback_for_test(speech.local_addr().unwrap());
+            client.stable_draft_delay = Duration::from_secs(60);
+            client.maximum_wait_delay = Duration::from_secs(60);
             client
                 .set_network(
                     ProviderNetwork::resolve(&ProxyConfig {
@@ -3261,9 +3456,19 @@ mod tests {
             let (frames, mut pending_frames) = mpsc::channel::<Value>(8);
             let speech_server = tokio::spawn(async move {
                 for connection in 0..2 {
-                    let mut socket = accept_async(speech.accept().await.unwrap().0)
-                        .await
-                        .unwrap();
+                    let mut socket = accept_hdr_async(
+                        speech.accept().await.unwrap().0,
+                        |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+                         response| {
+                            assert_eq!(
+                                request.headers().get("Authorization").unwrap(),
+                                "Bearer synthetic-speech-key"
+                            );
+                            Ok(response)
+                        },
+                    )
+                    .await
+                    .unwrap();
                     socket
                         .send(Message::Text(
                             json!({"type":"transcript.created"}).to_string().into(),

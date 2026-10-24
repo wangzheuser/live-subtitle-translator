@@ -4,7 +4,7 @@ import type {
   TextTranslation,
   ServiceProvider,
 } from "./types";
-import { isChatCompletionsTranslation, isCustomSpeechProvider, isStandaloneAsrProvider } from "./providerCapabilities";
+import { isChatCompletionsTranslation, isCustomSpeechProvider, isIndependentAsrProfile } from "./providerCapabilities";
 
 export type CredentialFieldName =
   | "asrApiKey"
@@ -142,15 +142,16 @@ function buildProviderInput(provider: ServiceProvider, draft: CredentialDraft, s
 
 export const CHATMOCK_DEFAULT_ENDPOINT = "http://127.0.0.1:8000/v1";
 
-/** Alibaba retains its profile-scoped key; an empty replacement reuses it natively. */
-export function buildAlibabaTranslationCredentials(profile: ServiceProfile, draft: CredentialDraft, translation: TextTranslation, clearToken = false): ProviderCredentialsInput | null {
-  const custom = isStandaloneAsrProvider(profile.provider);
+/** Independent destinations cannot read or submit a recognition key. */
+export function buildTextTranslationCredentials(profile: ServiceProfile, draft: CredentialDraft, translation: TextTranslation, clearToken = false, hasSavedDestination?: boolean): ProviderCredentialsInput | null {
+  const custom = isIndependentAsrProfile(profile);
   if (!custom && profile.provider !== "alibabaCloud" && profile.provider !== "deepLX") return null;
   if (!custom && !draft.apiKey.trim() && (profile.speechCredentialState ?? profile.credentialState) !== "present") return null;
   const savedTranslation = profile.textTranslation ?? (profile.provider === "deepLX" ? "deepLX" : "followService");
-  const keepsSavedDestination = (custom ? profile.textCredentialState : profile.credentialState) === "present" && translation === savedTranslation;
+  const keepsSavedDestination = hasSavedDestination ?? ((custom ? profile.textCredentialState : profile.credentialState) === "present" && translation === savedTranslation);
   if (translation === "deepLX" && !draft.endpoint.trim() && !keepsSavedDestination) return null;
   if (translation === "deepL" && !draft.token.trim() && !keepsSavedDestination) return null;
+  if (translation === "xAI" && !keepsSavedDestination && (!draft.token.trim() || !draft.model.trim())) return null;
   if (isChatCompletionsTranslation(translation) && !keepsSavedDestination && (!draft.endpoint.trim() || !draft.model.trim())) return null;
   return {
     kind: "alibabaTranslation",
@@ -158,10 +159,13 @@ export function buildAlibabaTranslationCredentials(profile: ServiceProfile, draf
     textTranslation: translation,
     endpoint: translation === "deepLX" || isChatCompletionsTranslation(translation) ? draft.endpoint.trim() : "",
     token: translation === "followService" || translation === "apple" || (isChatCompletionsTranslation(translation) && clearToken) ? "" : draft.token.trim(),
-    model: isChatCompletionsTranslation(translation) ? draft.model.trim() : "",
+    model: isChatCompletionsTranslation(translation) || translation === "xAI" ? draft.model.trim() : "",
     ...(isChatCompletionsTranslation(translation) && clearToken ? { clearToken: true } : {}),
   };
 }
+
+/** Compatibility name for existing callers; the payload remains the same IPC patch. */
+export const buildAlibabaTranslationCredentials = buildTextTranslationCredentials;
 
 export function buildCustomSpeechCredentials(profile: ServiceProfile, draft: Pick<CredentialDraft, "endpoint" | "model" | "apiKey">): ProviderCredentialsInput | null {
   if (!isCustomSpeechProvider(profile.provider)) return null;

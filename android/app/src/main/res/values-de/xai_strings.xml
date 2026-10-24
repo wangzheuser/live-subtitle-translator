@@ -2,8 +2,10 @@
     <string name="xai_mode">Erkennung und Übersetzung</string>
     <string name="xai_asr_mt">Streaming-Erkennung + Textübersetzung</string>
     <string name="xai_voice">Grok Voice</string>
-    <string name="xai_text_model">Textübersetzungsmodell</string>
-    <string name="xai_help">Die Streaming-Erkennung übergibt erkannten Text an das gewählte Grok-Textmodell. Beide Schritte verwenden denselben xAI API Key. Grok Voice übersetzt nach Sprechpausen.</string>
+    <string name="xai_help">Streaming-Erkennung lässt sich mit jedem Textübersetzungsdienst unten kombinieren. Grok Voice übersetzt nach Sprechpausen.</string>
     <string name="xai_check_speech">Spracherkennung prüfen</string>
-    <string name="xai_model_invalid">Eine Textmodell-ID ohne Steuerzeichen mit höchstens 256 Byte eingeben.</string>
+    <string name="translation_xai">xAI Grok</string>
+    <string name="translation_help_xai">Ein Grok-Textmodell wählen und einen eigenen xAI API Key für die Übersetzung eingeben. Mit jedem unterstützten Erkennungsdienst kombinierbar.</string>
+    <string name="translation_help_xai_original">Erkannten Originaltext anzeigen, ohne einen Textübersetzungsdienst aufzurufen.</string>
+    <string name="translation_xai_original">xAI (nur Originaltext)</string>
 </resources>

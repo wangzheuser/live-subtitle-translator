@@ -550,6 +550,16 @@ guard must wait for concrete owners rather than its own global counter.
   or offline replay results distinct from live provider acceptance. Repeated
   frontend Retry cannot cancel an unfinished native authorization read.
 
+## Local network regression fixtures
+
+When many localhost HTTP/WebSocket fixtures fail through the system proxy while
+an explicit Direct fixture passes, compare the same test with a command-scoped
+`NO_PROXY=127.0.0.1,localhost,::1`. The macOS system matcher can omit the OS proxy
+exclusion list, so an existing loopback exclusion alone does not prove direct
+routing. This A/B check reproduced a setup `TransportFailure` and restored the
+same fixture immediately. Keep the bypass limited to that local test command;
+do not change system proxy settings or apply it to real-provider acceptance.
+
 ## Before handing off
 
 Keep the internal `mimi UI test settings` window title stable when changing

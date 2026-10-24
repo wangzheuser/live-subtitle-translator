@@ -110,6 +110,7 @@ impl ServiceProfilePayload {
     #[cfg(test)]
     fn unavailable(profile: ServiceProfile) -> Self {
         let text_translation = profile.text_translation();
+        let standalone = profile.is_standalone_asr();
         Self {
             speech_network_proxy: profile.speech_network_proxy,
             text_network_proxy: profile.text_network_proxy,
@@ -126,14 +127,8 @@ impl ServiceProfilePayload {
             speech_recognition_name: profile.speech_recognition_name,
             credential_state: CredentialState::Unavailable,
             credential_storage: "keychain",
-            speech_credential_state: profile
-                .provider
-                .is_standalone_asr()
-                .then_some(CredentialState::Unavailable),
-            text_credential_state: profile
-                .provider
-                .is_standalone_asr()
-                .then_some(CredentialState::Unavailable),
+            speech_credential_state: standalone.then_some(CredentialState::Unavailable),
+            text_credential_state: standalone.then_some(CredentialState::Unavailable),
             text_translation,
             text_translation_names: profile.text_translation_names,
         }

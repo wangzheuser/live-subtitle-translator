@@ -14,6 +14,8 @@ class ServiceProfileRepositoryTest {
         var failCatalog = false
         var failSecret = false
         var failReadback = false
+        var failWrittenSecretReadback = false
+        private var unreadableRevision: String? = null
         var failCleanup = false
         var failCatalogReadAfterWrite = false
         private var failNextCatalogRead = false
@@ -26,8 +28,13 @@ class ServiceProfileRepositoryTest {
             catalog = value; failNextCatalogRead = failCatalogReadAfterWrite
             return true
         }
-        override fun readSecret(revision: String) = if (failReadback) null else secrets[revision]
-        override fun writeSecret(revision: String, value: String): Boolean { if (failSecret) return false; secrets[revision] = value; return true }
+        override fun readSecret(revision: String) = if (failReadback || revision == unreadableRevision) null else secrets[revision]
+        override fun writeSecret(revision: String, value: String): Boolean {
+            if (failSecret) return false
+            secrets[revision] = value
+            unreadableRevision = revision.takeIf { failWrittenSecretReadback }
+            return true
+        }
         override fun retainSecrets(revisions: Set<String>) { check(!failCleanup); secrets.keys.retainAll(revisions) }
     }
     private fun contents(key: String, model: String = "lite", mode: String = "asrMt") = ProfileContents(
@@ -64,6 +71,91 @@ class ServiceProfileRepositoryTest {
         assertEquals("grok-4.3", legacy.xaiTextModel)
         assertEquals("voice", LegacyServiceProfiles.read(mapOf("api_key_xai" to "synthetic-legacy-key"))
             .profiles.single().second.speech.xaiSpeechMode)
+    }
+
+    @Test fun legacyXaiAsrMigrationIsDurableRetryableAndScopedToItsOwnProfile() {
+        val disk = MemoryDisk(); val repository = ServiceProfileRepository(disk)
+        val old = ProfileContents(ServiceConfiguration(ServiceProvider.XAI, mapOf("apiKey" to "old-speech-key"),
+            xaiSpeechMode = "asrMt", xaiTextModel = "old-grok-model"), selectedTranslation = TextTranslationProvider.BUILTIN,
+            xaiIndependentTranslationMigrated = false)
+        val id = repository.save(null, "Old streaming", old)!!
+        val other = repository.save(null, "Other", ProfileContents(ServiceConfiguration(ServiceProvider.XAI,
+            mapOf("apiKey" to "other-speech-key"), xaiSpeechMode = "asrMt"), TextTranslationProvider.XAI,
+            mapOf(TextTranslationProvider.XAI to TranslationConfiguration(provider = TextTranslationProvider.XAI,
+                model = "other-model", apiKey = "other-text-key"))))!!
+        // Reproduce the published catalog shape: selectedTranslation was explicitly builtin, without a checkpoint.
+        val catalog = org.json.JSONObject(disk.catalog!!)
+        catalog.getJSONArray("profiles").getJSONObject(0).getJSONObject("details").remove("xaiIndependentTranslationMigrated")
+        disk.catalog = catalog.toString()
+        val before = disk.catalog
+        disk.failSecret = true
+        assertFalse(repository.migrateXaiAsrTranslations()); assertEquals(before, disk.catalog)
+        disk.failSecret = false; disk.failWrittenSecretReadback = true
+        assertFalse(repository.migrateXaiAsrTranslations()); assertEquals(before, disk.catalog)
+        disk.failWrittenSecretReadback = false; disk.failCatalog = true
+        assertFalse(repository.migrateXaiAsrTranslations()); assertEquals(before, disk.catalog)
+        assertEquals(TextTranslationProvider.BUILTIN, repository.contents(id).selectedTranslation)
+        disk.failCatalog = false
+        assertTrue(repository.migrateXaiAsrTranslations())
+        val migrated = ServiceProfileRepository(disk).contents(id)
+        assertTrue(migrated.xaiIndependentTranslationMigrated)
+        assertEquals(TextTranslationProvider.XAI, migrated.selectedTranslation)
+        assertEquals("old-speech-key", migrated.speech.value("apiKey"))
+        assertEquals("old-speech-key", migrated.translations.getValue(TextTranslationProvider.XAI).apiKey)
+        assertEquals("old-grok-model", migrated.translations.getValue(TextTranslationProvider.XAI).model)
+        assertEquals("other-text-key", repository.contents(other).translations.getValue(TextTranslationProvider.XAI).apiKey)
+        assertEquals(id, repository.activeId())
+        assertFalse(disk.catalog!!.contains("old-speech-key"))
+        val after = disk.catalog
+        assertTrue(repository.migrateXaiAsrTranslations()); assertEquals(after, disk.catalog)
+    }
+
+    @Test fun explicitOriginalAndDeletedGrokKeyNeverBorrowSpeechKeyAgain() {
+        val disk = MemoryDisk(); val repository = ServiceProfileRepository(disk)
+        val speech = ServiceConfiguration(ServiceProvider.XAI, mapOf("apiKey" to "speech-only-key"), xaiSpeechMode = "asrMt")
+        val grok = TranslationConfiguration(provider = TextTranslationProvider.XAI, model = "grok-custom", apiKey = "text-only-key")
+        val generic = TranslationConfiguration(provider = TextTranslationProvider.OPENAI_COMPATIBLE,
+            endpoint = "https://generic.example.invalid/v1", model = "generic-model", apiKey = "generic-key")
+        val id = repository.save(null, "Independent", ProfileContents(speech, TextTranslationProvider.XAI,
+            mapOf(TextTranslationProvider.XAI to grok, TextTranslationProvider.OPENAI_COMPATIBLE to generic)))!!
+        val original = ProfileContents(speech, TextTranslationProvider.NONE,
+            repository.contents(id).translations + (TextTranslationProvider.XAI to grok.copy(apiKey = "")))
+        assertEquals(id, repository.save(id, "Independent", original))
+        assertTrue(repository.migrateXaiAsrTranslations())
+        var reloaded = ServiceProfileRepository(disk).contents(id).withIndependentXaiTranslation()
+        assertEquals(TextTranslationProvider.NONE, reloaded.selectedTranslation)
+        assertEquals("", reloaded.translations.getValue(TextTranslationProvider.XAI).apiKey)
+        assertEquals("generic-key", reloaded.translations.getValue(TextTranslationProvider.OPENAI_COMPATIBLE).apiKey)
+        assertEquals("speech-only-key", reloaded.speech.value("apiKey"))
+        assertEquals(id, repository.save(id, "Independent", ProfileContents(speech, TextTranslationProvider.XAI,
+            reloaded.translations, xaiIndependentTranslationMigrated = reloaded.xaiIndependentTranslationMigrated)))
+        assertTrue(repository.migrateXaiAsrTranslations())
+        reloaded = ServiceProfileRepository(disk).contents(id)
+        assertEquals("", reloaded.translations.getValue(TextTranslationProvider.XAI).apiKey)
+    }
+
+    @Test fun oldVoiceMigrationStaysAnUnsavedProjectionUntilAnExplicitAsrSave() {
+        val disk = MemoryDisk(); val repository = ServiceProfileRepository(disk)
+        val voice = ServiceConfiguration(ServiceProvider.XAI, mapOf("apiKey" to "old-voice-key"), xaiTextModel = "old-voice-model")
+        val id = repository.save(null, "Voice", ProfileContents(voice, xaiIndependentTranslationMigrated = false))!!
+        val before = disk.catalog
+        assertTrue(repository.migrateXaiAsrTranslations()); assertEquals(before, disk.catalog)
+        val draft = repository.contents(id).withIndependentXaiTranslation()
+        assertEquals(TextTranslationProvider.XAI, draft.selectedTranslation)
+        assertEquals("old-voice-key", draft.translations.getValue(TextTranslationProvider.XAI).apiKey)
+        assertEquals(before, disk.catalog)
+        assertEquals("voice", repository.contents(id).speech.xaiSpeechMode)
+        assertFalse(repository.contents(id).xaiIndependentTranslationMigrated)
+        val asr = ServiceConfiguration(ServiceProvider.XAI, voice.credentials, xaiSpeechMode = "asrMt", xaiTextModel = voice.xaiTextModel)
+        assertEquals(id, repository.save(id, "Streaming", ProfileContents(asr, draft.selectedTranslation, draft.translations,
+            xaiIndependentTranslationMigrated = draft.xaiIndependentTranslationMigrated)))
+        val saved = ServiceProfileRepository(disk).contents(id)
+        assertTrue(saved.xaiIndependentTranslationMigrated)
+        assertEquals("old-voice-model", saved.translations.getValue(TextTranslationProvider.XAI).model)
+        val fresh = ProfileContents(asr)
+        assertEquals(TextTranslationProvider.XAI, fresh.selectedTranslation)
+        assertTrue(fresh.translations.isEmpty())
+        assertSame(fresh, fresh.withIndependentXaiTranslation())
     }
 
     @Test fun sameProviderProfilesKeepKeysModelsModesAndTranslatorsIndependentAfterReload() {

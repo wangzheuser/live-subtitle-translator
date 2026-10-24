@@ -15,18 +15,22 @@ import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 
 /** A draft only. ServiceSettingsActivity commits this alongside the speech configuration. */
-internal class TextTranslationSettings(private val activity: AppCompatActivity, private val profileId: String? = null, editorDraft: TextTranslationEditorDraft? = null) {
+internal class TextTranslationSettings(private val activity: AppCompatActivity, private val profileId: String? = null,
+    editorDraft: TextTranslationEditorDraft? = null, private val speechProvider: ServiceProvider = ServiceProvider.DASHSCOPE) {
     private class Draft(val saved: TranslationConfiguration) {
         var endpoint = saved.endpoint.ifBlank {
             if (saved.provider == TextTranslationProvider.CHAT_MOCK) "http://127.0.0.1:8000/v1" else ""
         }
-        var model = saved.model
+        var model = saved.model.ifBlank { if (saved.provider == TextTranslationProvider.XAI) "grok-4.3" else "" }
         var key = ""
         var localHttp = saved.allowLocalHttp
         var forgetKey = false
     }
-    private val providers = listOf(TextTranslationProvider.BUILTIN, TextTranslationProvider.DEEPL, TextTranslationProvider.DEEPLX,
-        TextTranslationProvider.CHAT_MOCK, TextTranslationProvider.OPENAI_COMPATIBLE, TextTranslationProvider.NONE)
+    private val providers = buildList {
+        if (speechProvider == ServiceProvider.DASHSCOPE) add(TextTranslationProvider.BUILTIN)
+        addAll(listOf(TextTranslationProvider.DEEPL, TextTranslationProvider.DEEPLX,
+            TextTranslationProvider.CHAT_MOCK, TextTranslationProvider.OPENAI_COMPATIBLE, TextTranslationProvider.XAI, TextTranslationProvider.NONE))
+    }
     private val drafts = providers.associateWith { route ->
         Draft(if (profileId == null) TranslationConfiguration(provider = route) else SettingsStore.profileTranslationConfiguration(activity, profileId, route)).apply {
             editorDraft?.routes?.get(route)?.let {
@@ -35,7 +39,11 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
             }
         }
     }
-    private var selected = editorDraft?.selected ?: if (profileId == null) TextTranslationProvider.BUILTIN else SettingsStore.profileTextTranslationProvider(activity, profileId)
+    private var selected = (editorDraft?.selected ?: if (profileId == null) {
+        if (speechProvider == ServiceProvider.XAI) TextTranslationProvider.XAI else TextTranslationProvider.BUILTIN
+    } else SettingsStore.profileTextTranslationProvider(activity, profileId)).let {
+        if (it in providers) it else TextTranslationProvider.NONE
+    }
     private var rendering = false
     private val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
     private val fields = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
@@ -147,7 +155,7 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
         localHttp.isChecked = state.localHttp
         fields.visibility = if (hasNetworkProvider()) View.VISIBLE else View.GONE
         qwenModelRow.visibility = if (selected == TextTranslationProvider.BUILTIN) View.VISIBLE else View.GONE
-        val customEndpoint = selected.usesOpenAIProtocol || selected == TextTranslationProvider.DEEPLX
+        val customEndpoint = selected.hasCustomEndpoint
         ServiceSettingsUi.fieldVisible(inputLayouts.getValue(endpoint), customEndpoint)
         ServiceSettingsUi.fieldLabel(inputLayouts.getValue(endpoint), activity.getString(if (selected == TextTranslationProvider.DEEPLX) R.string.translation_deeplx_endpoint else R.string.translation_endpoint))
         inputLayouts.getValue(endpoint).placeholderText = if (selected == TextTranslationProvider.DEEPLX) "https://example.com/translate" else "https://example.com/v1"
@@ -162,17 +170,17 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
         if (!hasNetworkProvider()) return TranslationConfiguration(provider = selected)
         val state = drafts.getValue(selected)
         val config = TranslationConfiguration(
-            endpoint = if (selected == TextTranslationProvider.DEEPL) "" else state.endpoint.trim(),
+            endpoint = if (selected.hasCustomEndpoint) state.endpoint.trim() else "",
             model = if (selected.usesOpenAIProtocol) state.model.trim() else "",
             apiKey = state.key.trim().ifBlank { if (reusesSavedKey(state)) state.saved.apiKey else "" },
-            allowLocalHttp = selected != TextTranslationProvider.DEEPL && state.localHttp,
+            allowLocalHttp = selected.hasCustomEndpoint && state.localHttp,
             provider = selected,
         )
         if (!validate) return config
-        if (selected == TextTranslationProvider.DEEPL && config.apiKey.isBlank()) {
+        if (selected in listOf(TextTranslationProvider.DEEPL, TextTranslationProvider.XAI) && config.apiKey.isBlank()) {
             showError(R.string.translation_key_required); return null
         }
-        if (selected != TextTranslationProvider.DEEPL && config.endpoint.isBlank()) {
+        if (selected.hasCustomEndpoint && config.endpoint.isBlank()) {
             showError(R.string.translation_endpoint_required); return null
         }
         if (selected.usesOpenAIProtocol && config.model.isBlank()) {
@@ -197,26 +205,27 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
         ServiceSettingsUi.fieldLabel(inputLayouts.getValue(key), if (hasSavedKey && state.key.isBlank()) activity.getString(R.string.translation_saved_field, label) else label)
         inputLayouts.getValue(key).placeholderText = when {
             hasSavedKey && state.key.isBlank() -> activity.getString(R.string.service_secret_saved)
-            selected == TextTranslationProvider.DEEPL -> null
+            selected in listOf(TextTranslationProvider.DEEPL, TextTranslationProvider.XAI) -> null
             else -> activity.getString(R.string.translation_key_optional)
         }
-        removeKey.visibility = if (hasSavedKey && selected != TextTranslationProvider.DEEPL) View.VISIBLE else View.GONE
+        removeKey.visibility = if (hasSavedKey && selected !in listOf(TextTranslationProvider.DEEPL, TextTranslationProvider.XAI)) View.VISIBLE else View.GONE
     }
 
     private fun hasNetworkProvider() = selected !in listOf(TextTranslationProvider.BUILTIN, TextTranslationProvider.NONE)
     private fun reusesSavedKey(state: Draft) = !state.forgetKey && state.saved.apiKey.isNotBlank() &&
-        (selected == TextTranslationProvider.DEEPL || state.endpoint.trim() == state.saved.endpoint.trim())
+        (!selected.hasCustomEndpoint || state.endpoint.trim() == state.saved.endpoint.trim())
 
     private fun showHelp() {
         val body = when (selected) {
             TextTranslationProvider.BUILTIN -> activity.getString(R.string.translation_help_builtin)
-            TextTranslationProvider.NONE -> activity.getString(R.string.translation_help_none)
-            else -> activity.getString(R.string.translation_help_speech) + "\n\n" + activity.getString(when (selected) {
+            TextTranslationProvider.NONE -> activity.getString(if (speechProvider == ServiceProvider.XAI) R.string.translation_help_xai_original else R.string.translation_help_none)
+            else -> activity.getString(if (speechProvider == ServiceProvider.XAI) R.string.xai_help else R.string.translation_help_speech) + "\n\n" + activity.getString(when (selected) {
                 TextTranslationProvider.DEEPL -> R.string.translation_help_deepl
                 TextTranslationProvider.DEEPLX -> R.string.translation_help_deeplx
                 TextTranslationProvider.CHAT_MOCK -> R.string.translation_help_chatmock
+                TextTranslationProvider.XAI -> R.string.translation_help_xai
                 else -> R.string.translation_help
-            }) + (if (selected == TextTranslationProvider.DEEPL) "" else "\n\n" + activity.getString(R.string.translation_help_network)) +
+            }) + (if (!selected.hasCustomEndpoint) "" else "\n\n" + activity.getString(R.string.translation_help_network)) +
                 "\n\n" + activity.getString(R.string.profiles_translation_help_save)
         }
         ServiceSettingsUi.showHelp(activity, activity.getString(translationProviderLabel(selected)), body)
@@ -224,10 +233,11 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
 
     private fun helpResource() = when (selected) {
         TextTranslationProvider.BUILTIN -> R.string.translation_help_builtin
-        TextTranslationProvider.NONE -> R.string.translation_help_none
+        TextTranslationProvider.NONE -> if (speechProvider == ServiceProvider.XAI) R.string.translation_help_xai_original else R.string.translation_help_none
         TextTranslationProvider.DEEPL -> R.string.translation_help_deepl
         TextTranslationProvider.DEEPLX -> R.string.translation_help_deeplx
         TextTranslationProvider.CHAT_MOCK -> R.string.translation_help_chatmock
+        TextTranslationProvider.XAI -> R.string.translation_help_xai
         else -> R.string.translation_help
     }
 
@@ -239,8 +249,10 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
         check.isEnabled = false; check.setText(R.string.translation_checking)
         result.visibility = View.GONE
         val probe = try {
-            val (source, target) = ServiceProvider.DASHSCOPE.normalize(SettingsStore.sourceLang(activity),
-                SettingsStore.targetLang(activity).takeUnless { it == "original" } ?: "zh", config.provider)
+            // The check uses only text-service fields. A speech key or an unsaved recognition mode is irrelevant.
+            val (source, target) = speechProvider.normalize(SettingsStore.sourceLang(activity),
+                SettingsStore.targetLang(activity).takeUnless { it == "original" } ?: "zh", config.provider,
+                xaiSpeechMode = if (speechProvider == ServiceProvider.XAI) "asrMt" else "voice")
             buildTextProbeConfiguration(config, source, target, qwenMtModel)
         } catch (_: Exception) {
             check.isEnabled = true; check.setText(R.string.translation_check)
@@ -310,6 +322,7 @@ internal fun translationProviderLabel(provider: TextTranslationProvider): Int = 
     TextTranslationProvider.NONE -> R.string.translation_none
     TextTranslationProvider.CHAT_MOCK -> R.string.translation_chatmock
     TextTranslationProvider.OPENAI_COMPATIBLE -> R.string.translation_openai_compatible
+    TextTranslationProvider.XAI -> R.string.translation_xai
     TextTranslationProvider.DEEPL -> R.string.translation_deepl
     TextTranslationProvider.DEEPLX -> R.string.translation_deeplx
 }

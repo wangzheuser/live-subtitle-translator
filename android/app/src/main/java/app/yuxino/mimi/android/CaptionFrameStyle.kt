@@ -45,7 +45,7 @@ internal fun captionProviderMarks(context: Context): List<Int> {
         if (SettingsStore.configuration(context).usesIndependentTextTranslation && translator != TextTranslationProvider.BUILTIN && translator != TextTranslationProvider.NONE) {
             add(translationProviderIcon(translator))
         }
-    }
+    }.distinct()
 }
 
 /** Native frame sizing shared by the preview and WindowManager adapter. */

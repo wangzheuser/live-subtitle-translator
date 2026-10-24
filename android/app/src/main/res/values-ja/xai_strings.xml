@@ -2,8 +2,10 @@
     <string name="xai_mode">認識と翻訳</string>
     <string name="xai_asr_mt">ストリーミング認識 + テキスト翻訳</string>
     <string name="xai_voice">Grok Voice</string>
-    <string name="xai_text_model">テキスト翻訳モデル</string>
-    <string name="xai_help">ストリーミング認識のテキストを、選択した Grok モデルで翻訳します。両方に同じ xAI API Key を使用します。Grok Voice は発話の切れ目で翻訳します。</string>
+    <string name="xai_help">ストリーミング認識は下の任意のテキスト翻訳サービスと組み合わせられます。Grok Voice は発話の切れ目で翻訳します。</string>
     <string name="xai_check_speech">音声認識を確認</string>
-    <string name="xai_model_invalid">制御文字を含まない、256 バイト以内のテキストモデル ID を入力してください。</string>
+    <string name="translation_xai">xAI Grok</string>
+    <string name="translation_help_xai">Grok テキストモデルを選び、翻訳用の xAI API Key を入力してください。対応する任意の音声認識と組み合わせられます。</string>
+    <string name="translation_help_xai_original">音声認識の原文のみを表示し、テキスト翻訳サービスは呼び出しません。</string>
+    <string name="translation_xai_original">xAI（原文のみ）</string>
 </resources>

@@ -87,6 +87,10 @@ impl CredentialEditorState {
         let mut state = Self::default();
         let token = match credentials {
             TextTranslationCredentials::Apple => return state,
+            TextTranslationCredentials::XAI { api_key, model } => {
+                state.model = Some(model);
+                api_key
+            }
             TextTranslationCredentials::DeepL { api_key } => api_key,
             TextTranslationCredentials::DeepLX { endpoint, token } => {
                 state.endpoint = Some(endpoint);
@@ -125,6 +129,15 @@ struct TextTranslationDestination {
     open_ai_compatible: Option<OpenAICompatibleDestination>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     chat_mock: Option<OpenAICompatibleDestination>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    xai: Option<XAITextDestination>,
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct XAITextDestination {
+    api_key: String,
+    model: String,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -138,16 +151,33 @@ struct OpenAICompatibleDestination {
 impl TextTranslationDestination {
     fn credentials(&self, route: TextTranslation) -> Option<TextTranslationCredentials> {
         match route {
+            TextTranslation::XAI => {
+                self.xai
+                    .as_ref()
+                    .map(|value| TextTranslationCredentials::XAI {
+                        api_key: value.api_key.clone(),
+                        model: value.model.clone(),
+                    })
+            }
             TextTranslation::FollowService | TextTranslation::Apple => None,
-            TextTranslation::DeepL => Some(TextTranslationCredentials::DeepL {
-                api_key: self.deep_l_api_key.clone().unwrap_or_default(),
-            }),
-            TextTranslation::DeepLX => Some(TextTranslationCredentials::DeepLX {
-                endpoint: self.endpoint.clone(),
-                token: self.token.clone(),
-            }),
+            TextTranslation::DeepL => {
+                self.deep_l_api_key
+                    .as_ref()
+                    .map(|api_key| TextTranslationCredentials::DeepL {
+                        api_key: api_key.clone(),
+                    })
+            }
+            TextTranslation::DeepLX => {
+                if self.endpoint.is_empty() && self.token.is_empty() {
+                    return None;
+                }
+                Some(TextTranslationCredentials::DeepLX {
+                    endpoint: self.endpoint.clone(),
+                    token: self.token.clone(),
+                })
+            }
             TextTranslation::OpenAICompatible => {
-                let value = self.open_ai_compatible.clone().unwrap_or_default();
+                let value = self.open_ai_compatible.clone()?;
                 Some(TextTranslationCredentials::OpenAICompatible {
                     endpoint: value.endpoint,
                     model: value.model,
@@ -155,7 +185,7 @@ impl TextTranslationDestination {
                 })
             }
             TextTranslation::ChatMock => {
-                let value = self.chat_mock.clone().unwrap_or_default();
+                let value = self.chat_mock.clone()?;
                 Some(TextTranslationCredentials::ChatMock {
                     endpoint: value.endpoint,
                     model: value.model,
@@ -167,6 +197,9 @@ impl TextTranslationDestination {
 
     fn set_credentials(&mut self, credentials: TextTranslationCredentials) {
         match credentials {
+            TextTranslationCredentials::XAI { api_key, model } => {
+                self.xai = Some(XAITextDestination { api_key, model });
+            }
             TextTranslationCredentials::Apple => {}
             TextTranslationCredentials::DeepL { api_key } => self.deep_l_api_key = Some(api_key),
             TextTranslationCredentials::DeepLX { endpoint, token } => {
@@ -760,6 +793,7 @@ pub struct SettingsStore {
     /// Explicit saves/deletes replace the cached state; diagnostics retry failed
     /// reads for the selected profile, and restart retries all failed reads.
     secret_cache: Mutex<HashMap<SecretCacheKey, Result<Option<String>, SecretStoreError>>>,
+    xai_translation_upgrade: Mutex<()>,
     is_ui_test: bool,
     ui_test_preferences_writable: bool,
 }
@@ -895,6 +929,7 @@ impl SettingsStore {
             secret: Box::new(secret),
             profile_keychain_service: DEVELOPMENT_PROFILE_KEYCHAIN_SERVICE,
             secret_cache: Mutex::new(HashMap::new()),
+            xai_translation_upgrade: Mutex::new(()),
             is_ui_test: false,
             ui_test_preferences_writable: false,
         })
@@ -964,6 +999,7 @@ impl SettingsStore {
             secret,
             profile_keychain_service,
             secret_cache: Mutex::new(HashMap::new()),
+            xai_translation_upgrade: Mutex::new(()),
             is_ui_test,
             ui_test_preferences_writable: false,
         };
@@ -1007,6 +1043,7 @@ impl SettingsStore {
             secret,
             profile_keychain_service,
             secret_cache: Mutex::new(HashMap::new()),
+            xai_translation_upgrade: Mutex::new(()),
             is_ui_test,
             ui_test_preferences_writable: false,
         }
@@ -1159,6 +1196,7 @@ impl SettingsStore {
         if self.catalog_write_blocked {
             return Err(PROFILE_CATALOG_UNAVAILABLE.to_string());
         }
+        self.migrate_xai_translation_profiles()?;
         let catalog = self.catalog.lock().unwrap();
         Ok((catalog.active_profile_id.clone(), catalog.profiles.clone()))
     }
@@ -1169,6 +1207,7 @@ impl SettingsStore {
         if self.catalog_write_blocked {
             return Err(PROFILE_CATALOG_UNAVAILABLE.to_string());
         }
+        self.migrate_xai_translation_profiles()?;
         let catalog = self.catalog.lock().unwrap();
         let mut prefs = self.prefs.lock().unwrap().clone();
         prefs.translation_mode = TranslationMode::Turbo;
@@ -1185,6 +1224,73 @@ impl SettingsStore {
             .into_iter()
             .find(|profile| profile.id == active_id)
             .ok_or_else(|| PROFILE_CATALOG_UNAVAILABLE.to_string())
+    }
+
+    /// Upgrade only the old integrated STT profile, in its existing private
+    /// store. The durable catalog marker follows verified destination storage;
+    /// retry never overwrites a destination written by an earlier attempt.
+    fn migrate_xai_translation_profiles(&self) -> Result<(), String> {
+        if self.is_ui_test {
+            return Ok(());
+        }
+        let _upgrade = self.xai_translation_upgrade.lock().unwrap();
+        let candidates: Vec<_> = self
+            .catalog
+            .lock()
+            .unwrap()
+            .profiles
+            .iter()
+            .filter(|profile| {
+                profile.uses_xai_asr() && !profile.xai_independent_translation_migrated
+            })
+            .cloned()
+            .collect();
+        for profile in candidates {
+            self.retry_profile_credential_errors(&profile, true, true);
+            let previous = self.destination_value(&profile)?;
+            let mut destination = previous
+                .as_deref()
+                .map(serde_json::from_str::<TextTranslationDestination>)
+                .transpose()
+                .map_err(|_| CREDENTIAL_STORE_UNAVAILABLE.to_string())?
+                .unwrap_or_default();
+            if destination.xai.is_none() {
+                let key = self
+                    .load_api_key_for_profile(&profile)
+                    .map_err(SecretStoreError::public_error)?
+                    .map(|value| ProviderCredentials::decode_for_profile(&profile, &value))
+                    .transpose()
+                    .map_err(|error| error.to_string())?
+                    .and_then(|speech| speech.direct_api_key().map(str::to_owned))
+                    .unwrap_or_default();
+                let model = crate::core::protocols::openai_compatible::validate_model(
+                    &profile.xai_text_model,
+                )
+                .map_err(|error| error.to_string())?;
+                // Preserve a legacy setup's chosen model even without a key.
+                // Authentication stays missing and is never borrowed later.
+                destination.xai = Some(XAITextDestination {
+                    api_key: key,
+                    model,
+                });
+                let value = serde_json::to_string(&destination)
+                    .map_err(|_| CREDENTIAL_STORE_UNAVAILABLE.to_string())?;
+                self.write_destination_value(&profile, Some(&value), true)?;
+            }
+            self.mutate_catalog_with_normalization(Some(&profile.id), |catalog| {
+                let current = catalog
+                    .profiles
+                    .iter_mut()
+                    .find(|candidate| candidate.id == profile.id)
+                    .ok_or_else(|| PROFILE_NOT_FOUND.to_string())?;
+                if !current.xai_independent_translation_migrated {
+                    current.text_translation = Some(TextTranslation::XAI);
+                    current.xai_independent_translation_migrated = true;
+                }
+                Ok(())
+            })?;
+        }
+        Ok(())
     }
 
     /// New desktop Alibaba configurations start with integrated translation.
@@ -1432,7 +1538,7 @@ impl SettingsStore {
             || alibaba_realtime_mode.is_some()
             || xai_speech_mode.is_some())
         .then_some(profile_id);
-        self.mutate_catalog_with_normalization(normalize_profile, |catalog| {
+        let updated = self.mutate_catalog_with_normalization(normalize_profile, |catalog| {
             let current = catalog
                 .profiles
                 .iter_mut()
@@ -1506,7 +1612,9 @@ impl SettingsStore {
             let updated = updated.validated().map_err(|error| error.to_string())?;
             *current = updated.clone();
             Ok(updated)
-        })
+        })?;
+        self.migrate_xai_translation_profiles()?;
+        self.profile(&updated.id)
     }
 
     pub fn select_profile(&self, profile_id: &str) -> Result<(), String> {
@@ -1681,7 +1789,7 @@ impl SettingsStore {
                 let selected = service == self.profile_keychain_service
                     && ((speech && slot == &account)
                         || (text
-                            && profile.provider.supports_text_translation()
+                            && profile.supports_text_translation_configuration()
                             && slot == &Self::destination_account(profile)));
                 result.is_ok() || !selected
             });
@@ -1713,14 +1821,22 @@ impl SettingsStore {
         &self,
         profile: &ServiceProfile,
     ) -> Option<(CredentialState, CredentialState)> {
-        if !profile.provider.is_standalone_asr() {
+        if !profile.is_standalone_asr() {
             return None;
         }
         if self.is_ui_test || (!self.secret.uses_local_file() && !cfg!(target_os = "macos")) {
             return self.custom_credential_states(profile);
         }
         let speech = self.speech_presence_for_snapshot(profile);
-        let text = if matches!(
+        let text = if profile.text_translation() == TextTranslation::XAI
+            && self.secret.uses_local_file()
+        {
+            match self.text_credentials_for_profile(profile) {
+                Ok(Some(_)) => CredentialState::Present,
+                Ok(None) => CredentialState::Missing,
+                Err(_) => CredentialState::Unavailable,
+            }
+        } else if matches!(
             profile.text_translation(),
             TextTranslation::FollowService | TextTranslation::Apple
         ) {
@@ -1765,7 +1881,7 @@ impl SettingsStore {
         &self,
         profile: &ServiceProfile,
     ) -> Option<(CredentialState, CredentialState)> {
-        if !profile.provider.is_standalone_asr() {
+        if !profile.is_standalone_asr() {
             return None;
         }
         let speech = match self.credentials_for_profile(profile) {
@@ -1827,17 +1943,31 @@ impl SettingsStore {
             return Ok(CredentialEditorState::default());
         }
         if let Some(route) = text_translation {
-            if !CredentialRevealField::Token.allowed_for(&profile, Some(route)) {
+            // Explicitly selecting a destination may hydrate its model/address
+            // and saved-field flags before committing the route. Revealing a
+            // secret remains restricted to the currently saved route below.
+            if !profile.supports_text_translation_configuration()
+                || route == TextTranslation::FollowService
+            {
                 return Err("credential_reveal_field_mismatch".into());
             }
             if let Some(value) = self.destination_value(&profile)? {
                 let destination: TextTranslationDestination = serde_json::from_str(&value)
                     .map_err(|_| CREDENTIAL_STORE_UNAVAILABLE.to_string())?;
-                let credentials = destination
-                    .credentials(route)
-                    .ok_or_else(|| CREDENTIAL_STORE_UNAVAILABLE.to_string())?
-                    .validated()
-                    .map_err(|_| CREDENTIAL_STORE_UNAVAILABLE.to_string())?;
+                let Some(credentials) = destination.credentials(route) else {
+                    return Ok(CredentialEditorState::default());
+                };
+                let credentials = match credentials {
+                    TextTranslationCredentials::XAI { api_key, model } if api_key.is_empty() => {
+                        let model =
+                            crate::core::protocols::openai_compatible::validate_model(&model)
+                                .map_err(|_| CREDENTIAL_STORE_UNAVAILABLE.to_string())?;
+                        TextTranslationCredentials::XAI { api_key, model }
+                    }
+                    credentials => credentials
+                        .validated()
+                        .map_err(|_| CREDENTIAL_STORE_UNAVAILABLE.to_string())?,
+                };
                 return Ok(CredentialEditorState::from_text_credentials(credentials));
             }
             // Historical DeepLX profiles may keep both slots in one record.
@@ -1961,6 +2091,12 @@ impl SettingsStore {
                             model: destination.model,
                         }
                     }
+                    TextTranslation::XAI => {
+                        return Ok(destination
+                            .xai
+                            .map(|value| value.api_key)
+                            .filter(|key| !key.is_empty()))
+                    }
                     TextTranslation::FollowService | TextTranslation::Apple => unreachable!(),
                 };
                 return credentials
@@ -2079,7 +2215,7 @@ impl SettingsStore {
     }
 
     fn destination_value(&self, profile: &ServiceProfile) -> Result<Option<String>, String> {
-        if !profile.provider.supports_text_translation() {
+        if !profile.supports_text_translation_configuration() {
             return Ok(None);
         }
         self.load_secret(
@@ -2142,10 +2278,12 @@ impl SettingsStore {
         if matches!(
             profile.provider,
             ProviderKind::AlibabaCloud | ProviderKind::DeepLX
-        ) && !matches!(
-            profile.text_translation(),
-            TextTranslation::FollowService | TextTranslation::Apple
-        ) {
+        ) && profile.text_translation() != TextTranslation::XAI
+            && !matches!(
+                profile.text_translation(),
+                TextTranslation::FollowService | TextTranslation::Apple
+            )
+        {
             let Some(destination) = self.destination_value(profile)? else {
                 if profile.provider == ProviderKind::DeepLX
                     && matches!(
@@ -2195,6 +2333,7 @@ impl SettingsStore {
                         model: destination.model,
                     }
                 }
+                TextTranslation::XAI => return Ok(Some(credentials)),
                 TextTranslation::FollowService | TextTranslation::Apple => unreachable!(),
             };
             return credentials
@@ -2222,6 +2361,14 @@ impl SettingsStore {
             serde_json::from_str(&value).map_err(|_| {
                 crate::core::credentials::ProviderCredentialsError::InvalidStoredValue.to_string()
             })?;
+        if profile.text_translation() == TextTranslation::XAI
+            && destination
+                .xai
+                .as_ref()
+                .is_some_and(|value| value.api_key.trim().is_empty())
+        {
+            return Ok(None);
+        }
         destination
             .credentials(profile.text_translation())
             .map(|credentials| credentials.validated())
@@ -2424,8 +2571,8 @@ impl SettingsStore {
         api_key: &str,
     ) -> Result<(), String> {
         use crate::core::credentials::ProviderCredentialsError as Error;
-        if !profile.provider.supports_text_translation()
-            || (profile.provider.is_standalone_asr() && !api_key.trim().is_empty())
+        if !(profile.provider.supports_text_translation() || profile.uses_xai_asr())
+            || (profile.is_standalone_asr() && !api_key.trim().is_empty())
         {
             return Err(Error::ProviderMismatch.to_string());
         }
@@ -2534,7 +2681,7 @@ impl SettingsStore {
             }
             return self.save_apple_text_translation(profile, api_key);
         }
-        if profile.provider.is_standalone_asr() {
+        if profile.is_standalone_asr() {
             if !api_key.is_empty() {
                 return Err("custom_speech_text_update_contains_speech_key".into());
             }
@@ -2601,6 +2748,7 @@ impl SettingsStore {
                             deep_l_api_key: None,
                             open_ai_compatible: None,
                             chat_mock: None,
+                            xai: None,
                         }),
                         ProviderCredentials::DeepL { api_key, .. } => {
                             Some(TextTranslationDestination {
@@ -2609,6 +2757,7 @@ impl SettingsStore {
                                 deep_l_api_key: Some(api_key.clone()),
                                 open_ai_compatible: None,
                                 chat_mock: None,
+                                xai: None,
                             })
                         }
                         _ => None,
@@ -2792,8 +2941,11 @@ impl SettingsStore {
         configuration.source_language = selection.source_language;
         configuration.target_language = selection.target_language;
         configuration.translation_mode = selection.translation_mode;
-        if (configuration.provider.is_standalone_asr()
-            || profile.text_translation() == TextTranslation::Apple)
+        if (configuration.is_standalone_asr()
+            || matches!(
+                profile.text_translation(),
+                TextTranslation::Apple | TextTranslation::XAI
+            ))
             && selection.target_language.translates_audio()
             && configuration.text_credentials.is_none()
         {
@@ -2839,11 +2991,12 @@ impl SettingsStore {
     ) -> Result<LiveTranslationConfiguration, String> {
         use crate::core::credentials::ProviderCredentialsError as Error;
 
-        if !speech_only && profile.provider.supports_text_translation() {
+        if !speech_only && (profile.provider.supports_text_translation() || profile.uses_xai_asr())
+        {
             return Err("draft_connection_check_stage_required".into());
         }
-        let provider = if profile.provider.supports_text_translation()
-            && !profile.provider.is_standalone_asr()
+        let provider = if (profile.provider.supports_text_translation() || profile.uses_xai_asr())
+            && !profile.is_standalone_asr()
         {
             ProviderKind::AlibabaCloud
         } else {
@@ -2877,7 +3030,7 @@ impl SettingsStore {
         };
         let prefs = self.preferences();
         let target_language = if speech_only
-            && (profile.provider.supports_text_translation()
+            && ((profile.provider.supports_text_translation() || profile.uses_xai_asr())
                 || (profile.provider == ProviderKind::XAIRealtime
                     && profile.xai_speech_mode == crate::core::provider::XAISpeechMode::AsrMt))
         {
@@ -2927,13 +3080,7 @@ impl SettingsStore {
         use crate::core::configuration::TextTranslationProbeCredentials;
         use crate::core::credentials::ProviderCredentialsError as Error;
 
-        if profile.provider == ProviderKind::XAIRealtime
-            && profile.xai_speech_mode == crate::core::provider::XAISpeechMode::AsrMt
-        {
-            let speech = self.configuration_for_speech_draft_probe(profile, draft, true)?;
-            return self.xai_text_probe(profile, &speech.credentials);
-        }
-        if !profile.provider.supports_text_translation() {
+        if !(profile.provider.supports_text_translation() || profile.uses_xai_asr()) {
             return Err(Error::ProviderMismatch.to_string());
         }
         let (route, endpoint, token_update, model, speech_key) = match draft {
@@ -2993,7 +3140,7 @@ impl SettingsStore {
             }
             TextTranslationProbeCredentials::Independent(TextTranslationCredentials::Apple)
         } else if route == TextTranslation::FollowService {
-            if profile.provider.is_standalone_asr() {
+            if profile.is_standalone_asr() {
                 return Err("text_translation_not_configured".into());
             }
             let speech = self.configuration_for_speech_draft_probe(
@@ -3106,7 +3253,7 @@ impl SettingsStore {
                 .ok_or("custom_speech_credentials_missing")?;
             return self.configuration_for_speech_draft_probe(profile, &credentials, true);
         }
-        if !profile.provider.supports_text_translation() {
+        if !(profile.provider.supports_text_translation() || profile.uses_xai_asr()) {
             return self.configuration_for_profile_probe(profile);
         }
         let value = self
@@ -3165,16 +3312,8 @@ impl SettingsStore {
         profile: &ServiceProfile,
     ) -> Result<crate::core::configuration::TextTranslationProbeConfiguration, String> {
         use crate::core::configuration::TextTranslationProbeCredentials;
-        if profile.provider == ProviderKind::XAIRealtime
-            && profile.xai_speech_mode == crate::core::provider::XAISpeechMode::AsrMt
-        {
-            let credentials = self
-                .credentials_for_profile(profile)?
-                .ok_or("text_translation_credentials_missing")?;
-            return self.xai_text_probe(profile, &credentials);
-        }
-        if !profile.provider.supports_text_translation()
-            || (profile.provider.is_standalone_asr()
+        if !(profile.provider.supports_text_translation() || profile.uses_xai_asr())
+            || (profile.is_standalone_asr()
                 && profile.text_translation() == TextTranslation::FollowService)
         {
             return Err("text_translation_not_configured".into());
@@ -3222,34 +3361,6 @@ impl SettingsStore {
             TextTranslationProbeCredentials::Independent(credentials)
         };
         self.text_probe_with_credentials(profile, credentials)
-    }
-
-    fn xai_text_probe(
-        &self,
-        profile: &ServiceProfile,
-        credentials: &ProviderCredentials,
-    ) -> Result<crate::core::configuration::TextTranslationProbeConfiguration, String> {
-        let prefs = self.preferences();
-        LiveTranslationConfiguration::with_credentials(
-            profile.provider,
-            credentials.clone(),
-            prefs.source_language,
-            prefs.target_language,
-            prefs.translation_mode,
-        )
-        .with_xai_speech(profile.xai_speech_mode, &profile.xai_text_model)
-        .with_stage_network_proxies(
-            profile
-                .speech_network_proxy
-                .clone()
-                .unwrap_or_else(|| prefs.network_proxy.clone()),
-            profile
-                .text_network_proxy
-                .clone()
-                .unwrap_or(prefs.network_proxy),
-        )
-        .xai_text_probe_configuration()
-        .map_err(|error| error.to_string())
     }
 
     fn text_probe_with_credentials(
@@ -3313,7 +3424,7 @@ impl SettingsStore {
         if for_probe {
             // Explicit checks verify a configured text destination even when
             // listening is recognition-only. This local choice never persists.
-            if profile.provider.is_standalone_asr()
+            if profile.is_standalone_asr()
                 && !matches!(
                     profile.text_translation(),
                     TextTranslation::FollowService | TextTranslation::Apple
@@ -3394,7 +3505,8 @@ impl SettingsStore {
                 .unwrap_or(prefs.network_proxy),
         );
         if profile.text_translation() == TextTranslation::Apple
-            || (provider.is_standalone_asr() && prefs.target_language.translates_audio())
+            || ((profile.is_standalone_asr() || profile.text_translation() == TextTranslation::XAI)
+                && prefs.target_language.translates_audio())
         {
             let text_credentials =
                 self.text_credentials_for_profile(profile)?.ok_or_else(|| {
@@ -4013,7 +4125,7 @@ mod tests {
     }
 
     #[test]
-    fn xai_modes_and_text_model_persist_without_changing_the_shared_key() {
+    fn xai_mode_switch_preserves_independent_text_credentials_and_legacy_metadata() {
         use crate::core::provider::XAISpeechMode;
         let directory = tempfile::tempdir().unwrap();
         let fake = FakeSecretStore::default();
@@ -4028,6 +4140,12 @@ mod tests {
         );
         store
             .save_api_key(&profile.id, "synthetic-xai-key")
+            .unwrap();
+        store
+            .save_credentials(
+                &profile.id,
+                &xai_text_request("synthetic-text-key", "chosen-text-model"),
+            )
             .unwrap();
         store.select_profile(&profile.id).unwrap();
         let key_before = fake.value(PROFILE_KEYCHAIN_SERVICE, &credential_account(&profile));
@@ -4047,6 +4165,7 @@ mod tests {
             TargetLanguage::Original
         );
         assert!(!store.configuration().unwrap().uses_xai_asr());
+        assert_eq!(voice.text_translation, Some(TextTranslation::XAI));
         let streaming =
             save_xai_options(&store, &profile.id, Some(XAISpeechMode::AsrMt), None).unwrap();
         store
@@ -4073,10 +4192,26 @@ mod tests {
         assert_eq!(profile.xai_speech_mode, XAISpeechMode::AsrMt);
         assert_eq!(profile.xai_text_model, "custom-xai-model");
         assert!(reopened.configuration().unwrap().uses_xai_asr());
+        assert!(
+            matches!(reopened.configuration_for_text_probe(&profile).unwrap().credentials,
+            crate::core::configuration::TextTranslationProbeCredentials::Independent(TextTranslationCredentials::XAI { model, api_key })
+                if model == "chosen-text-model" && api_key == "synthetic-text-key")
+        );
+    }
+
+    fn xai_text_request(key: &str, model: &str) -> ProviderCredentials {
+        ProviderCredentials::AlibabaTranslation {
+            api_key: String::new(),
+            text_translation: TextTranslation::XAI,
+            endpoint: String::new(),
+            token: key.into(),
+            model: model.into(),
+            clear_token: false,
+        }
     }
 
     #[test]
-    fn xai_checks_share_one_key_with_independent_stage_proxies_and_drafts_do_not_persist() {
+    fn xai_checks_use_independent_keys_and_proxies_without_persisting_drafts() {
         use crate::core::configuration::TextTranslationProbeCredentials;
         use crate::core::network_proxy::ProxyMode;
         let directory = tempfile::tempdir().unwrap();
@@ -4105,52 +4240,436 @@ mod tests {
                 None,
                 None,
                 None,
-                Some("custom-xai-model"),
+                None,
             )
             .unwrap();
         let catalog_before = std::fs::read(directory.path().join(PROFILE_CATALOG_FILE)).unwrap();
-        let draft = ProviderCredentials::api_key("synthetic-unsaved-xai");
         let speech = store
-            .configuration_for_speech_draft_probe(&profile, &draft, true)
+            .configuration_for_speech_draft_probe(
+                &profile,
+                &ProviderCredentials::api_key("synthetic-unsaved-speech"),
+                true,
+            )
             .unwrap();
         assert!(speech.uses_xai_asr());
         assert_eq!(speech.target_language, TargetLanguage::Original);
         assert_eq!(speech.network_proxy.mode, ProxyMode::Direct);
         let text = store
-            .configuration_for_text_draft_probe(&profile, &draft)
+            .configuration_for_text_draft_probe(
+                &profile,
+                &xai_text_request("synthetic-unsaved-text", "chosen-grok"),
+            )
             .unwrap();
         assert_eq!(text.network_proxy.mode, ProxyMode::Custom);
-        let TextTranslationProbeCredentials::Independent(
-            TextTranslationCredentials::OpenAICompatible {
-                api_key,
-                model,
-                endpoint,
-            },
-        ) = text.credentials
-        else {
-            panic!("xAI text check route");
-        };
-        assert_eq!(api_key, "synthetic-unsaved-xai");
-        assert_eq!(model, "custom-xai-model");
-        assert_eq!(endpoint, crate::core::provider::XAI_TEXT_ENDPOINT);
+        assert!(matches!(text.credentials,
+            TextTranslationProbeCredentials::Independent(TextTranslationCredentials::XAI { api_key, model })
+                if api_key == "synthetic-unsaved-text" && model == "chosen-grok"));
         assert_eq!(
             std::fs::read(directory.path().join(PROFILE_CATALOG_FILE)).unwrap(),
             catalog_before
         );
         assert!(store.credentials_for_profile(&profile).unwrap().is_none());
+        assert!(store.destination_value(&profile).unwrap().is_none());
         store
-            .save_api_key(&profile.id, "synthetic-saved-xai")
+            .save_api_key(&profile.id, "synthetic-speech-key")
             .unwrap();
-        let TextTranslationProbeCredentials::Independent(
-            TextTranslationCredentials::OpenAICompatible { api_key, .. },
-        ) = store
-            .configuration_for_text_probe(&profile)
+        assert_eq!(
+            store
+                .credential_editor_state(&profile.id, None)
+                .unwrap()
+                .saved_fields,
+            vec![CredentialRevealField::ApiKey]
+        );
+        assert!(
+            store.configuration_for_text_probe(&profile).is_err(),
+            "a speech key is never borrowed for text"
+        );
+        store
+            .save_credentials(
+                &profile.id,
+                &xai_text_request("synthetic-text-key", "saved-grok"),
+            )
+            .unwrap();
+        assert!(
+            matches!(store.configuration_for_text_probe(&store.profile(&profile.id).unwrap()).unwrap().credentials,
+            TextTranslationProbeCredentials::Independent(TextTranslationCredentials::XAI { api_key, model })
+                if api_key == "synthetic-text-key" && model == "saved-grok")
+        );
+        assert_eq!(
+            store
+                .credential_editor_state(&profile.id, Some(TextTranslation::XAI))
+                .unwrap()
+                .model
+                .as_deref(),
+            Some("saved-grok")
+        );
+        assert_eq!(
+            store
+                .reveal_credential(
+                    &profile.id,
+                    CredentialRevealField::Token,
+                    Some(TextTranslation::XAI)
+                )
+                .unwrap()
+                .as_deref(),
+            Some("synthetic-text-key")
+        );
+    }
+
+    #[test]
+    fn legacy_xai_stt_migrates_once_and_deleted_text_credentials_never_return() {
+        for legacy_voice in [false, true] {
+            use crate::core::provider::XAISpeechMode;
+            let directory = tempfile::tempdir().unwrap();
+            let fake = FakeSecretStore::default();
+            let store = fresh_store(directory.path(), &fake);
+            let profile = store
+                .create_profile_for_setup(ProviderKind::XAIRealtime, "Old xAI")
+                .unwrap();
+            store
+                .save_api_key(&profile.id, "synthetic-old-key")
+                .unwrap();
+            {
+                let mut catalog = store.catalog.lock().unwrap();
+                let old = catalog
+                    .profiles
+                    .iter_mut()
+                    .find(|p| p.id == profile.id)
+                    .unwrap();
+                old.xai_independent_translation_migrated = false;
+                old.text_translation = None;
+                old.xai_text_model = "legacy-grok-model".into();
+                if legacy_voice {
+                    old.xai_speech_mode = XAISpeechMode::Voice;
+                }
+            }
+            store.persist_catalog().unwrap();
+            drop(store);
+            let store = fresh_store(directory.path(), &fake);
+            if legacy_voice {
+                assert!(
+                    !store
+                        .profile(&profile.id)
+                        .unwrap()
+                        .xai_independent_translation_migrated
+                );
+                assert!(store.destination_value(&profile).unwrap().is_none());
+                save_xai_options(&store, &profile.id, Some(XAISpeechMode::AsrMt), None).unwrap();
+            }
+            let migrated = store.profile(&profile.id).unwrap();
+            assert!(migrated.xai_independent_translation_migrated);
+            assert_eq!(migrated.text_translation, Some(TextTranslation::XAI));
+            assert!(
+                matches!(store.text_credentials_for_profile(&migrated).unwrap(),
+                Some(TextTranslationCredentials::XAI { api_key, model })
+                    if api_key == "synthetic-old-key" && model == "legacy-grok-model")
+            );
+            store.delete_api_key(&profile.id).unwrap();
+            store
+                .save_api_key(&profile.id, "synthetic-replacement-speech")
+                .unwrap();
+            assert!(store.configuration_for_text_probe(&migrated).is_err());
+            store
+                .save_credentials(
+                    &profile.id,
+                    &ProviderCredentials::AlibabaTranslation {
+                        api_key: String::new(),
+                        text_translation: TextTranslation::FollowService,
+                        endpoint: String::new(),
+                        token: String::new(),
+                        model: String::new(),
+                        clear_token: false,
+                    },
+                )
+                .unwrap();
+            drop(store);
+            let reloaded = fresh_store(directory.path(), &fake);
+            let selected = reloaded.profile(&profile.id).unwrap();
+            assert_eq!(selected.text_translation(), TextTranslation::FollowService);
+            assert_eq!(
+                reloaded.configuration().unwrap().target_language,
+                TargetLanguage::Original
+            );
+            assert!(reloaded.destination_value(&selected).unwrap().is_none());
+        }
+    }
+
+    fn mark_legacy_xai_profile(store: &SettingsStore, id: &str) {
+        {
+            let mut catalog = store.catalog.lock().unwrap();
+            let profile = catalog
+                .profiles
+                .iter_mut()
+                .find(|profile| profile.id == id)
+                .unwrap();
+            profile.xai_independent_translation_migrated = false;
+            profile.text_translation = None;
+            profile.xai_text_model = "legacy-custom-grok".into();
+        }
+        store.persist_catalog().unwrap();
+    }
+
+    #[test]
+    fn legacy_xai_model_without_a_key_remains_editable_and_never_borrows_a_later_key() {
+        let directory = tempfile::tempdir().unwrap();
+        let fake = FakeSecretStore::default();
+        let store = fresh_store(directory.path(), &fake);
+        let profile = store
+            .create_profile_for_setup(ProviderKind::XAIRealtime, "No key yet")
+            .unwrap();
+        mark_legacy_xai_profile(&store, &profile.id);
+        let profile = store.profile(&profile.id).unwrap();
+        let editor = store
+            .credential_editor_state(&profile.id, Some(TextTranslation::XAI))
+            .unwrap();
+        assert_eq!(editor.model.as_deref(), Some("legacy-custom-grok"));
+        assert!(editor.saved_fields.is_empty());
+        assert!(store
+            .text_credentials_for_profile(&profile)
             .unwrap()
-            .credentials
-        else {
-            panic!("xAI saved text check route");
-        };
-        assert_eq!(api_key, "synthetic-saved-xai");
+            .is_none());
+        store
+            .save_api_key(&profile.id, "synthetic-later-speech-key")
+            .unwrap();
+        assert!(store.configuration_for_text_probe(&profile).is_err());
+        store
+            .save_credentials(
+                &profile.id,
+                &xai_text_request("synthetic-explicit-text-key", ""),
+            )
+            .unwrap();
+        assert!(
+            matches!(store.text_credentials_for_profile(&profile).unwrap(),
+            Some(TextTranslationCredentials::XAI { api_key, model })
+                if api_key == "synthetic-explicit-text-key" && model == "legacy-custom-grok")
+        );
+    }
+
+    #[test]
+    fn legacy_xai_upgrade_retries_transient_credential_errors_in_the_same_store() {
+        for fail_write in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let fake = FakeSecretStore::default();
+            let store = fresh_store(directory.path(), &fake);
+            let profile = store
+                .create_profile_for_setup(ProviderKind::XAIRealtime, "Old xAI")
+                .unwrap();
+            store
+                .save_api_key(&profile.id, "synthetic-migration-key")
+                .unwrap();
+            mark_legacy_xai_profile(&store, &profile.id);
+            let account = SettingsStore::destination_account(&profile);
+            store.secret_cache.lock().unwrap().clear();
+            if fail_write {
+                fake.state.lock().unwrap().saves_before_failure = Some(0);
+            } else {
+                fake.make_unavailable(PROFILE_KEYCHAIN_SERVICE, &account);
+            }
+            assert!(store.profile_catalog().is_err());
+            assert!(
+                !store.catalog.lock().unwrap().profiles[0].xai_independent_translation_migrated
+            );
+            {
+                let mut state = fake.state.lock().unwrap();
+                state.saves_before_failure = None;
+                state.unavailable.clear();
+            }
+            let profile = store.profile(&profile.id).unwrap();
+            assert!(profile.xai_independent_translation_migrated);
+            assert!(
+                matches!(store.text_credentials_for_profile(&profile).unwrap(),
+                Some(TextTranslationCredentials::XAI { api_key, model })
+                    if api_key == "synthetic-migration-key" && model == "legacy-custom-grok")
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_xai_upgrade_reuses_verified_destination_after_catalog_write_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let fake = FakeSecretStore::default();
+        let store = fresh_store(directory.path(), &fake);
+        let profile = store
+            .create_profile_for_setup(ProviderKind::XAIRealtime, "Old xAI")
+            .unwrap();
+        store
+            .save_api_key(&profile.id, "synthetic-original-key")
+            .unwrap();
+        mark_legacy_xai_profile(&store, &profile.id);
+        let file = directory.path().join(PROFILE_CATALOG_FILE);
+        let backup = directory.path().join("catalog-backup");
+        std::fs::rename(&file, &backup).unwrap();
+        std::fs::create_dir(&file).unwrap();
+        assert!(store.profile_catalog().is_err());
+        assert!(!store.catalog.lock().unwrap().profiles[0].xai_independent_translation_migrated);
+        let verified = fake
+            .value(
+                PROFILE_KEYCHAIN_SERVICE,
+                &SettingsStore::destination_account(&profile),
+            )
+            .unwrap();
+        std::fs::remove_dir(&file).unwrap();
+        std::fs::rename(&backup, &file).unwrap();
+        assert!(
+            store
+                .profile(&profile.id)
+                .unwrap()
+                .xai_independent_translation_migrated
+        );
+        assert_eq!(
+            fake.value(
+                PROFILE_KEYCHAIN_SERVICE,
+                &SettingsStore::destination_account(&profile)
+            )
+            .as_deref(),
+            Some(verified.as_str())
+        );
+    }
+
+    #[test]
+    fn xai_saved_route_metadata_can_be_restored_without_revealing_an_inactive_key() {
+        let directory = tempfile::tempdir().unwrap();
+        let fake = FakeSecretStore::default();
+        let store = fresh_store(directory.path(), &fake);
+        let profile = store
+            .create_profile_for_setup(ProviderKind::XAIRealtime, "xAI")
+            .unwrap();
+        store
+            .save_api_key(&profile.id, "synthetic-recognition-key")
+            .unwrap();
+        store
+            .save_credentials(
+                &profile.id,
+                &xai_text_request("synthetic-grok-key", "saved-custom-grok"),
+            )
+            .unwrap();
+        store
+            .save_credentials(
+                &profile.id,
+                &ProviderCredentials::AlibabaTranslation {
+                    api_key: String::new(),
+                    text_translation: TextTranslation::DeepL,
+                    endpoint: String::new(),
+                    token: "synthetic-deepl:fx".into(),
+                    model: String::new(),
+                    clear_token: false,
+                },
+            )
+            .unwrap();
+        let editor = store
+            .credential_editor_state(&profile.id, Some(TextTranslation::XAI))
+            .unwrap();
+        assert_eq!(editor.model.as_deref(), Some("saved-custom-grok"));
+        assert_eq!(editor.saved_fields, vec![CredentialRevealField::Token]);
+        assert_eq!(
+            store.profile(&profile.id).unwrap().text_translation(),
+            TextTranslation::DeepL
+        );
+        assert!(store
+            .reveal_credential(
+                &profile.id,
+                CredentialRevealField::Token,
+                Some(TextTranslation::XAI)
+            )
+            .is_err());
+        store
+            .save_credentials(&profile.id, &xai_text_request("", ""))
+            .unwrap();
+        assert!(
+            matches!(store.text_credentials_for_profile(&store.profile(&profile.id).unwrap()).unwrap(),
+            Some(TextTranslationCredentials::XAI { api_key, model })
+                if api_key == "synthetic-grok-key" && model == "saved-custom-grok")
+        );
+    }
+
+    #[test]
+    fn xai_voice_probes_never_change_provider_or_use_an_independent_text_route() {
+        use crate::core::provider::XAISpeechMode;
+        let directory = tempfile::tempdir().unwrap();
+        let fake = FakeSecretStore::default();
+        let store = fresh_store(directory.path(), &fake);
+        let profile = store
+            .create_profile_for_setup(ProviderKind::XAIRealtime, "Voice")
+            .unwrap();
+        store
+            .save_api_key(&profile.id, "synthetic-voice-key")
+            .unwrap();
+        let voice =
+            save_xai_options(&store, &profile.id, Some(XAISpeechMode::Voice), None).unwrap();
+        let draft = store
+            .configuration_for_speech_draft_probe(
+                &voice,
+                &ProviderCredentials::api_key("synthetic-voice-draft"),
+                false,
+            )
+            .unwrap();
+        assert_eq!(draft.provider, ProviderKind::XAIRealtime);
+        assert!(!draft.uses_xai_asr());
+        assert_eq!(
+            store
+                .configuration_for_speech_probe(&voice)
+                .unwrap()
+                .provider,
+            ProviderKind::XAIRealtime
+        );
+        assert!(store.configuration_for_text_probe(&voice).is_err());
+        assert!(store
+            .configuration_for_text_draft_probe(
+                &voice,
+                &xai_text_request("synthetic-text-key", "grok-4.3")
+            )
+            .is_err());
+        assert!(store
+            .save_credentials(
+                &profile.id,
+                &xai_text_request("synthetic-text-key", "grok-4.3")
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn alibaba_original_to_translation_restores_the_selected_grok_destination() {
+        let fake = FakeSecretStore::default();
+        let store = settings(&fake);
+        let profile = ServiceProfile::alibaba_default();
+        store
+            .save_credentials(
+                &profile.id,
+                &ProviderCredentials::AlibabaTranslation {
+                    api_key: "synthetic-alibaba-key".into(),
+                    text_translation: TextTranslation::XAI,
+                    endpoint: String::new(),
+                    token: "synthetic-grok-key".into(),
+                    model: "chosen-grok".into(),
+                    clear_token: false,
+                },
+            )
+            .unwrap();
+        let profile = store.profile(&profile.id).unwrap();
+        store
+            .save_preferences(|prefs| prefs.target_language = TargetLanguage::Original)
+            .unwrap();
+        let original = store.configuration().unwrap();
+        assert!(original.text_credentials.is_none());
+        let selection = profile
+            .preferences_after_target_switch(
+                ProviderPreferences {
+                    source_language: original.source_language,
+                    target_language: TargetLanguage::Original,
+                    translation_mode: original.translation_mode,
+                },
+                TargetLanguage::Japanese,
+            )
+            .unwrap();
+        let translated = store
+            .configuration_for_target_switch(&profile, original, selection)
+            .unwrap();
+        assert!(matches!(translated.text_credentials,
+            Some(TextTranslationCredentials::XAI { api_key, model }) if api_key=="synthetic-grok-key" && model=="chosen-grok"));
+        assert_eq!(
+            translated.credentials.direct_api_key(),
+            Some("synthetic-alibaba-key")
+        );
     }
 
     #[test]
@@ -8385,7 +8904,7 @@ mod tests {
                     TextTranslation::OpenAICompatible => assert!(
                         matches!(config.text_credentials, Some(TextTranslationCredentials::OpenAICompatible { api_key, model, .. }) if api_key == "synthetic-chat-key" && model == "chat-model")
                     ),
-                    TextTranslation::ChatMock | TextTranslation::Apple => {
+                    TextTranslation::XAI | TextTranslation::ChatMock | TextTranslation::Apple => {
                         unreachable!("covered by independent local and ChatMock persistence tests")
                     }
                     TextTranslation::FollowService => {
@@ -8902,7 +9421,7 @@ mod tests {
     }
 
     #[test]
-    fn credential_editor_state_reads_only_requested_slot_and_rejects_stale_route() {
+    fn credential_editor_state_hydrates_requested_text_metadata_without_reading_speech() {
         let fake = FakeSecretStore::default();
         let store = settings(&fake);
         let profile = ServiceProfile::alibaba_default();
@@ -8919,14 +9438,11 @@ mod tests {
             .unwrap();
         store.secret_cache.lock().unwrap().clear();
         fake.state.lock().unwrap().loads.clear();
-        assert_eq!(
-            store
-                .credential_editor_state(&profile.id, Some(TextTranslation::DeepLX))
-                .err()
-                .as_deref(),
-            Some("credential_reveal_field_mismatch")
-        );
-        assert!(fake.state.lock().unwrap().loads.is_empty());
+        let absent = store
+            .credential_editor_state(&profile.id, Some(TextTranslation::DeepLX))
+            .unwrap();
+        assert!(absent.saved_fields.is_empty());
+        assert!(absent.endpoint.is_none());
         let speech_account = credential_account(&profile);
         let text_account = SettingsStore::destination_account(&profile);
         fake.make_unavailable(PROFILE_KEYCHAIN_SERVICE, &speech_account);
@@ -9601,7 +10117,7 @@ mod tests {
                     TextTranslation::DeepLX => assert!(
                         matches!(credentials, ProviderCredentials::DeepLX { token, endpoint, .. } if token == "synthetic-deeplx" && endpoint == "https://example.com/translate")
                     ),
-                    TextTranslation::ChatMock | TextTranslation::Apple => {
+                    TextTranslation::XAI | TextTranslation::ChatMock | TextTranslation::Apple => {
                         unreachable!("covered by independent local and ChatMock persistence tests")
                     }
                     TextTranslation::FollowService => {
@@ -10070,7 +10586,8 @@ mod tests {
                     store.configuration().unwrap().credentials.direct_api_key(),
                     Some("synthetic-asr")
                 ),
-                TextTranslation::OpenAICompatible
+                TextTranslation::XAI
+                | TextTranslation::OpenAICompatible
                 | TextTranslation::ChatMock
                 | TextTranslation::Apple => unreachable!(),
             }
@@ -10813,6 +11330,7 @@ mod tests {
                 deep_l_api_key: None,
                 open_ai_compatible: None,
                 chat_mock: None,
+                xai: None,
             })
             .unwrap(),
         );

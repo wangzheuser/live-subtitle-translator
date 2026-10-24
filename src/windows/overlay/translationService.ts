@@ -3,7 +3,7 @@ import { speechRecognitionDisplayName } from "../../lib/speechRecognitionName";
 import { I18N } from "../../lib/i18n";
 import {
   activeServiceProfile,
-  isStandaloneAsrProvider,
+  isIndependentAsrProfile,
   textTranslationForProfile,
 } from "../../lib/providerCapabilities";
 import type { ServiceProvider, SettingsSnapshot, TextTranslation } from "../../lib/types";
@@ -32,16 +32,17 @@ export function translationService(
   const speechProvider = profile.provider === "deepLX" ? "alibabaCloud" : profile.provider;
   const speechLabel = speechRecognitionDisplayName(profile);
   const originalOnly = settings.targetLanguage === "original"
-    || (isStandaloneAsrProvider(profile.provider) && route === "followService");
+    || (isIndependentAsrProfile(profile) && route === "followService");
   const translationLabel = originalOnly ? I18N.overlay.originalOnly : textTranslationDisplayName(profile);
+  const sameXai = profile.provider === "xAIRealtime" && route === "xAI";
   const stages: OverlayServiceStage[] = [{
-    role: !originalOnly && route === "followService" ? "combined" : "recognition",
+    role: !originalOnly && (route === "followService" || sameXai) ? "combined" : "recognition",
     provider: speechProvider,
     label: speechLabel,
   }];
   // Matching names or compatible protocols do not establish that two
   // independently configured endpoints are the same service.
-  if (!originalOnly && route !== "followService") {
+  if (!originalOnly && route !== "followService" && !sameXai) {
     stages.push({ role: "translation", provider: route, label: translationLabel });
   }
 

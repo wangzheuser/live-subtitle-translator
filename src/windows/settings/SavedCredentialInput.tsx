@@ -15,6 +15,8 @@ type Props = Omit<ComponentProps<typeof ConfigInput>, "value" | "action" | "expa
   textTranslation?: Exclude<TextTranslation, "followService">;
   label: string;
   hasSavedValue: boolean;
+  /** Inactive route metadata can show presence without authorizing a secret read. */
+  allowSavedReveal?: boolean;
   active?: boolean;
   value: string;
 };
@@ -24,10 +26,10 @@ type Props = Omit<ComponentProps<typeof ConfigInput>, "value" | "action" | "expa
 export function SavedCredentialInput(props: Props) {
   // These boundaries discard the private component state before rendering the
   // next field. The replacement draft remains owned by the editor.
-  return <CredentialInput key={`${props.profileId}:${props.field}:${props.textTranslation ?? ""}:${props.hasSavedValue}:${!!props.disabled}:${props.active !== false}`} {...props} />;
+  return <CredentialInput key={`${props.profileId}:${props.field}:${props.textTranslation ?? ""}:${props.hasSavedValue}:${props.allowSavedReveal !== false}:${!!props.disabled}:${props.active !== false}`} {...props} />;
 }
 
-function CredentialInput({ profileId, field, textTranslation, label, hasSavedValue, active = true, value, onValueChange, onGroupBlur, onKeyDown, disabled, ...inputProps }: Props) {
+function CredentialInput({ profileId, field, textTranslation, label, hasSavedValue, allowSavedReveal = true, active = true, value, onValueChange, onGroupBlur, onKeyDown, disabled, ...inputProps }: Props) {
   const [preview, setPreview] = useState<{ status: "hidden" | "loading" | "shown"; saved: string | null; draft: string }>({ status: "hidden", saved: null, draft: value });
   const { beginToast, clearToast } = useSettingsToast();
   const mounted = useRef(false);
@@ -81,7 +83,7 @@ function CredentialInput({ profileId, field, textTranslation, label, hasSavedVal
       setPreview({ status: "shown", saved: null, draft: value });
       return;
     }
-    if (!hasSavedValue) return;
+    if (!hasSavedValue || !allowSavedReveal) return;
     const nonce = ++request.current;
     const notify = beginToast();
     setPreview({ status: "loading", saved: null, draft: value });
@@ -97,7 +99,7 @@ function CredentialInput({ profileId, field, textTranslation, label, hasSavedVal
         notify(profileErrorMessage(error), true);
       });
   };
-  const shown = active && !disabled && preview.status === "shown";
+  const shown = active && !disabled && (!!value || allowSavedReveal) && preview.status === "shown";
   const actionText = preview.status === "loading" ? I18N.settings.readingSavedCredential
     : value ? shown ? I18N.settings.hideCredential : I18N.settings.showCredential
     : shown ? I18N.settings.hideSavedCredential : I18N.settings.revealSavedCredential;
@@ -121,7 +123,7 @@ function CredentialInput({ profileId, field, textTranslation, label, hasSavedVal
       onKeyDown?.(event);
     }}
     action={(hasSavedValue || !!value) && <button type="button" className="saved-credential-input__toggle"
-      disabled={disabled || !active} aria-label={`${actionText}: ${label}`} title={`${actionText}: ${label}`}
+      disabled={disabled || !active || !value && !allowSavedReveal} aria-label={`${actionText}: ${label}`} title={`${actionText}: ${label}`}
       aria-pressed={shown} aria-busy={preview.status === "loading" || undefined} onClick={reveal}
       onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); hide(); } }}>
       <Icon name={preview.status === "hidden" ? "eye" : "eye-off"} /><span>{actionText}</span>

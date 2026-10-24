@@ -15,8 +15,8 @@ vi.mock("../../lib/ipc", async importOriginal => ({
   getAppleTranslationStatus: vi.fn(),
   getAppleTranslationSupport: vi.fn(),
 }));
-vi.mock("./AlibabaCredentialEditor", () => ({
-  AlibabaCredentialEditor: ({ disabled, sourceLanguage, textConnectionCheck }: { disabled: boolean; sourceLanguage: SourceLanguage; textConnectionCheck?: unknown }) =>
+vi.mock("./SpeechAndTextCredentialEditor", () => ({
+  TextTranslationEditor: ({ disabled, sourceLanguage, textConnectionCheck }: { disabled: boolean; sourceLanguage: SourceLanguage; textConnectionCheck?: unknown }) =>
     <div data-testid="translation-editor" aria-disabled={disabled} data-source-language={sourceLanguage} data-text-check={textConnectionCheck ? "available" : "unavailable"} />,
 }));
 

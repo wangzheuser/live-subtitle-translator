@@ -364,6 +364,21 @@ fn custom_speech_capabilities(
     capabilities
 }
 
+/// xAI STT supplies recognition; the selected text route supplies its own
+/// language limits. Original captions retain the complete STT catalog.
+pub fn xai_asr_capabilities(
+    route: TextTranslation,
+    target: TargetLanguage,
+) -> ProviderCapabilities {
+    let mut capabilities =
+        custom_speech_capabilities(ProviderKind::CustomDashScopeASR, route, target);
+    let speech = XAISpeechMode::AsrMt.capabilities();
+    capabilities
+        .source_languages
+        .retain(|language| speech.source_languages.contains(language));
+    capabilities
+}
+
 fn independent_catalog(
     route: TextTranslation,
 ) -> (&'static [&'static str], &'static [&'static str]) {
@@ -674,6 +689,8 @@ pub enum ServiceProfileError {
 pub enum TextTranslation {
     #[serde(rename = "followService")]
     FollowService,
+    #[serde(rename = "xAI")]
+    XAI,
     #[serde(rename = "deepL")]
     DeepL,
     #[serde(rename = "deepLX")]
@@ -714,7 +731,7 @@ where
 
 impl TextTranslation {
     pub const fn uses_chat_completions(self) -> bool {
-        matches!(self, Self::OpenAICompatible | Self::ChatMock)
+        matches!(self, Self::OpenAICompatible | Self::ChatMock | Self::XAI)
     }
 }
 
@@ -737,6 +754,9 @@ pub struct ServiceProfile {
     pub xai_speech_mode: XAISpeechMode,
     #[serde(default = "default_xai_text_model")]
     pub xai_text_model: String,
+    /// A completed same-profile upgrade must never resurrect a deleted text key.
+    #[serde(default)]
+    pub xai_independent_translation_migrated: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language_preset: Option<ProfileLanguagePreset>,
     /// User-declared explicit ASR languages, not server discovery. None means
@@ -797,10 +817,12 @@ impl ServiceProfile {
                 XAISpeechMode::Voice
             },
             xai_text_model: default_xai_text_model(),
+            xai_independent_translation_migrated: provider == ProviderKind::XAIRealtime,
             language_preset: None,
             custom_speech_source_languages: None,
             speech_recognition_name: None,
-            text_translation: None,
+            text_translation: (provider == ProviderKind::XAIRealtime)
+                .then_some(TextTranslation::XAI),
             text_translation_names: BTreeMap::new(),
             speech_network_proxy: None,
             text_network_proxy: None,
@@ -817,6 +839,7 @@ impl ServiceProfile {
             alibaba_workspace_id: String::new(),
             xai_speech_mode: XAISpeechMode::Voice,
             xai_text_model: default_xai_text_model(),
+            xai_independent_translation_migrated: false,
             language_preset: None,
             custom_speech_source_languages: None,
             speech_recognition_name: None,
@@ -835,16 +858,18 @@ impl ServiceProfile {
         profile.qwen_mt_model = self.qwen_mt_model;
         profile.set_alibaba_realtime(self.alibaba_realtime_mode, &self.alibaba_workspace_id)?;
         profile.set_xai_speech(self.xai_speech_mode, &self.xai_text_model)?;
+        profile.xai_independent_translation_migrated = self.xai_independent_translation_migrated;
         if matches!(
             self.text_translation,
             Some(
                 TextTranslation::DeepLX
+                    | TextTranslation::XAI
                     | TextTranslation::DeepL
                     | TextTranslation::OpenAICompatible
                     | TextTranslation::ChatMock
                     | TextTranslation::Apple
             )
-        ) && !self.provider.supports_text_translation()
+        ) && !self.supports_text_translation_configuration()
         {
             return Err(ServiceProfileError::UnsupportedTextTranslation);
         }
@@ -952,7 +977,9 @@ impl ServiceProfile {
         route: TextTranslation,
         name: &str,
     ) -> Result<(), ServiceProfileError> {
-        if route == TextTranslation::FollowService || !self.provider.supports_text_translation() {
+        if route == TextTranslation::FollowService
+            || !self.supports_text_translation_configuration()
+        {
             return Err(ServiceProfileError::UnsupportedTextTranslation);
         }
         let name = name.trim();
@@ -968,22 +995,26 @@ impl ServiceProfile {
     }
 
     pub fn text_translation(&self) -> TextTranslation {
+        if self.provider == ProviderKind::XAIRealtime && !self.uses_xai_asr() {
+            return TextTranslation::FollowService;
+        }
         if self.provider == ProviderKind::AlibabaCloud
             && self.alibaba_realtime_mode != AlibabaRealtimeMode::Disabled
         {
             return TextTranslation::FollowService;
         }
-        self.text_translation
-            .unwrap_or(if self.provider == ProviderKind::DeepLX {
-                TextTranslation::DeepLX
-            } else {
-                TextTranslation::FollowService
-            })
+        self.text_translation.unwrap_or(if self.uses_xai_asr() {
+            TextTranslation::XAI
+        } else if self.provider == ProviderKind::DeepLX {
+            TextTranslation::DeepLX
+        } else {
+            TextTranslation::FollowService
+        })
     }
 
     pub fn capabilities(&self, target: TargetLanguage) -> ProviderCapabilities {
         if self.uses_xai_asr() {
-            return self.xai_speech_mode.capabilities();
+            return xai_asr_capabilities(self.text_translation(), target);
         }
         if self.provider == ProviderKind::AlibabaCloud
             && self.alibaba_realtime_mode != AlibabaRealtimeMode::Disabled
@@ -1072,6 +1103,7 @@ impl ServiceProfile {
             (
                 ProviderKind::DeepLX,
                 TextTranslation::FollowService
+                | TextTranslation::XAI
                 | TextTranslation::DeepL
                 | TextTranslation::OpenAICompatible
                 | TextTranslation::ChatMock
@@ -1079,6 +1111,16 @@ impl ServiceProfile {
             ) => ProviderKind::AlibabaCloud,
             _ => self.provider,
         }
+    }
+
+    pub fn is_standalone_asr(&self) -> bool {
+        self.provider.is_standalone_asr() || self.uses_xai_asr()
+    }
+
+    /// Stored destinations survive integrated-mode switches. This does not
+    /// turn Grok Voice into a recognizer with an independent text phase.
+    pub fn supports_text_translation_configuration(&self) -> bool {
+        self.provider.supports_text_translation() || self.provider == ProviderKind::XAIRealtime
     }
 }
 

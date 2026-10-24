@@ -5,7 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { Icon } from "../../components/Icon";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { I18N, providerDisplayName } from "../../lib/i18n";
-import { SERVICE_PROVIDERS, credentialStateForTarget, isCustomSpeechProvider, isStandaloneAsrProvider, subtitlePreferencesChanged, textTranslationForProfile, usesAlibabaRealtime } from "../../lib/providerCapabilities";
+import { SERVICE_PROVIDERS, credentialStateForTarget, isCustomSpeechProvider, isStandaloneAsrProvider, subtitlePreferencesChanged, textTranslationForProfile, usesAlibabaRealtime, usesXaiAsr } from "../../lib/providerCapabilities";
 import { DEFAULT_NETWORK_PROXY, networkProxyConfigKey } from "../../lib/networkProxy";
 import {
   buildProviderCredentials,
@@ -61,6 +61,7 @@ import { TencentSetupHelp } from "./TencentSetupHelp";
 import { profileCopyName } from "../../lib/profileCopyName";
 import { AlibabaRealtimeSettings } from "./AlibabaRealtimeSettings";
 import { QwenMTModelSettings } from "./QwenMTModelSettings";
+import { XAISpeechSettings } from "./XAISpeechSettings";
 import { ServiceEditorModule } from "./ServiceEditorModule";
 import { useServicePageNavigation } from "./useServicePageNavigation";
 
@@ -142,8 +143,8 @@ export function ServiceProfiles({
   const creationInFlight = useRef(false);
   const mutationInFlight = useRef(false);
   const proxyKeys = useMemo(() => Object.fromEntries(settings.profiles.map(profile => {
-    const speech = JSON.stringify([networkProxyConfigKey(profile.speechNetworkProxy ?? settings.networkProxy ?? DEFAULT_NETWORK_PROXY), profile.alibabaRealtimeMode ?? "disabled", profile.alibabaWorkspaceId ?? ""]);
-    const text = networkProxyConfigKey(profile.textNetworkProxy ?? settings.networkProxy ?? DEFAULT_NETWORK_PROXY);
+    const speech = JSON.stringify([networkProxyConfigKey(profile.speechNetworkProxy ?? settings.networkProxy ?? DEFAULT_NETWORK_PROXY), profile.alibabaRealtimeMode ?? "disabled", profile.alibabaWorkspaceId ?? "", profile.xaiSpeechMode ?? "voice"]);
+    const text = JSON.stringify([networkProxyConfigKey(profile.textNetworkProxy ?? settings.networkProxy ?? DEFAULT_NETWORK_PROXY), profile.xaiTextModel ?? "grok-4.3", profile.xaiSpeechMode ?? "voice"]);
     return [profile.id, { speech, text, combined: JSON.stringify([speech, text]) }];
   })), [settings.profiles, settings.networkProxy]);
   const proxyKey = JSON.stringify(proxyKeys);
@@ -286,7 +287,7 @@ export function ServiceProfiles({
   }, [appleResourcesRequest, appleResourcesProfileId, handledAppleResourcesRequest, pendingAction, selectedProfile?.id,
     selectedProfile?.provider, settings.activeProfileId, showsEditor, visible]);
 
-  const hasIndependentTextProxy = !!selectedProfile && !usesAlibabaRealtime(selectedProfile) && (isStandaloneAsrProvider(selectedProfile.provider) || ["alibabaCloud", "deepLX"].includes(selectedProfile.provider));
+  const hasIndependentTextProxy = !!selectedProfile && !usesAlibabaRealtime(selectedProfile) && (usesXaiAsr(selectedProfile) || isStandaloneAsrProvider(selectedProfile.provider) || ["alibabaCloud", "deepLX"].includes(selectedProfile.provider));
   const hasRemoteTextProxy = hasIndependentTextProxy && selectedProfile && textTranslationForProfile(selectedProfile) !== "apple";
 
   const SelectedCredentialEditor = selectedProfile?.provider === "appleSpeech" ? AppleSpeechSettings : selectedProfile && isCustomSpeechProvider(selectedProfile.provider) ? CustomSpeechCredentialEditor : selectedProfile && ["alibabaCloud", "deepLX"].includes(selectedProfile.provider) ? AlibabaCredentialEditor : CredentialEditor;
@@ -578,7 +579,7 @@ export function ServiceProfiles({
   const renderConnectionCheck = (profile: ServiceProfile, stage?: ConnectionCheckStage, draft?: ProviderCredentialsInput | null, sourceLanguage?: SourceLanguage) => {
     const key = stage ?? "combined";
     const outcome = diagnostics[key];
-    const context = JSON.stringify([profile.provider, textTranslationForProfile(profile), profile.alibabaRealtimeMode ?? "disabled", profile.alibabaWorkspaceId ?? "", sourceLanguage ?? settings.sourceLanguage,
+    const context = JSON.stringify([profile.provider, textTranslationForProfile(profile), profile.alibabaRealtimeMode ?? "disabled", profile.alibabaWorkspaceId ?? "", profile.xaiSpeechMode ?? "voice", stage === "speech" ? null : profile.xaiTextModel ?? "grok-4.3", sourceLanguage ?? settings.sourceLanguage,
       stage === "speech" ? null : settings.targetLanguage]);
     return <DraftConnectionCheck key={`${profile.id}:${key}`} draft={draft} context={context}
       outcome={outcome?.profileId === profile.id ? outcome : undefined}
@@ -705,6 +706,19 @@ export function ServiceProfiles({
                   }} />
 }
           </ServiceEditorModule>}
+          {selectedProfile.provider === "xAIRealtime" && <ServiceEditorModule kind="models">
+            <XAISpeechSettings key={selectedProfile.id} profile={selectedProfile} disabled={mutationsDisabled}
+              onSave={async options => {
+                if (mutationInFlight.current || mutationsDisabled) throw new Error("profile-change-requires-stop");
+                mutationInFlight.current = true;
+                setPendingAction("save-model");
+                try {
+                  const snapshot = await trackProfileOperation(() => updateProfile(selectedProfile.id, undefined, options));
+                  invalidateProfileCheck(selectedProfile.id, options.xaiSpeechMode ? undefined : "text");
+                  return snapshot;
+                } finally { mutationInFlight.current = false; setPendingAction(null); }
+              }} />
+          </ServiceEditorModule>}
           <div className="service-detail__connection service-editor-module service-editor-module--connection">
             <SelectedCredentialEditor
               support={apple.support} settings={settings} requiresStop={requiresStop} loading={apple.loading} failed={apple.failed} sourceLanguage={settings.sourceLanguage} targetLanguage={settings.targetLanguage}
@@ -724,7 +738,7 @@ export function ServiceProfiles({
                   invalidateProfileCheck(profileId);
                 } finally { mutationInFlight.current = false; }
               }}
-              connectionCheck={(draft: ProviderCredentialsInput | null | undefined, sourceLanguage?: SourceLanguage) => renderConnectionCheck(selectedProfile, isStandaloneAsrProvider(selectedProfile.provider) || ["alibabaCloud", "deepLX"].includes(selectedProfile.provider) ? "speech" : undefined, draft, sourceLanguage)}
+              connectionCheck={(draft: ProviderCredentialsInput | null | undefined, sourceLanguage?: SourceLanguage) => renderConnectionCheck(selectedProfile, usesXaiAsr(selectedProfile) || isStandaloneAsrProvider(selectedProfile.provider) || ["alibabaCloud", "deepLX"].includes(selectedProfile.provider) ? "speech" : undefined, draft, sourceLanguage)}
               textConnectionCheck={(draft) => renderConnectionCheck(selectedProfile, "text", draft)}
 
               key={selectedProfile.id}
@@ -893,6 +907,7 @@ function CredentialEditor({
   confirmingDelete,
   onCancelDelete,
   connectionCheck,
+  textConnectionCheck,
 }: {
   connectionCheck?: ReactNode | ((draft?: ProviderCredentialsInput | null) => ReactNode);
   textConnectionCheck?: (draft?: ProviderCredentialsInput | null) => ReactNode;
@@ -984,8 +999,10 @@ function CredentialEditor({
     void onConfirmDelete();
   };
 
+  const xaiAsr = usesXaiAsr(profile);
+  const textCheck = xaiAsr && textConnectionCheck?.(!hasCredentialChanges ? undefined : probeCredentials);
   const serviceIdentity = <section className="service-stage service-stage--integrated">
-    <header className="service-stage__heading"><h3>{I18N.settings.voiceTranslation}</h3><SettingsHelp text={I18N.settings.textTranslationUnsupported} label={I18N.settings.helpLabel} /></header>
+    <header className="service-stage__heading"><h3>{xaiAsr ? I18N.settings.speechRecognition : I18N.settings.voiceTranslation}</h3>{!xaiAsr && <SettingsHelp text={I18N.settings.textTranslationUnsupported} label={I18N.settings.helpLabel} />}</header>
     {profile.provider === "tencentCloud" && <TencentSetupHelp />}
   </section>;
   const storageHelp = <CredentialStorageHelp id={noteId} profile={profile} />;
@@ -993,8 +1010,9 @@ function CredentialEditor({
 
   return (
     <div className="credential-panel" aria-busy={busy}>
-      <div className="service-credential-toolbar">
+      <div className={`service-credential-toolbar${xaiAsr ? " service-credential-toolbar--split" : ""}`}>
         {storageHelp}
+        <div className="service-credential-toolbar__actions">
         {profile.credentialState === "present" && (
           <button
             type="button"
@@ -1006,6 +1024,8 @@ function CredentialEditor({
           </button>
         )}
         {check}
+        {textCheck}
+        </div>
       </div>
       {serviceIdentity}
 

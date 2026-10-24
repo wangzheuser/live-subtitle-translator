@@ -23,6 +23,7 @@ pub(super) fn disable(body: &mut Value, endpoint: &url::Url) {
         "api.openai.com" if openai_optional_thinking(model) => {
             Some(("reasoning_effort", json!("none")))
         }
+        "api.x.ai" if named(model, &["grok-4.3"]) => Some(("reasoning_effort", json!("none"))),
         "generativelanguage.googleapis.com" if gemini_optional_thinking(model) => {
             Some(("reasoning_effort", json!("none")))
         }

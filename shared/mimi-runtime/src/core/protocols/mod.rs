@@ -21,3 +21,5 @@ pub mod deeplx;
 pub mod endpoint;
 #[cfg(test)]
 mod translation_contract_tests;
+
+pub mod xai_stt;

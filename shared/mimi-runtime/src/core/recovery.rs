@@ -290,7 +290,12 @@ impl MTBudgetScope {
         profile_id: String,
         configuration: &LiveTranslationConfiguration,
     ) -> Option<Self> {
-        let route = if matches!(
+        let route = if configuration.uses_xai_asr() {
+            if !configuration.target_language.translates_audio() {
+                return None;
+            }
+            MTBudgetRoute::OpenAICompatible
+        } else if matches!(
             configuration.text_credentials,
             Some(TextTranslationCredentials::Apple)
         ) {

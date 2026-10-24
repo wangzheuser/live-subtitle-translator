@@ -8,7 +8,7 @@
     <string name="guide_detail_volcano">Uses Doubao Simultaneous Interpretation 2.0 to return original text and translations in real time.\nThe translation service cannot be changed separately.</string>
     <string name="guide_detail_tencent">Tencent Cloud recognizes and translates speech in real time.\nThe translation service cannot be changed separately.</string>
     <string name="guide_detail_baidu">Baidu recognizes and translates speech in real time.\nThe translation service cannot be changed separately.</string>
-    <string name="guide_detail_xai">Uses Grok Voice to translate in segments after detecting pauses in speech.\nThe translation service cannot be changed separately.</string>
+    <string name="guide_detail_xai">Use xAI streaming recognition with your chosen Grok text model.\nGrok Voice is also available for translation after speech pauses.</string>
     <string name="guide_help_dashscope">Enable Model Studio and create an API key. Simultaneous translation also requires a Beijing workspace ID.</string>
     <string name="guide_help_openai">Create an OpenAI API project and key with Realtime access. ChatGPT subscriptions do not include API usage.</string>
     <string name="guide_help_gemini">Create a Gemini API key in Google AI Studio and check Live API availability for your project.</string>
@@ -16,7 +16,7 @@
     <string name="guide_help_volcano">Verify your account and enable Simultaneous Interpretation 2.0 in the new Doubao Voice console. Mimi uses the new API key, not the legacy AppID/access token.</string>
     <string name="guide_help_tencent">Realtime speech translation requires your account AppID and a SecretID / SecretKey pair from the same account. Find AppID on Account Information, not UIN; find the pair on CAM API Keys. Enable the service in the ASR console. A single Hunyuan model API key cannot authenticate this API. Pay-as-you-go must be enabled explicitly.</string>
     <string name="guide_help_baidu">Create a Machine Translation app in Baidu AI Cloud with realtime speech translation access. AppKey means the app\'s API Key, not Secret Key.</string>
-    <string name="guide_help_xai">Create an API key in the xAI console and check realtime voice access and available credits.</string>
+    <string name="guide_help_xai">Create an API key in the xAI console. Check available credits and access to the selected speech and text models.</string>
     <string name="profiles_alibaba_mode">Recognition and translation</string>
     <string name="profiles_alibaba_asr_mt">ASR + MT</string>
     <string name="profiles_alibaba_live">Simultaneous translation</string>

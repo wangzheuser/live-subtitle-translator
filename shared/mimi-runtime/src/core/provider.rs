@@ -15,6 +15,41 @@ use std::fmt;
 use thiserror::Error;
 
 pub const DEFAULT_ALIBABA_PROFILE_ID: &str = "alibaba-default";
+pub const DEFAULT_XAI_TEXT_MODEL: &str = "grok-4.3";
+pub const XAI_TEXT_ENDPOINT: &str = "https://api.x.ai/v1/chat/completions";
+
+pub fn default_xai_text_model() -> String {
+    DEFAULT_XAI_TEXT_MODEL.to_owned()
+}
+
+/// Missing metadata preserves the historical turn-based Voice route.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum XAISpeechMode {
+    #[default]
+    #[serde(rename = "voice")]
+    Voice,
+    #[serde(rename = "asrMt")]
+    AsrMt,
+}
+
+impl XAISpeechMode {
+    pub fn capabilities(self) -> ProviderCapabilities {
+        match self {
+            Self::Voice => ProviderKind::XAIRealtime.capabilities(),
+            Self::AsrMt => ProviderCapabilities {
+                source_languages: [
+                    vec![SourceLanguage::Automatic],
+                    source_languages(crate::core::protocols::xai_stt::LANGUAGE_CODES),
+                ]
+                .concat(),
+                target_languages: TargetLanguage::ALL.to_vec(),
+                translation_modes: vec![TranslationMode::Turbo],
+                input_sample_rate_hz: 16_000,
+                target_pairs: Vec::new(),
+            },
+        }
+    }
+}
 
 /// Experimental integrated audio routes; absent metadata keeps the ASR + MT chain.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -606,6 +641,10 @@ where
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ServiceProfileError {
+    #[error("xAI speech options require an xAI configuration.")]
+    UnsupportedXAISpeech,
+    #[error("Enter a valid xAI text model name (up to 256 bytes).")]
+    InvalidXAITextModel,
     #[error("{0}")]
     NetworkProxy(#[from] ProxyConfigError),
     #[error("The selected speech service does not support separate text translation.")]
@@ -694,6 +733,10 @@ pub struct ServiceProfile {
     /// Optional non-secret workspace identifier, never an API key.
     #[serde(default)]
     pub alibaba_workspace_id: String,
+    #[serde(default)]
+    pub xai_speech_mode: XAISpeechMode,
+    #[serde(default = "default_xai_text_model")]
+    pub xai_text_model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language_preset: Option<ProfileLanguagePreset>,
     /// User-declared explicit ASR languages, not server discovery. None means
@@ -748,6 +791,12 @@ impl ServiceProfile {
             qwen_mt_model: Default::default(),
             alibaba_realtime_mode: Default::default(),
             alibaba_workspace_id: String::new(),
+            xai_speech_mode: if provider == ProviderKind::XAIRealtime {
+                XAISpeechMode::AsrMt
+            } else {
+                XAISpeechMode::Voice
+            },
+            xai_text_model: default_xai_text_model(),
             language_preset: None,
             custom_speech_source_languages: None,
             speech_recognition_name: None,
@@ -766,6 +815,8 @@ impl ServiceProfile {
             qwen_mt_model: Default::default(),
             alibaba_realtime_mode: Default::default(),
             alibaba_workspace_id: String::new(),
+            xai_speech_mode: XAISpeechMode::Voice,
+            xai_text_model: default_xai_text_model(),
             language_preset: None,
             custom_speech_source_languages: None,
             speech_recognition_name: None,
@@ -783,6 +834,7 @@ impl ServiceProfile {
         profile.language_preset = self.language_preset;
         profile.qwen_mt_model = self.qwen_mt_model;
         profile.set_alibaba_realtime(self.alibaba_realtime_mode, &self.alibaba_workspace_id)?;
+        profile.set_xai_speech(self.xai_speech_mode, &self.xai_text_model)?;
         if matches!(
             self.text_translation,
             Some(
@@ -818,6 +870,27 @@ impl ServiceProfile {
             .map(ProxyConfig::validate)
             .transpose()?;
         Ok(profile)
+    }
+
+    pub fn set_xai_speech(
+        &mut self,
+        mode: XAISpeechMode,
+        model: &str,
+    ) -> Result<(), ServiceProfileError> {
+        if self.provider != ProviderKind::XAIRealtime
+            && (mode != XAISpeechMode::Voice || model != DEFAULT_XAI_TEXT_MODEL)
+        {
+            return Err(ServiceProfileError::UnsupportedXAISpeech);
+        }
+        let model = crate::core::protocols::openai_compatible::validate_model(model)
+            .map_err(|_| ServiceProfileError::InvalidXAITextModel)?;
+        self.xai_speech_mode = mode;
+        self.xai_text_model = model;
+        Ok(())
+    }
+
+    pub fn uses_xai_asr(&self) -> bool {
+        self.provider == ProviderKind::XAIRealtime && self.xai_speech_mode == XAISpeechMode::AsrMt
     }
 
     pub fn set_alibaba_realtime(
@@ -909,6 +982,9 @@ impl ServiceProfile {
     }
 
     pub fn capabilities(&self, target: TargetLanguage) -> ProviderCapabilities {
+        if self.uses_xai_asr() {
+            return self.xai_speech_mode.capabilities();
+        }
         if self.provider == ProviderKind::AlibabaCloud
             && self.alibaba_realtime_mode != AlibabaRealtimeMode::Disabled
         {
@@ -1014,6 +1090,48 @@ impl Default for ServiceProfile {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn xai_profiles_preserve_legacy_voice_and_opt_into_streaming_for_new_profiles() {
+        let legacy: ServiceProfile =
+            serde_json::from_str(r#"{"id":"legacy-xai","name":"xAI","provider":"xAIRealtime"}"#)
+                .unwrap();
+        let legacy = legacy.validated().unwrap();
+        assert_eq!(legacy.xai_speech_mode, XAISpeechMode::Voice);
+        assert!(!legacy
+            .capabilities(TargetLanguage::Original)
+            .target_languages
+            .contains(&TargetLanguage::Original));
+        let mut profile = ServiceProfile::new("new-xai", "xAI", ProviderKind::XAIRealtime).unwrap();
+        assert!(profile.uses_xai_asr());
+        assert_eq!(
+            profile
+                .capabilities(TargetLanguage::Original)
+                .input_sample_rate_hz,
+            16_000
+        );
+        assert!(profile
+            .capabilities(TargetLanguage::Original)
+            .target_languages
+            .contains(&TargetLanguage::Original));
+        profile
+            .set_xai_speech(XAISpeechMode::AsrMt, " custom-text-model ")
+            .unwrap();
+        let restored: ServiceProfile =
+            serde_json::from_value(serde_json::to_value(profile.validated().unwrap()).unwrap())
+                .unwrap();
+        assert_eq!(restored.xai_text_model, "custom-text-model");
+        assert!(profile
+            .set_xai_speech(XAISpeechMode::AsrMt, "bad\nmodel")
+            .is_err());
+        let mut other = ServiceProfile::alibaba_default();
+        assert!(other
+            .set_xai_speech(XAISpeechMode::AsrMt, DEFAULT_XAI_TEXT_MODEL)
+            .is_err());
+        assert!(other
+            .set_xai_speech(XAISpeechMode::Voice, "other-model")
+            .is_err());
+    }
+
     #[test]
     fn workspace_ids_match_the_realtime_endpoint_dns_label() {
         for valid in ["a", "123456", "test-workspace"] {
@@ -1197,7 +1315,13 @@ mod tests {
                 TargetLanguage::French,
             ),
         ] {
-            let profile = ServiceProfile::new("target-test", "Target", provider).unwrap();
+            let mut profile = ServiceProfile::new("target-test", "Target", provider).unwrap();
+            // Keep this matrix on the historical integrated Voice route.
+            if provider == ProviderKind::XAIRealtime {
+                profile
+                    .set_xai_speech(XAISpeechMode::Voice, DEFAULT_XAI_TEXT_MODEL)
+                    .unwrap();
+            }
             let prefs = ProviderPreferences {
                 source_language: source,
                 target_language: TargetLanguage::SimplifiedChinese,

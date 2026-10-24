@@ -5,7 +5,7 @@ import { InlineFeedback } from "./SettingsPrimitives";
 import { NameDraft, NameDraftContext, type NameDraftKey } from "./nameDraftOwner";
 
 /** Keep a native editing draft while committing only trimmed display metadata. */
-export function AutoSaveNameField({ id, label, value, placeholder, draftKey, disabled = false, readOnly = false, allowEmpty = true, className = "", onSave }: {
+export function AutoSaveNameField({ id, label, value, placeholder, draftKey, disabled = false, readOnly = false, allowEmpty = true, className = "", maxLength = 64, requiredMessage, onSave }: {
   id: string;
   label: string;
   value: string;
@@ -15,6 +15,8 @@ export function AutoSaveNameField({ id, label, value, placeholder, draftKey, dis
   readOnly?: boolean;
   allowEmpty?: boolean;
   className?: string;
+  maxLength?: number;
+  requiredMessage?: string;
   onSave: (name: string) => Promise<unknown>;
 }) {
   const scope = useContext(NameDraftContext);
@@ -27,7 +29,7 @@ export function AutoSaveNameField({ id, label, value, placeholder, draftKey, dis
     return () => current.detach();
   }, [current]);
   useEffect(() => {
-    current.options = { readOnly, allowEmpty, onSave };
+    current.options = { readOnly, allowEmpty, requiredMessage, onSave };
   });
   useEffect(() => {
     current.receive(value);
@@ -41,7 +43,7 @@ export function AutoSaveNameField({ id, label, value, placeholder, draftKey, dis
   return <div className={`settings-field auto-save-name-field ${className}`}>
     <label htmlFor={id}>{label}</label>
     <span className="settings-field__inline">
-      <ConfigInput id={id} value={draft} maxLength={64} disabled={disabled} readOnly={readOnly}
+      <ConfigInput id={id} value={draft} maxLength={maxLength} disabled={disabled} readOnly={readOnly}
         placeholder={placeholder} autoComplete="off"
         aria-invalid={error ? true : undefined} aria-describedby={error ? `${id}-error` : undefined}
         onValueChange={next => current.change(next)}

@@ -146,14 +146,14 @@
       "androidResource": "guide_detail_xai",
       "desktopSetting": "providerXAIDescription",
       "translations": {
-        "zh": "使用 Grok Voice，检测到说话停顿后分段生成译文。\n翻译服务不可单独更换。",
-        "zh-TW": "使用 Grok Voice，偵測到說話停頓後分段產生譯文。\n翻譯服務不可單獨更換。",
-        "en": "Uses Grok Voice to translate in segments after detecting pauses in speech.\nThe translation service cannot be changed separately.",
-        "ja": "Grok Voice が発話の切れ目を検出して区切りごとに翻訳します。\n翻訳サービスだけを変更することはできません。",
-        "de": "Grok Voice übersetzt abschnittsweise, sobald Sprechpausen erkannt werden.\nDer Übersetzungsdienst kann nicht separat gewechselt werden.",
-        "ko": "Grok Voice가 말 사이의 멈춤을 감지한 뒤 구간별로 번역합니다.\n번역 서비스만 별도로 변경할 수 없습니다.",
-        "fr": "Grok Voice traduit par segments après détection des pauses dans la parole.\nLe service de traduction ne peut pas être remplacé séparément.",
-        "th": "Grok Voice แปลเป็นช่วงหลังตรวจพบการหยุดพูด\nไม่สามารถเปลี่ยนเฉพาะบริการแปลได้"
+        "zh": "可使用 xAI 流式识别与自选 Grok 文字模型翻译。\n也可选择在说话停顿后分段翻译的 Grok Voice。",
+        "zh-TW": "可使用 xAI 串流辨識與自選 Grok 文字模型翻譯。\n也可選擇在說話停頓後分段翻譯的 Grok Voice。",
+        "en": "Use xAI streaming recognition with your chosen Grok text model.\nGrok Voice is also available for translation after speech pauses.",
+        "ja": "xAI のストリーミング音声認識と選択した Grok テキストモデルで翻訳します。\n発話の切れ目で翻訳する Grok Voice も選べます。",
+        "de": "xAI-Spracherkennung mit wählbarem Grok-Textmodell zur Übersetzung.\nAlternativ übersetzt Grok Voice nach Sprechpausen.",
+        "ko": "xAI 스트리밍 음성 인식과 선택한 Grok 텍스트 모델로 번역합니다.\n말이 멈춘 뒤 번역하는 Grok Voice도 선택할 수 있습니다.",
+        "fr": "Reconnaissance vocale xAI en continu et modèle texte Grok au choix.\nGrok Voice peut aussi traduire après les pauses de parole.",
+        "th": "ใช้การรู้จำเสียงสตรีมมิงของ xAI กับโมเดลข้อความ Grok ที่เลือก\nหรือเลือก Grok Voice ที่แปลหลังช่วงหยุดพูด"
       }
     },
     "providerAlibabaSetup": {
@@ -283,14 +283,14 @@
       "androidResource": "guide_help_xai",
       "desktopSetting": null,
       "translations": {
-        "zh": "在 xAI 控制台创建 API Key，并确认账号有实时语音服务额度与访问权限。",
-        "zh-TW": "在 xAI 控制台建立 API Key，並確認帳號有即時語音服務額度與訪問權限。",
-        "en": "Create an API key in the xAI console and check realtime voice access and available credits.",
-        "ja": "xAI コンソールで API Key を作成し、リアルタイム音声へのアクセスと残高を確認してください。",
-        "de": "Einen API-Schlüssel in der xAI-Konsole erstellen und Echtzeit-Sprachzugriff sowie verfügbares Guthaben prüfen.",
-        "ko": "xAI 콘솔에서 API 키를 생성하고 실시간 음성 접근 권한과 사용 가능한 크레딧을 확인하세요.",
-        "fr": "Créez une clé API dans la console xAI et vérifiez l’accès vocal en temps réel ainsi que les crédits disponibles.",
-        "th": "สร้าง API key ในคอนโซล xAI แล้วตรวจสอบสิทธิ์เสียงเรียลไทม์และเครดิตที่ใช้ได้"
+        "zh": "在 xAI 控制台创建 API Key，确认账号有可用额度，并已开通所选语音识别和文字模型。",
+        "zh-TW": "在 xAI 控制台建立 API Key，確認帳號有可用額度，並已開通所選語音辨識和文字模型。",
+        "en": "Create an API key in the xAI console. Check available credits and access to the selected speech and text models.",
+        "ja": "xAI コンソールで API Key を作成し、残高と選択した音声認識・テキストモデルへのアクセスを確認してください。",
+        "de": "API-Schlüssel in der xAI-Konsole erstellen. Guthaben und Zugriff auf die gewählten Sprach- und Textmodelle prüfen.",
+        "ko": "xAI 콘솔에서 API 키를 만들고 잔액과 선택한 음성 인식 및 텍스트 모델의 접근 권한을 확인하세요.",
+        "fr": "Créez une clé API dans la console xAI. Vérifiez les crédits et l’accès aux modèles vocaux et texte choisis.",
+        "th": "สร้าง API key ในคอนโซล xAI ตรวจสอบเครดิตและสิทธิ์ใช้โมเดลเสียงและข้อความที่เลือก"
       }
     },
     "alibabaModeLabel": {

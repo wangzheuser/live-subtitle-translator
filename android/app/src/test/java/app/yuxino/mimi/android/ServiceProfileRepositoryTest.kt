@@ -41,6 +41,31 @@ class ServiceProfileRepositoryTest {
         assertTrue(repository.migrate(emptyList(), null)); assertTrue(repository.profiles().isEmpty())
     }
 
+    @Test fun xaiModesAndModelsPersistDuplicateAndPreserveLegacyVoice() {
+        val disk = MemoryDisk(); val repository = ServiceProfileRepository(disk)
+        val contents = ProfileContents(ServiceConfiguration(ServiceProvider.XAI, mapOf("apiKey" to "synthetic-xai-key"),
+            xaiSpeechMode = "asrMt", xaiTextModel = "grok-custom-text"))
+        val id = repository.save(null, "Streaming", contents)!!
+        val copied = repository.duplicate(id, "Copy")!!
+        val restored = ServiceProfileRepository(disk).contents(copied).speech
+        assertEquals("asrMt", restored.xaiSpeechMode)
+        assertEquals("grok-custom-text", restored.xaiTextModel)
+        assertEquals("synthetic-xai-key", restored.value("apiKey"))
+        val catalog = org.json.JSONObject(disk.catalog!!)
+        val entries = catalog.getJSONArray("profiles")
+        for (index in 0 until entries.length()) {
+            entries.getJSONObject(index).getJSONObject("details").getJSONObject("speech").apply {
+                remove("xaiSpeechMode"); remove("xaiTextModel")
+            }
+        }
+        disk.catalog = catalog.toString()
+        val legacy = ServiceProfileRepository(disk).contents(id).speech
+        assertEquals("voice", legacy.xaiSpeechMode)
+        assertEquals("grok-4.3", legacy.xaiTextModel)
+        assertEquals("voice", LegacyServiceProfiles.read(mapOf("api_key_xai" to "synthetic-legacy-key"))
+            .profiles.single().second.speech.xaiSpeechMode)
+    }
+
     @Test fun sameProviderProfilesKeepKeysModelsModesAndTranslatorsIndependentAfterReload() {
         val disk = MemoryDisk(); val repository = ServiceProfileRepository(disk)
         val first = repository.save(null, "ASR", contents("one", "plus"))!!

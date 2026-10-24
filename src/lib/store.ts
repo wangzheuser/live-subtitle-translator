@@ -517,7 +517,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       activeProfileId: current.profiles.length ? current.activeProfileId : id,
       profiles: [
         ...current.profiles,
-        { id, name, provider, credentialState: "missing", ...(provider === "alibabaCloud" ? { alibabaRealtimeMode: "liveTranslate" as const, alibabaWorkspaceId: "" } : {}), ...(isCustomSpeechProvider(provider) ? { speechCredentialState: "missing" as const, textCredentialState: "missing" as const } : {}) },
+        { id, name, provider, credentialState: "missing", ...(provider === "xAIRealtime" ? { xaiSpeechMode: "asrMt" as const, xaiTextModel: "grok-4.3" } : {}), ...(provider === "alibabaCloud" ? { alibabaRealtimeMode: "liveTranslate" as const, alibabaWorkspaceId: "" } : {}), ...(isCustomSpeechProvider(provider) ? { speechCredentialState: "missing" as const, textCredentialState: "missing" as const } : {}) },
       ],
     };
     set({ settings: snapshot });
@@ -575,6 +575,12 @@ export const useStore = create<StoreState>()((set, get) => ({
       if (!["disabled", "liveTranslate"].includes(mode) || workspace.length > 63
         || (workspace !== "" && !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(workspace)) || (mode !== "disabled" && workspace === "")) throw new Error("alibaba-realtime-invalid");
     }
+    if (options?.xaiSpeechMode !== undefined || options?.xaiTextModel !== undefined) {
+      const profile = current.profiles.find(profile => profile.id === profileId);
+      if (profile?.provider !== "xAIRealtime") throw new Error("provider-mismatch");
+      if (options.xaiSpeechMode !== undefined && !["voice", "asrMt"].includes(options.xaiSpeechMode)) throw new Error("provider-mismatch");
+      if (options.xaiTextModel !== undefined && (!options.xaiTextModel.trim() || new TextEncoder().encode(options.xaiTextModel.trim()).length > 256 || /\p{Cc}/u.test(options.xaiTextModel))) throw new Error("invalid-openai-compatible-model");
+    }
     const declaration = options?.customSpeechSourceLanguages ?? null;
     if (hasDeclaration) {
       const profile = current.profiles.find(profile => profile.id === profileId);
@@ -604,16 +610,17 @@ export const useStore = create<StoreState>()((set, get) => ({
           }
           return { ...profile, ...(name === undefined ? {} : { name: name.trim() }), ...proxies, textTranslationNames,
             ...(options?.alibabaWorkspaceId === undefined ? {} : { alibabaWorkspaceId: options.alibabaWorkspaceId.trim() }),
+            ...(options?.xaiTextModel === undefined ? {} : { xaiTextModel: options.xaiTextModel.trim() }),
             ...(hasDeclaration ? { customSpeechSourceLanguages: declaration === null ? null : SOURCE_LANGUAGE_CODES.filter(code => declaration.includes(code)) } : {}),
             ...(speechRecognitionName === undefined ? {} : { speechRecognitionName: speechRecognitionName.trim() || undefined }) };
         })() : profile,
       ),
     };
-    if ((hasDeclaration || options?.alibabaRealtimeMode !== undefined) && current.activeProfileId === profileId) {
-      if (options?.alibabaRealtimeMode !== undefined) snapshot.languageCapabilities = undefined;
+    if ((hasDeclaration || options?.alibabaRealtimeMode !== undefined || options?.xaiSpeechMode !== undefined) && current.activeProfileId === profileId) {
+      if (options?.alibabaRealtimeMode !== undefined || options?.xaiSpeechMode !== undefined) snapshot.languageCapabilities = undefined;
       const sources = sourceLanguagesForSettings(snapshot);
       if (!sources.includes(snapshot.sourceLanguage)) snapshot.sourceLanguage = sources[0]!;
-      if (options?.alibabaRealtimeMode !== undefined) {
+      if (options?.alibabaRealtimeMode !== undefined || options?.xaiSpeechMode !== undefined) {
         const targets = targetLanguagesForSettings(snapshot);
         if (!targets.includes(snapshot.targetLanguage)) snapshot.targetLanguage = targets[0]!;
       }

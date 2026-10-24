@@ -338,6 +338,15 @@ export function credentialErrorMessage(error: unknown, platform?: DiagnosticPlat
   if (error === "apple_speech_resources_unavailable") return I18N.settings.appleSpeechResourcesUnavailable;
   if (error === "apple_speech_preparing") return I18N.settings.appleSpeechPreparationInProgress;
   if (["apple_speech_setup_timeout", "apple_speech_start_failed", "apple_speech_recognition_failed", "apple_speech_runtime_timeout", "apple_speech_stream_closed", "apple_speech_audio_failed", "apple_speech_not_connected", "apple_speech_result_backlog", "apple_speech_invalid_result", "apple_speech_finalize_timeout"].includes(error)) return I18N.settings.appleSpeechRecognitionFailed;
+  if (error === "xai_stt_credentials_missing") return diagnosticCopy().missing;
+  if (error === "xai_stt_authentication_failed") return diagnosticCopy().auth;
+  if (error === "xai_stt_language_unsupported") return diagnosticCopy().reasons.unsupportedLanguage;
+  if (error === "xai_stt_unreachable" || error === "xai_stt_not_connected") return diagnosticCopy().speechUnreachable;
+  if (error === "xai_stt_setup_timeout" || error === "xai_stt_health_timeout") return diagnosticCopy().speechTimeout;
+  if (error === "xai_stt_session_rejected") return diagnosticCopy().reasons.serviceRejected;
+  if (error === "xai_stt_protocol_invalid" || error === "xai_stt_audio_invalid") return diagnosticCopy().checkFailed;
+  if (error === "Enter a valid xAI text model name (up to 256 bytes).") return I18N.settings.openAICompatibleModelInvalid;
+  if (error === "Invalid xAI speech mode or text model." || error === "xAI speech options require an xAI configuration.") return diagnosticCopy().reasons.invalidConfiguration;
   if (error === "custom_speech_endpoint_invalid") return I18N.settings.customSpeechEndpointInvalid;
   if (error === "custom_speech_model_invalid") return I18N.settings.customSpeechModelInvalid;
   if (error === "custom_speech_session_rejected") return I18N.settings.customSpeechRejected;
@@ -428,6 +437,11 @@ export function sessionErrorSettingsTarget(error: unknown): SettingsNavigationTa
     "custom_speech_endpoint_invalid",
     "custom_speech_model_invalid",
     "text_translation_credentials_missing",
+    "xai_stt_credentials_missing",
+    "xai_stt_authentication_failed",
+    "xai_stt_language_unsupported",
+    "Enter a valid xAI text model name (up to 256 bytes).",
+    "Invalid xAI speech mode or text model.",
     "tencent_configuration_rejected",
     "tencent_service_activation_required",
     "tencent_quota_exhausted",

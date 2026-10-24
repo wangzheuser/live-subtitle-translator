@@ -7,6 +7,38 @@ class RuntimeConfigurationTest {
     private val alibaba = ServiceConfiguration(ServiceProvider.DASHSCOPE, mapOf("apiKey" to "synthetic-speech-key"),
         "wss://legacy.example.invalid/realtime", "qwen3.5-livetranslate-flash-realtime")
 
+    @Test fun xaiSpeechModeAndTextModelCrossTheRuntimeBoundaryWithoutChangingTheKeyShape() {
+        val voice = ServiceConfiguration(ServiceProvider.XAI, mapOf("apiKey" to "synthetic-xai-key"))
+        val streaming = ServiceConfiguration(ServiceProvider.XAI, voice.credentials, xaiSpeechMode = "asrMt", xaiTextModel = "grok-custom-text")
+        for (speech in listOf(voice, streaming)) {
+            val configuration = buildRuntimeConfiguration(speech, TranslationConfiguration(provider = TextTranslationProvider.BUILTIN), "en", "zh", "lite")
+            assertEquals(speech.xaiSpeechMode, configuration.getString("xaiSpeechMode"))
+            assertEquals(speech.xaiTextModel, configuration.getString("xaiTextModel"))
+            assertEquals("apiKey", configuration.getJSONObject("credentials").getString("kind"))
+            assertEquals("synthetic-xai-key", configuration.getJSONObject("credentials").getString("apiKey"))
+            assertTrue(configuration.isNull("textCredentials"))
+            assertEquals("system", configuration.getJSONObject("networkProxy").getString("mode"))
+            assertEquals("system", configuration.getJSONObject("textNetworkProxy").getString("mode"))
+        }
+        assertEquals("voice", voice.xaiSpeechMode)
+    }
+
+    @Test fun xaiRecognitionProbeIgnoresUnsavedTextModelWhileTextProbeKeepsItsDraft() {
+        for (model in listOf("", "bad\nmodel", "x".repeat(257))) {
+            val draft = ServiceConfiguration(ServiceProvider.XAI, mapOf("apiKey" to "synthetic-current-key"),
+                xaiSpeechMode = "asrMt", xaiTextModel = model)
+            val recognition = buildXaiProbeConfiguration(draft, "synthetic-saved-model", "en", "zh", true)
+            assertEquals("original", recognition.getString("targetLanguage"))
+            assertEquals("synthetic-saved-model", recognition.getString("xaiTextModel"))
+            assertEquals("synthetic-current-key", recognition.getJSONObject("credentials").getString("apiKey"))
+            assertEquals("en", recognition.getString("sourceLanguage"))
+            assertTrue(recognition.isNull("textCredentials"))
+            val text = buildXaiProbeConfiguration(draft, "synthetic-saved-model", "en", "zh", false)
+            assertEquals("zh", text.getString("targetLanguage"))
+            assertEquals(model, text.getString("xaiTextModel"))
+        }
+    }
+
     @Test fun alibabaUsesIndependentTextModelWithoutBorrowingTheOldRealtimeOverride() {
         val config = buildRuntimeConfiguration(alibaba, TranslationConfiguration(provider = TextTranslationProvider.BUILTIN), "ja", "zh", "flash")
         assertEquals("alibabaCloud", config.getString("provider"))

@@ -298,6 +298,8 @@ window.__TAURI_INTERNALS__ = {
         const next = { ...profile, ...(args.name === undefined ? {} : { name: args.name.trim() }) };
         if (args.alibabaRealtimeMode !== undefined) next.alibabaRealtimeMode = args.alibabaRealtimeMode;
         if (args.alibabaWorkspaceId !== undefined) next.alibabaWorkspaceId = args.alibabaWorkspaceId;
+        if (args.xaiSpeechMode !== undefined) next.xaiSpeechMode = args.xaiSpeechMode;
+        if (args.xaiTextModel !== undefined) next.xaiTextModel = args.xaiTextModel;
         if (args.qwenMtModel !== undefined) next.qwenMtModel = args.qwenMtModel;
         if (args.textTranslationName) {
           next.textTranslationNames = { ...profile.textTranslationNames };

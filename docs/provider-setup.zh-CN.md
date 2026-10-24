@@ -15,7 +15,7 @@
 | 需要搭配 DeepL 等文字翻译服务 | [阿里云的「ASR + MT」](#alibaba-cloud)可单独更换翻译服务 |
 | 在 Mac 本地处理 | [Apple Speech](#apple-speech)识别人声，[Apple 翻译](#apple-translation)翻译文字；需 Apple 芯片、macOS 26+ 和对应语言包 |
 | 已有自己的识别接口 | [自定义识别](#custom-recognition)，文字翻译另选；必须支持相应的实时语音协议 |
-| 使用 xAI 账号 | [xAI Grok](#xai-grok)按讲话停顿分段翻译 |
+| 使用 xAI 账号 | [xAI Grok](#xai-grok)流式识别，搭配可选 Grok 文字模型 |
 
 语言范围和费用各不相同，按需要的语言、已有账号和预算选择。DeepL、Index-Translate 等[文字翻译服务](#text-translation)只处理文字，不能单独听声音。
 
@@ -194,13 +194,15 @@ Mimi 这项服务接的是 **Azure OpenAI**，不是 Azure Speech 资源。普�
 
 ## xAI Grok
 
-入口：[xAI Console](https://console.x.ai/) · [官方快速开始](https://docs.x.ai/developers/quickstart) · [Voice API](https://docs.x.ai/developers/model-capabilities/audio/speech-to-speech)
+入口：[xAI Console](https://console.x.ai/) · [官方快速开始](https://docs.x.ai/developers/quickstart) · [Streaming STT](https://docs.x.ai/developers/model-capabilities/audio/speech-to-text) · [Grok Voice](https://docs.x.ai/developers/model-capabilities/audio/speech-to-speech)
 
 1. 登录 xAI Console，选择或创建团队。
-2. 检查团队的 API 用量、付费设置和 Voice 模型权限，再创建 API Key。
-3. 在 Mimi 添加 **xAI Grok**，填入 **API Key** 并保存。
+2. 检查团队的 API 用量、付费设置，以及流式语音识别和所选文字模型的权限，再创建 API Key。
+3. 在 Mimi 添加 **xAI Grok**，保留「**流式识别 + 文字翻译**」，填入 **API Key** 并选择「**文字模型**」。保存后分别检查识别与翻译。
 
-Mimi 当前使用 `grok-voice-latest`，配合 `grok-transcribe` 获取原文，属于回合式语音翻译。这里只填团队的 xAI API Key。额度和收费请查看控制台及[xAI API 定价](https://docs.x.ai/developers/pricing)，不要仅凭消费端会员状态判断 API 是否可用。
+此模式使用 xAI 流式语音识别（`grok-voice-transcribe-2.0`），将已确认的语音片段交给所选 Grok 文字模型翻译。两步使用这份配置的同一个 xAI API Key。文字模型默认 `grok-4.3`，可改为团队实际可用的 Chat Completions 模型 ID。只看原文时不会请求文字翻译。
+
+已有配置保留「**Grok Voice**」，使用 `grok-voice-latest` 在讲话停顿后分段翻译。需要新模式时手动切换为流式识别与文字翻译。额度和收费请查看控制台及[xAI API 定价](https://docs.x.ai/developers/pricing)，不要仅凭消费端会员状态判断 API 是否可用。
 
 <a id="apple-speech"></a>
 
@@ -350,7 +352,7 @@ Android 的八个内置云语音服务使用上文对应凭证，但没有 Apple
 | Baidu Translate | 实时语音翻译 `/ws/realtime_speech_trans` | 内置服务接口；请求未指定公开模型 ID |
 | OpenAI Realtime | 翻译：`gpt-realtime-translate`；原文转写：`gpt-realtime-whisper` | 内置固定，使用专用 Realtime 翻译接口 |
 | Azure OpenAI | 翻译：用户部署的 `gpt-realtime-translate`；原文：用户指定的兼容实时转写部署 | 填写两个实际部署名；Mimi 不替用户选择转写模型 |
-| xAI Grok | Voice：`grok-voice-latest`；原文转写：`grok-transcribe` | 内置固定；回合式翻译 |
+| xAI Grok | 流式识别：`grok-voice-transcribe-2.0`；文字模型默认 `grok-4.3`，可编辑 | 两步使用同一个 xAI Key；仍可选择旧 Grok Voice 模式 |
 | Apple Speech | macOS `SpeechTranscriber` 与已下载语言包；文字翻译单独配置 | 选择本机语言包；无云端模型 ID |
 | 自定义 DashScope / OpenAI Realtime 识别 | 识别使用用户填入的模型 ID；文字翻译单独配置 | 端点、模型与识别 Key 均由用户填写 |
 

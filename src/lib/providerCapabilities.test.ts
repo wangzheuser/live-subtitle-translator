@@ -1,6 +1,7 @@
 import languageCatalogs from "../../shared/provider-language-catalogs.json";
 import contract from "../../shared/translation-contracts.json";
 import audio3 from "../../shared/mimi-runtime/src/core/protocols/audio3.rs?raw";
+import xaiStt from "../../shared/mimi-runtime/src/core/protocols/xai_stt.rs?raw";
 import qwenMt from "../../shared/mimi-runtime/src/core/protocols/qwen_mt.rs?raw";
 import { describe, expect, it } from "vitest";
 import { AUDIO3_RECOGNITION_LANGUAGE_CODES, QWEN_MT_LITE_TRANSLATION_LANGUAGE_CODES, SOURCE_LANGUAGE_CODES, TARGET_LANGUAGE_CODES, type SettingsSnapshot } from "./types";
@@ -523,4 +524,21 @@ it("uses the selected Qwen model catalog even when a previous native snapshot ha
   const flash = qwenMt.match(/QWEN_MT_FLASH_LANGUAGE_CODES:[\s\S]*?= &\[([\s\S]*?)\];/)![1];
   const codes = [...flash.matchAll(/"([\w-]+)"/g)].map(match => match[1] === "nb" ? "no" : match[1]);
   expect(languageCatalogs.qwenMtFlash.targetLanguages).toEqual(codes.filter(code => (TARGET_LANGUAGE_CODES as readonly string[]).includes(code)));
+});
+
+it("keeps legacy xAI Voice separate from ASR + text and rejects a stale native mode catalog", () => {
+  const profile = { id: "xai", name: "xAI", provider: "xAIRealtime", credentialState: "present" } as const;
+  expect(capabilitiesForProfile(profile).targetLanguages).not.toContain("original");
+  const asr = { ...profile, xaiSpeechMode: "asrMt" } as const;
+  expect(capabilitiesForProfile(asr).sourceLanguages).toEqual(languageCatalogs.xAIStt.sourceLanguages);
+  expect(capabilitiesForProfile(asr).sourceLanguages).toContain("yue");
+  expect(capabilitiesForProfile(asr).sourceLanguages).not.toContain("bn");
+  const codes = xaiStt.match(/pub const LANGUAGE_CODES: &\[&str\] = &\[([\s\S]*?)\];/)![1];
+  expect(languageCatalogs.xAIStt.sourceLanguages).toEqual(["auto", ...Array.from(codes.matchAll(/"([^"]+)"/g), match => match[1])]);
+  expect(capabilitiesForProfile(asr).targetLanguages).toEqual(["original", ...TARGET_LANGUAGE_CODES]);
+  const settings = { profiles: [asr], activeProfileId: asr.id, sourceLanguage: "auto", targetLanguage: "zh",
+    languageCapabilities: { profileId: asr.id, provider: asr.provider, textTranslation: "followService", targetLanguage: "zh",
+      xaiSpeechMode: "voice", sourceLanguages: ["auto"], targetLanguages: ["en"] } } satisfies Pick<SettingsSnapshot, "profiles" | "activeProfileId" | "sourceLanguage" | "targetLanguage" | "languageCapabilities">;
+  expect(targetLanguagesForSettings(settings)).toContain("original");
+  expect(targetLanguagesForSettings({ ...settings, languageCapabilities: { ...settings.languageCapabilities, xaiSpeechMode: "asrMt", targetLanguages: ["original", "zh"] } })).toEqual(["original", "zh"]);
 });

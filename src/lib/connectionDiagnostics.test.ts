@@ -504,3 +504,27 @@ it("routes exact language failures to Audio & Languages without accepting provid
     expect(sessionErrorSettingsTarget(`${label}: private-runtime-detail`)).toBeNull();
   }
 });
+
+it.each(UI_LANGUAGES)("localizes exact xAI ASR errors and text-model validation in %s", language => {
+  setStoredUiLanguage(language);
+  const messages = {
+    xai_stt_credentials_missing: diagnosticCopy().missing,
+    xai_stt_authentication_failed: diagnosticCopy().auth,
+    xai_stt_language_unsupported: diagnosticCopy().reasons.unsupportedLanguage,
+    xai_stt_unreachable: diagnosticCopy().speechUnreachable,
+    xai_stt_not_connected: diagnosticCopy().speechUnreachable,
+    xai_stt_setup_timeout: diagnosticCopy().speechTimeout,
+    xai_stt_health_timeout: diagnosticCopy().speechTimeout,
+    xai_stt_session_rejected: diagnosticCopy().reasons.serviceRejected,
+    xai_stt_protocol_invalid: diagnosticCopy().checkFailed,
+    xai_stt_audio_invalid: diagnosticCopy().checkFailed,
+    "Enter a valid xAI text model name (up to 256 bytes).": I18N.settings.openAICompatibleModelInvalid,
+  };
+  for (const [label, message] of Object.entries(messages)) {
+    expect(sessionActionErrorMessage(new Error(label), "fallback")).toBe(message);
+    expect(credentialErrorMessage(`${label}: private-provider-description`)).toBeNull();
+  }
+  expect(sessionErrorSettingsTarget("xai_stt_authentication_failed")).toBe("service");
+  expect(sessionErrorSettingsTarget("xai_stt_credentials_missing")).toBe("service");
+  expect(sessionErrorSettingsTarget("xai_stt_health_timeout")).toBeNull();
+});

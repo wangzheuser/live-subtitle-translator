@@ -288,11 +288,12 @@ class MainActivity : AppCompatActivity() {
         val (effectiveSource, effectiveTarget) = effectiveLanguages()
         findViewById<TextView>(R.id.source_summary).text = languageLabel(effectiveSource)
         val originalOnly = SettingsStore.originalTextOnly(this)
+        val translationLocked = SettingsStore.translationSelectionLocked(this)
         findViewById<TextView>(R.id.target_summary).apply {
             text = if (originalOnly) getString(R.string.translation_none) else languageLabel(effectiveTarget)
-            setCompoundDrawablesRelativeWithIntrinsicBounds(0, 0, if (originalOnly) 0 else R.drawable.ic_expand, 0)
+            setCompoundDrawablesRelativeWithIntrinsicBounds(0, 0, if (translationLocked) 0 else R.drawable.ic_expand, 0)
         }
-        findViewById<View>(R.id.target_language_action).isEnabled = !originalOnly
+        findViewById<View>(R.id.target_language_action).isEnabled = !translationLocked
         val selectedProvider = app.yuxino.mimi.android.provider.ServiceProvider.fromId(SettingsStore.provider(this))
         findViewById<android.widget.ImageView>(R.id.provider_icon).setImageResource(serviceProviderIcon(selectedProvider))
         findViewById<android.widget.ImageView>(R.id.translation_provider_icon).apply {
@@ -333,16 +334,17 @@ class MainActivity : AppCompatActivity() {
     private fun languageLabel(code: String): String = languageDisplayName(this, code)
 
     private fun showLanguages(source: Boolean) {
-        if (!source && SettingsStore.originalTextOnly(this)) return
+        if (!source && SettingsStore.translationSelectionLocked(this)) return
         val previousSource = SettingsStore.sourceLang(this)
         val previousTarget = SettingsStore.targetLang(this)
         val (effectiveSource, effectiveTarget) = effectiveLanguages()
         val selected = if (source) effectiveSource else effectiveTarget
         val provider = app.yuxino.mimi.android.provider.ServiceProvider.fromId(SettingsStore.provider(this))
         val translation = SettingsStore.textTranslationProvider(this)
-        val mode = SettingsStore.configuration(this).alibabaRealtimeMode
-        val choices = if (source) provider.sourcesForTranslation(translation, mode)
-            else provider.targetsForTranslation(translation, mode).filter { provider.supportsPair(effectiveSource, it, translation, mode) }
+        val speech = SettingsStore.configuration(this)
+        val mode = speech.alibabaRealtimeMode
+        val choices = if (source) provider.sourcesForTranslation(translation, mode, speech.xaiSpeechMode)
+            else provider.targetsForTranslation(translation, mode, speech.xaiSpeechMode).filter { provider.supportsPair(effectiveSource, it, translation, mode, speech.xaiSpeechMode) }
         val dialog = BottomSheetDialog(this)
         val content = layoutInflater.inflate(R.layout.language_sheet, FrameLayout(this), false)
         content.findViewById<LinearLayout>(R.id.language_help_heading).addView(HelpUi.heading(this,
@@ -394,13 +396,14 @@ class MainActivity : AppCompatActivity() {
     private fun effectiveLanguages(): Pair<String, String> {
         val config = SettingsStore.configuration(this)
         return config.provider.normalize(SettingsStore.sourceLang(this), SettingsStore.targetLang(this),
-            SettingsStore.textTranslationProvider(this), config.alibabaRealtimeMode)
+            SettingsStore.textTranslationProvider(this), config.alibabaRealtimeMode, config.xaiSpeechMode)
     }
 
     private fun saveLanguage(source: Boolean, code: String) {
         if (source) SettingsStore.setSourceLang(this, code) else SettingsStore.setTargetLang(this, code)
         val provider = app.yuxino.mimi.android.provider.ServiceProvider.fromId(SettingsStore.provider(this))
-        val (from, to) = provider.normalize(SettingsStore.sourceLang(this), SettingsStore.targetLang(this), SettingsStore.textTranslationProvider(this), SettingsStore.configuration(this).alibabaRealtimeMode)
+        val speech = SettingsStore.configuration(this)
+        val (from, to) = provider.normalize(SettingsStore.sourceLang(this), SettingsStore.targetLang(this), SettingsStore.textTranslationProvider(this), speech.alibabaRealtimeMode, speech.xaiSpeechMode)
         SettingsStore.setSourceLang(this, from)
         SettingsStore.setTargetLang(this, to)
     }

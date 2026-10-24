@@ -3389,3 +3389,23 @@
   .service-editor-module--models > .settings-field { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .service-editor-module--models > .settings-field > .settings-select-wrap { grid-column: 1 / -1; }
 }
+
+/* Keep the xAI credential heading readable when its two checks need a full row. */
+.service-credential-toolbar__actions { display: contents; }
+@media (max-width: 700px) {
+  .service-editor-module .service-credential-toolbar--split .credential-storage-help {
+    flex: 0 0 100%;
+    white-space: nowrap;
+  }
+  .service-credential-toolbar--split .service-credential-toolbar__actions {
+    display: flex;
+    min-width: 0;
+    width: 100%;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .service-editor-module .service-credential-toolbar--split .connection-check { margin-inline-start: 0; }
+  .service-credential-toolbar--split .service-credential-toolbar__actions .settings-button > svg { display: none; }
+}

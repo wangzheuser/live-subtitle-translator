@@ -107,13 +107,6 @@ impl LiveTranslationConfiguration {
     /// Display the selected models without retaining credentials in native UI state.
     /// Model identifiers come from the same protocol constants as the factory.
     pub fn model_names(&self) -> Vec<String> {
-        if self.uses_xai_asr() {
-            let mut names = vec![crate::core::protocols::xai_stt::MODEL.to_owned()];
-            if self.target_language.translates_audio() {
-                names.push(self.xai_text_model.clone());
-            }
-            return names;
-        }
         use crate::core::protocols::{
             audio3::Audio3ASREndpoint, gemini_live::GeminiLiveEndpoint,
             openai_realtime::OpenAIRealtimeEndpoint, xai_realtime::XAIRealtimeEndpoint,
@@ -127,6 +120,9 @@ impl LiveTranslationConfiguration {
             ProviderKind::AlibabaCloud | ProviderKind::DeepLX => Audio3ASREndpoint::MODEL,
             ProviderKind::OpenAIRealtime => OpenAIRealtimeEndpoint::MODEL,
             ProviderKind::GoogleGeminiLive => GeminiLiveEndpoint::MODEL,
+            ProviderKind::XAIRealtime if self.uses_xai_asr() => {
+                crate::core::protocols::xai_stt::MODEL
+            }
             ProviderKind::XAIRealtime => XAIRealtimeEndpoint::MODEL,
             ProviderKind::CustomDashScopeASR | ProviderKind::CustomOpenAIASR => {
                 match &self.credentials {
@@ -145,23 +141,26 @@ impl LiveTranslationConfiguration {
             names.push(speech.to_owned());
         }
         if self.target_language.translates_audio()
-            && matches!(
-                self.provider,
-                ProviderKind::AlibabaCloud
-                    | ProviderKind::DeepLX
-                    | ProviderKind::AppleSpeech
-                    | ProviderKind::CustomDashScopeASR
-                    | ProviderKind::CustomOpenAIASR
-            )
+            && (self.uses_xai_asr()
+                || matches!(
+                    self.provider,
+                    ProviderKind::AlibabaCloud
+                        | ProviderKind::DeepLX
+                        | ProviderKind::AppleSpeech
+                        | ProviderKind::CustomDashScopeASR
+                        | ProviderKind::CustomOpenAIASR
+                ))
         {
             let text = match &self.text_credentials {
                 Some(
                     TextTranslationCredentials::OpenAICompatible { model, .. }
-                    | TextTranslationCredentials::ChatMock { model, .. },
+                    | TextTranslationCredentials::ChatMock { model, .. }
+                    | TextTranslationCredentials::XAI { model, .. },
                 ) => model.as_str(),
                 Some(TextTranslationCredentials::DeepL { .. }) => "DeepL",
                 Some(TextTranslationCredentials::DeepLX { .. }) => "DeepLX",
                 Some(TextTranslationCredentials::Apple) => "Apple Translation",
+                None if self.is_standalone_asr() => "",
                 None => match &self.credentials {
                     ProviderCredentials::OpenAICompatible { model, .. }
                     | ProviderCredentials::ChatMock { model, .. } => model,
@@ -291,28 +290,25 @@ impl LiveTranslationConfiguration {
         self.provider == ProviderKind::XAIRealtime && self.xai_speech_mode == XAISpeechMode::AsrMt
     }
 
-    /// Both xAI stages intentionally use this profile's xAI key. No second
-    /// credential slot, other profile or environment fallback is consulted.
+    pub fn is_standalone_asr(&self) -> bool {
+        self.provider.is_standalone_asr() || self.uses_xai_asr()
+    }
+
+    /// A legacy session-envelope probe reads only its independently selected
+    /// text credentials. It never borrows the speech key or legacy text model.
     pub fn xai_text_probe_configuration(
         &self,
     ) -> Result<TextTranslationProbeConfiguration, LiveTranslationConfigurationError> {
         if !self.uses_xai_asr() {
             return Err(LiveTranslationConfigurationError::InvalidXAISpeech);
         }
-        let credentials = self.credentials.validated_for(self.provider)?;
-        let api_key = credentials
-            .direct_api_key()
-            .ok_or(LiveTranslationConfigurationError::InvalidXAISpeech)?;
-        let model = crate::core::protocols::openai_compatible::validate_model(&self.xai_text_model)
-            .map_err(|_| LiveTranslationConfigurationError::InvalidXAISpeech)?;
+        let credentials = self
+            .text_credentials
+            .as_ref()
+            .ok_or(ProviderCredentialsError::MissingTextTranslation)?
+            .validated()?;
         Ok(TextTranslationProbeConfiguration {
-            credentials: TextTranslationProbeCredentials::Independent(
-                TextTranslationCredentials::OpenAICompatible {
-                    endpoint: crate::core::provider::XAI_TEXT_ENDPOINT.to_owned(),
-                    api_key: api_key.to_owned(),
-                    model,
-                },
-            ),
+            credentials: TextTranslationProbeCredentials::Independent(credentials),
             qwen_mt_model: self.qwen_mt_model,
             source_language: self.source_language,
             target_language: if self.target_language.translates_audio() {
@@ -332,9 +328,6 @@ impl LiveTranslationConfiguration {
     }
 
     pub fn capabilities(&self) -> ProviderCapabilities {
-        if self.uses_xai_asr() {
-            return self.xai_speech_mode.capabilities();
-        }
         if self.provider == ProviderKind::AlibabaCloud
             && self.alibaba_realtime_mode != AlibabaRealtimeMode::Disabled
         {
@@ -350,6 +343,10 @@ impl LiveTranslationConfiguration {
             },
             TextTranslationCredentials::translation,
         );
+        if self.uses_xai_asr() {
+            return crate::core::provider::xai_asr_capabilities(route, self.target_language)
+                .for_source(self.source_language);
+        }
         self.provider
             .capabilities_for_route_with_model(route, self.target_language, self.qwen_mt_model)
             .for_source(self.source_language)
@@ -399,17 +396,20 @@ impl LiveTranslationConfiguration {
         let credentials = self.credentials.validated_for(self.provider)?;
 
         let text_credentials =
-            if self.provider.is_standalone_asr() && self.target_language.translates_audio() {
+            if self.is_standalone_asr() && self.target_language.translates_audio() {
                 Some(
                     self.text_credentials
                         .as_ref()
                         .ok_or(ProviderCredentialsError::MissingTextTranslation)?
                         .validated()?,
                 )
-            } else if self.provider.is_standalone_asr() {
+            } else if self.is_standalone_asr() {
                 None
             } else {
-                self.text_credentials.clone()
+                self.text_credentials
+                    .as_ref()
+                    .map(TextTranslationCredentials::validated)
+                    .transpose()?
             };
 
         let capabilities = self.capabilities();
@@ -462,7 +462,12 @@ mod tests {
         );
         assert!(!legacy.uses_xai_asr());
         assert_eq!(legacy.model_names(), ["grok-voice-latest"]);
-        let streaming = legacy.with_xai_speech(XAISpeechMode::AsrMt, "custom-xai-text-model");
+        let streaming = legacy
+            .with_xai_speech(XAISpeechMode::AsrMt, "legacy-unused-model")
+            .with_text_credentials(TextTranslationCredentials::XAI {
+                api_key: "synthetic-xai-text-key".into(),
+                model: "custom-xai-text-model".into(),
+            });
         let streaming = streaming.validated().unwrap();
         assert_eq!(streaming.capabilities().input_sample_rate_hz, 16_000);
         assert_eq!(streaming.model_names()[1], "custom-xai-text-model");
@@ -473,19 +478,15 @@ mod tests {
             Some(crate::core::provider::XAI_TEXT_ENDPOINT)
         );
         let probe = streaming.xai_text_probe_configuration().unwrap();
-        let TextTranslationProbeCredentials::Independent(
-            TextTranslationCredentials::OpenAICompatible {
-                endpoint,
-                model,
-                api_key,
-            },
-        ) = probe.credentials
+        let TextTranslationProbeCredentials::Independent(TextTranslationCredentials::XAI {
+            model,
+            api_key,
+        }) = probe.credentials
         else {
             panic!("xAI must use its text endpoint");
         };
-        assert_eq!(endpoint, crate::core::provider::XAI_TEXT_ENDPOINT);
         assert_eq!(model, "custom-xai-text-model");
-        assert_eq!(api_key, "synthetic-xai-key");
+        assert_eq!(api_key, "synthetic-xai-text-key");
         let mut original = streaming;
         original.target_language = TargetLanguage::Original;
         assert!(original.network_endpoints().unwrap().1.is_none());
@@ -499,6 +500,62 @@ mod tests {
         );
         original.provider = ProviderKind::AlibabaCloud;
         assert!(original.validated().is_err());
+    }
+
+    #[test]
+    fn xai_asr_requires_independent_text_and_original_drops_it() {
+        use super::*;
+        let configuration = LiveTranslationConfiguration::for_provider(
+            ProviderKind::XAIRealtime,
+            "synthetic-speech-key",
+            SourceLanguage::English,
+            TargetLanguage::Japanese,
+            TranslationMode::Turbo,
+        )
+        .with_xai_speech(XAISpeechMode::AsrMt, "legacy-model-must-not-supply-a-route");
+        assert!(configuration.is_standalone_asr());
+        assert!(matches!(
+            configuration.validated(),
+            Err(LiveTranslationConfigurationError::Credentials(
+                ProviderCredentialsError::MissingTextTranslation
+            ))
+        ));
+        assert!(matches!(
+            configuration.xai_text_probe_configuration(),
+            Err(LiveTranslationConfigurationError::Credentials(
+                ProviderCredentialsError::MissingTextTranslation
+            ))
+        ));
+        let mut original = configuration.clone();
+        original.target_language = TargetLanguage::Original;
+        original.text_credentials = Some(TextTranslationCredentials::XAI {
+            api_key: String::new(),
+            model: String::new(),
+        });
+        assert!(original.validated().unwrap().text_credentials.is_none());
+        let custom = configuration
+            .with_text_credentials(TextTranslationCredentials::OpenAICompatible {
+                endpoint: "http://127.0.0.1:1/v1".into(),
+                api_key: "synthetic-independent-key".into(),
+                model: "chosen-text-model".into(),
+            })
+            .validated()
+            .unwrap();
+        assert_eq!(
+            custom.model_names(),
+            [crate::core::protocols::xai_stt::MODEL, "chosen-text-model"]
+        );
+        assert_eq!(
+            custom.network_endpoints().unwrap().1.as_deref(),
+            Some("http://127.0.0.1:1/v1/chat/completions")
+        );
+        let TextTranslationProbeCredentials::Independent(
+            TextTranslationCredentials::OpenAICompatible { api_key, .. },
+        ) = custom.xai_text_probe_configuration().unwrap().credentials
+        else {
+            panic!("expected selected independent probe");
+        };
+        assert_eq!(api_key, "synthetic-independent-key");
     }
 
     #[test]

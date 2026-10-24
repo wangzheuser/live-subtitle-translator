@@ -12,15 +12,15 @@ export async function verifyXaiSettingsLayout(page, baseUrl = "http://127.0.0.1:
     await page.cdp("Emulation.setDeviceMetricsOverride", { width, height: 1000, deviceScaleFactor: 1, mobile: false });
     await page.cdp("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: theme }] });
     const issues = await page.evaluate(async next => {
-      await window.applyLayoutCase({ ...next, platform: "macos", state: "idle", editor: true, provider: "xAIRealtime", profileName: "xAI", profileOverrides: { xaiSpeechMode: next.mode, xaiTextModel: "grok-custom-text-model-".repeat(10) } });
+      await window.applyLayoutCase({ ...next, platform: "macos", state: "idle", editor: true, provider: "xAIRealtime", profileName: "xAI", textTranslation: "xAI", profileOverrides: { xaiSpeechMode: next.mode } });
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const issues = [];
       if (document.documentElement.scrollWidth > innerWidth + 1) issues.push("page overflow");
       const section = document.querySelector(".xai-speech-settings");
       if (!section) return ["missing xAI speech mode"];
-      const model = section.querySelector("input, textarea");
+      const model = document.querySelector('.service-stage--translation input[id$="-model"], .service-stage--translation textarea[id$="-model"]');
       if (Boolean(model) !== (next.mode === "asrMt")) issues.push("wrong model visibility");
-      for (const control of section.querySelectorAll("button, input, textarea")) {
+      for (const control of document.querySelectorAll(".xai-speech-settings button, .service-stage--translation button, .service-stage--translation input, .service-stage--translation textarea")) {
         const bounds = control.getBoundingClientRect();
         if (bounds.width && (bounds.left < 0 || bounds.right > innerWidth + 1)) issues.push("control outside viewport");
         if (control.tagName === "BUTTON" && !control.disabled && getComputedStyle(control).cursor !== "pointer") issues.push("button cursor");

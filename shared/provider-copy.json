@@ -146,14 +146,14 @@
       "androidResource": "guide_detail_xai",
       "desktopSetting": "providerXAIDescription",
       "translations": {
-        "zh": "可使用 xAI 流式识别与自选 Grok 文字模型翻译。\n也可选择在说话停顿后分段翻译的 Grok Voice。",
-        "zh-TW": "可使用 xAI 串流辨識與自選 Grok 文字模型翻譯。\n也可選擇在說話停頓後分段翻譯的 Grok Voice。",
-        "en": "Use xAI streaming recognition with your chosen Grok text model.\nGrok Voice is also available for translation after speech pauses.",
-        "ja": "xAI のストリーミング音声認識と選択した Grok テキストモデルで翻訳します。\n発話の切れ目で翻訳する Grok Voice も選べます。",
-        "de": "xAI-Spracherkennung mit wählbarem Grok-Textmodell zur Übersetzung.\nAlternativ übersetzt Grok Voice nach Sprechpausen.",
-        "ko": "xAI 스트리밍 음성 인식과 선택한 Grok 텍스트 모델로 번역합니다.\n말이 멈춘 뒤 번역하는 Grok Voice도 선택할 수 있습니다.",
-        "fr": "Reconnaissance vocale xAI en continu et modèle texte Grok au choix.\nGrok Voice peut aussi traduire après les pauses de parole.",
-        "th": "ใช้การรู้จำเสียงสตรีมมิงของ xAI กับโมเดลข้อความ Grok ที่เลือก\nหรือเลือก Grok Voice ที่แปลหลังช่วงหยุดพูด"
+        "zh": "使用 xAI 流式识别，可另选文字翻译服务。\\n也可选择在说话停顿后分段翻译的 Grok Voice。",
+        "zh-TW": "使用 xAI 串流辨識，可另選文字翻譯服務。\\n也可選擇在說話停頓後分段翻譯的 Grok Voice。",
+        "en": "Use xAI streaming recognition with a separate text translator of your choice.\\nGrok Voice is also available for translation after speech pauses.",
+        "ja": "xAI のストリーミング音声認識に、別のテキスト翻訳サービスを選んで組み合わせられます。\\n発話の切れ目で翻訳する Grok Voice も選べます。",
+        "de": "xAI-Spracherkennung mit einem separat wählbaren Textübersetzungsdienst.\\nAlternativ übersetzt Grok Voice nach Sprechpausen.",
+        "ko": "xAI 스트리밍 음성 인식에 원하는 텍스트 번역 서비스를 별도로 선택할 수 있습니다.\\n말이 멈춘 뒤 번역하는 Grok Voice도 선택할 수 있습니다.",
+        "fr": "Reconnaissance vocale xAI en continu avec un service de traduction de texte au choix.\\nGrok Voice peut aussi traduire après les pauses de parole.",
+        "th": "ใช้การรู้จำเสียงสตรีมมิงของ xAI กับบริการแปลข้อความที่เลือกแยกกันได้\\nหรือเลือก Grok Voice ที่แปลหลังช่วงหยุดพูด"
       }
     },
     "providerAlibabaSetup": {
@@ -283,14 +283,14 @@
       "androidResource": "guide_help_xai",
       "desktopSetting": null,
       "translations": {
-        "zh": "在 xAI 控制台创建 API Key，确认账号有可用额度，并已开通所选语音识别和文字模型。",
-        "zh-TW": "在 xAI 控制台建立 API Key，確認帳號有可用額度，並已開通所選語音辨識和文字模型。",
-        "en": "Create an API key in the xAI console. Check available credits and access to the selected speech and text models.",
-        "ja": "xAI コンソールで API Key を作成し、残高と選択した音声認識・テキストモデルへのアクセスを確認してください。",
-        "de": "API-Schlüssel in der xAI-Konsole erstellen. Guthaben und Zugriff auf die gewählten Sprach- und Textmodelle prüfen.",
-        "ko": "xAI 콘솔에서 API 키를 만들고 잔액과 선택한 음성 인식 및 텍스트 모델의 접근 권한을 확인하세요.",
-        "fr": "Créez une clé API dans la console xAI. Vérifiez les crédits et l’accès aux modèles vocaux et texte choisis.",
-        "th": "สร้าง API key ในคอนโซล xAI ตรวจสอบเครดิตและสิทธิ์ใช้โมเดลเสียงและข้อความที่เลือก"
+        "zh": "在 xAI 控制台获取 API Key，确认所用 xAI 模型的权限和额度。使用 Grok 文字翻译时，在文字翻译配置中另存 Key；可与识别填同一个已有 Key，也可分别使用不同 Key。",
+        "zh-TW": "在 xAI 控制台取得 API Key，確認所用 xAI 模型的權限和額度。使用 Grok 文字翻譯時，在文字翻譯設定中另存 Key；可與辨識填同一個已有 Key，也可分別使用不同 Key。",
+        "en": "Get an API key in xAI Console and check access and credits for the xAI models you use. Save the Grok text translation key separately; you may enter the same existing key as recognition or use different keys.",
+        "ja": "xAI コンソールで API Key を取得し、利用する xAI モデルへのアクセスと残高を確認してください。Grok テキスト翻訳のキーは別に保存します。音声認識と同じ既存のキーでも、異なるキーでも使えます。",
+        "de": "API-Schlüssel in der xAI-Konsole abrufen und Zugriff sowie Guthaben für die verwendeten xAI-Modelle prüfen. Den Schlüssel für die Grok-Textübersetzung separat speichern; derselbe vorhandene Schlüssel wie für die Erkennung oder unterschiedliche Schlüssel sind möglich.",
+        "ko": "xAI 콘솔에서 API 키를 얻고 사용할 xAI 모델의 권한과 잔액을 확인하세요. Grok 텍스트 번역 키는 별도로 저장하며, 인식과 같은 기존 키 또는 서로 다른 키를 사용할 수 있습니다.",
+        "fr": "Obtenez une clé API dans la console xAI et vérifiez l’accès et les crédits des modèles xAI utilisés. Enregistrez séparément la clé de traduction de texte Grok ; vous pouvez réutiliser la clé existante de reconnaissance ou utiliser des clés différentes.",
+        "th": "รับ API key ในคอนโซล xAI และตรวจสอบสิทธิ์กับเครดิตของโมเดล xAI ที่ใช้ บันทึกคีย์สำหรับการแปลข้อความ Grok แยกต่างหาก โดยกรอกคีย์เดิมที่ใช้รู้จำเสียงซ้ำได้ หรือใช้คนละคีย์ก็ได้"
       }
     },
     "alibabaModeLabel": {

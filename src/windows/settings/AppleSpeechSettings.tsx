@@ -8,13 +8,13 @@ import { activeServiceProfile, sourceLanguagesForSettings, textTranslationForPro
 import { useStore } from "../../lib/store";
 import { getAppleTranslationStatus, getAppleTranslationSupport, prepareAppleSpeechLanguage } from "../../lib/ipc";
 import { SOURCE_LANGUAGE_DISPLAY_NAMES, type AppleSpeechSupport, type SettingsSnapshot, type SourceLanguage } from "../../lib/types";
-import { AlibabaCredentialEditor } from "./AlibabaCredentialEditor";
+import { SpeechAndTextCredentialEditor, TextTranslationEditor } from "./SpeechAndTextCredentialEditor";
 import { InlineFeedback, SettingsRow } from "./SettingsPrimitives";
 import { SettingsHelp } from "./SettingsHelp";
 import { useSettingsToast } from "./useSettingsToast";
 import { appleSpeechLanguageStatus } from "./useAppleSpeechSupport";
 
-type Props = ComponentProps<typeof AlibabaCredentialEditor> & {
+type Props = ComponentProps<typeof SpeechAndTextCredentialEditor> & {
   support: AppleSpeechSupport | null;
   settings: SettingsSnapshot;
   requiresStop?: boolean;
@@ -240,7 +240,7 @@ export function AppleSpeechSettings({ support, settings, requiresStop = false, l
           <div className="apple-speech-connection-check">{typeof editor.connectionCheck === "function" ? editor.connectionCheck(languageInstalled ? undefined : null, language.sourceLanguage) : languageInstalled ? editor.connectionCheck : undefined}</div>
         </>}
     </section>
-    <AlibabaCredentialEditor {...editor} textOnly connectionCheck={undefined}
+    <TextTranslationEditor {...editor} connectionCheck={undefined}
       textConnectionCheck={language?.sourceLanguage === settings.sourceLanguage ? editor.textConnectionCheck : undefined}
       disabled={disabled} sourceLanguage={language?.sourceLanguage ?? sourceLanguage} targetLanguage={settings.targetLanguage} requiresStop={requiresStop} />
   </div>;

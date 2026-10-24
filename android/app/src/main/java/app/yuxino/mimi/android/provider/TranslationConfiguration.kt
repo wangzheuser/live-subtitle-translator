@@ -9,10 +9,12 @@ enum class TextTranslationProvider(val storageId: String) {
     NONE("none"),
     CHAT_MOCK("chatMock"),
     OPENAI_COMPATIBLE("openaiCompatible"),
+    XAI("xAI"),
     DEEPL("deepL"),
     DEEPLX("deepLX");
 
-    val usesOpenAIProtocol: Boolean get() = this == CHAT_MOCK || this == OPENAI_COMPATIBLE
+    val usesOpenAIProtocol: Boolean get() = this == CHAT_MOCK || this == OPENAI_COMPATIBLE || this == XAI
+    val hasCustomEndpoint: Boolean get() = this == CHAT_MOCK || this == OPENAI_COMPATIBLE || this == DEEPLX
 
     companion object {
         fun fromStorageId(id: String): TextTranslationProvider = entries.firstOrNull { it.storageId == id } ?: BUILTIN
@@ -33,6 +35,8 @@ data class TranslationConfiguration(
 /** Resolve only the endpoint shapes supported by the selected text protocol. */
 fun normalizeTranslationEndpoint(config: TranslationConfiguration): String = when (config.provider) {
     TextTranslationProvider.BUILTIN, TextTranslationProvider.NONE -> ""
+    // The shared runtime supplies xAI's fixed endpoint; native settings store no override.
+    TextTranslationProvider.XAI -> ""
     TextTranslationProvider.DEEPL -> deepLEndpoint(config.apiKey)
     TextTranslationProvider.DEEPLX -> {
         val url = validatedTranslationUrl(config)
@@ -69,6 +73,7 @@ internal fun validateTranslationConfiguration(config: TranslationConfiguration):
         require(config.model.trim().toByteArray(Charsets.UTF_8).size in 1..256 && config.model.none { it.isISOControl() }) { "translation_model" }
     }
     val key = config.apiKey.trim()
+    require(config.provider != TextTranslationProvider.XAI || key.isNotEmpty()) { "translation_key" }
     // Match desktop saved credentials: Unicode scalar count, optional blank keys and trimmed values.
     val checkedKey = if (config.provider.usesOpenAIProtocol) config.apiKey else key
     require(key.codePointCount(0, key.length) <= 1024 && checkedKey.none { it.isISOControl() }) { "translation_key" }

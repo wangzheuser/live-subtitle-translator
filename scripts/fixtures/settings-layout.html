@@ -321,7 +321,9 @@ window.__TAURI_INTERNALS__ = {
       window.layoutFixtureRequests.profileCreate += 1;
       if (fixture.failCreate) throw new Error("fixture_create_failed");
       const current = useStore.getState().settings;
-      const created = { id: `fixture-created-${current.profiles.length}`, provider: args.provider, name: args.name, credentialState: "missing", speechCredentialState: "missing", textTranslation: "followService" };
+      const created = { id: `fixture-created-${current.profiles.length}`, provider: args.provider, name: args.name, credentialState: "missing", speechCredentialState: "missing", textCredentialState: "missing",
+        textTranslation: args.provider === "xAIRealtime" ? "xAI" : "followService",
+        ...(args.provider === "xAIRealtime" ? { xaiSpeechMode: "asrMt", xaiIndependentTranslationMigrated: true } : {}) };
       const snapshot = { ...current, profiles: [...current.profiles, created], activeProfileId: current.activeProfileId || created.id };
       useStore.setState({ settings: snapshot });
       return snapshot;
@@ -362,14 +364,16 @@ window.__TAURI_INTERNALS__ = {
       if (fixture.failCredentialSave) throw new Error("credential_store_unavailable");
       const current = useStore.getState().settings;
       const snapshot = { ...current, profiles: current.profiles.map(profile => profile.id === args.profileId
-        ? { ...profile, credentialState: "present", speechCredentialState: "present", textCredentialState: "present",
-          ...(args.credentials.kind === "alibabaTranslation" ? { textTranslation: args.credentials.textTranslation } : {}) }
+        ? { ...profile,
+          ...(args.credentials.kind === "alibabaTranslation"
+            ? { textTranslation: args.credentials.textTranslation, textCredentialState: "present", credentialState: profile.speechCredentialState ?? profile.credentialState }
+            : { speechCredentialState: "present", credentialState: profile.textCredentialState === "missing" ? "missing" : "present" }) }
         : profile) };
       useStore.setState({ settings: snapshot });
       return snapshot;
     }
     if (command === "profile_credential_editor_state") return args.textTranslation
-      ? { savedFields: fixture.keyless ? [] : ["token"], endpoint: "http://127.0.0.1:8080/v1", model: "fixture-model" }
+      ? { savedFields: fixture.keyless ? [] : ["token"], ...(args.textTranslation === "xAI" ? { model: "grok-4.3" } : { endpoint: "http://127.0.0.1:8080/v1", model: "fixture-model" }) }
       : { savedFields: (useStore.getState().settings.profiles.find(profile => profile.id === args.profileId)?.speechCredentialState ?? useStore.getState().settings.profiles.find(profile => profile.id === args.profileId)?.credentialState) === "missing" ? [] : ["apiKey"], endpoint: fixture.savedSpeechEndpoint ?? "wss://speech.example/v1/realtime", model: fixture.savedSpeechModel ?? "fixture-speech-model" };
     if (command === "profile_reveal_credential") { window.layoutFixtureRequests.credentialReveal += 1; return "fixture-saved-value"; }
     if (command === "plugin:event|listen") return 0;

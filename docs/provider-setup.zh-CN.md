@@ -12,10 +12,10 @@
 | --- | --- |
 | 用一家服务完成识别和翻译 | [火山引擎](#volcano-engine)、[Gemini](#google-gemini)、[腾讯云](#tencent-cloud)、[百度](#baidu-translate)、[OpenAI](#openai-realtime)；已有 Azure 部署可用 [Azure OpenAI](#azure-openai) |
 | 用阿里云同声传译 | [同声传译](#alibaba-livetranslate)由同一个服务输出原文和译文；当前开发版的桌面与安卓均支持 |
-| 需要搭配 DeepL 等文字翻译服务 | [阿里云的「ASR + MT」](#alibaba-cloud)可单独更换翻译服务 |
+| 需要搭配 DeepL、Grok 等文字翻译服务 | [阿里云的「ASR + MT」](#alibaba-cloud)或 [xAI 流式识别](#xai-grok)，文字翻译另选 |
 | 在 Mac 本地处理 | [Apple Speech](#apple-speech)识别人声，[Apple 翻译](#apple-translation)翻译文字；需 Apple 芯片、macOS 26+ 和对应语言包 |
 | 已有自己的识别接口 | [自定义识别](#custom-recognition)，文字翻译另选；必须支持相应的实时语音协议 |
-| 使用 xAI 账号 | [xAI Grok](#xai-grok)流式识别，搭配可选 Grok 文字模型 |
+| 使用 xAI 账号 | [xAI 流式识别](#xai-grok)搭配自选文字翻译，或用其他支持的识别服务搭配 [Grok 文字翻译](#grok-text-translation) |
 
 语言范围和费用各不相同，按需要的语言、已有账号和预算选择。DeepL、Index-Translate 等[文字翻译服务](#text-translation)只处理文字，不能单独听声音。
 
@@ -50,7 +50,7 @@
 | [自定义识别（DashScope 协议）](#custom-recognition) | 你使用的 DashScope 兼容服务 | 完整 WebSocket URL、识别模型、API Key |
 | [自定义识别（OpenAI 实时兼容）](#custom-recognition) | 你使用的 Realtime 兼容服务 | 完整 WebSocket URL、识别模型、API Key |
 
-只想配置文字翻译？跳到 [Apple 翻译](#apple-translation)、[DeepL](#deepl)、[DeepLX](#deeplx)、[ChatMock](#chatmock)、[OpenAI 兼容接口 / Index-Translate](#openai-compatible)，或[仅显示原文](#original-only)。想确认具体调用哪个模型，见[当前模型与调用方式](#current-models)。
+只想配置文字翻译？跳到 [Grok](#grok-text-translation)、[Apple 翻译](#apple-translation)、[DeepL](#deepl)、[DeepLX](#deeplx)、[ChatMock](#chatmock)、[OpenAI 兼容接口 / Index-Translate](#openai-compatible)，或[仅显示原文](#original-only)。想确认具体调用哪个模型，见[当前模型与调用方式](#current-models)。
 
 <a id="alibaba-cloud"></a>
 
@@ -196,13 +196,17 @@ Mimi 这项服务接的是 **Azure OpenAI**，不是 Azure Speech 资源。普�
 
 入口：[xAI Console](https://console.x.ai/) · [官方快速开始](https://docs.x.ai/developers/quickstart) · [Streaming STT](https://docs.x.ai/developers/model-capabilities/audio/speech-to-text) · [Grok Voice](https://docs.x.ai/developers/model-capabilities/audio/speech-to-speech)
 
-1. 登录 xAI Console，选择或创建团队。
-2. 检查团队的 API 用量、付费设置，以及流式语音识别和所选文字模型的权限，再创建 API Key。
-3. 在 Mimi 添加 **xAI Grok**，保留「**流式识别 + 文字翻译**」，填入 **API Key** 并选择「**文字模型**」。保存后分别检查识别与翻译。
+1. 登录 xAI Console，选择或创建团队，确认所用 xAI 模型的 API 权限和额度，再获取 API Key。
+2. 在 Mimi 添加 **xAI Grok**。新配置默认选择「**流式语音识别（ASR）**」和 **xAI Grok** 文字翻译；先在「语音识别」填写识别 Key 并保存。
+3. 在「文字翻译」保留 **xAI Grok**，或选择其他支持的文字服务。使用 Grok 时，填入其 API Key、选择文字模型（默认 `grok-4.3`），再点击「**保存翻译配置**」。模型修改与其他文字服务一样，保存后才生效。
+4. 识别与翻译分别保存凭据。两处可以填写同一个已有 xAI Key，也可以使用不同 Key；Mimi 不会拿识别 Key 补上缺失的翻译 Key。分别运行两项检查。
+5. 不需要译文时，选择「**不翻译（仅原文）**」或开启「**跳过翻译**」；识别继续运行，不会请求文字翻译。
 
-此模式使用 xAI 流式语音识别（`grok-voice-transcribe-2.0`），将已确认的语音片段交给所选 Grok 文字模型翻译。两步使用这份配置的同一个 xAI API Key。文字模型默认 `grok-4.3`，可改为团队实际可用的 Chat Completions 模型 ID。只看原文时不会请求文字翻译。
+流式模式的识别模型是 `grok-voice-transcribe-2.0`，已确认的语音片段交给独立选择的文字服务。更换文字服务或其模型不会更换识别模型。阿里云识别、Apple Speech 和自定义识别也可使用 Grok，见 [Grok 文字翻译](#grok-text-translation)。
 
-已有配置保留「**Grok Voice**」，使用 `grok-voice-latest` 在讲话停顿后分段翻译。需要新模式时手动切换为流式识别与文字翻译。额度和收费请查看控制台及[xAI API 定价](https://docs.x.ai/developers/pricing)，不要仅凭消费端会员状态判断 API 是否可用。
+已有 Voice 配置保留「**Grok Voice**」，使用 `grok-voice-latest` 在讲话停顿后分段翻译。需要体验 ASR 时，手动切换语音模式，再配置文字翻译。如果曾试用未发布的旧版 ASR/Grok 组合，Mimi 会将同一配置已保存的 Key 和模型复制到独立文字设置一次；之后删除凭据不会自动恢复。
+
+额度和收费请查看控制台及 [xAI API 定价](https://docs.x.ai/developers/pricing)，不要仅凭消费端会员状态判断 API 是否可用。
 
 <a id="apple-speech"></a>
 
@@ -234,9 +238,17 @@ Apple Speech 只在**Apple 芯片、macOS 26 或更新版本、系统识别引�
 
 ## 独立文字翻译
 
-桌面端的 **阿里云的「ASR + MT」、Apple Speech、两种自定义识别**支持独立文字翻译。其他内置语音服务使用各自的翻译链路。Android 目前只在阿里云配置中提供独立文字翻译。
+桌面端的 **阿里云「ASR + MT」、xAI 流式识别、Apple Speech、两种自定义识别**支持独立文字翻译。Android 的 **阿里云 ASR 和 xAI ASR** 也支持。Grok Voice 等一体模式仍使用各自的翻译链路。
 
-先在「语音识别」部分完成配置，再在「文字翻译」选择服务。选择 DeepL、DeepLX、ChatMock 或 OpenAI 兼容接口时，Mimi 不会拿识别 Key 代替翻译凭证。默认阿里云翻译已在[阿里云章节](#alibaba-cloud)说明。
+先在「语音识别」部分完成配置，再在「文字翻译」选择服务。选择 Grok、DeepL、DeepLX、ChatMock 或 OpenAI 兼容接口时，分别保存对应的翻译凭据；Mimi 不会拿识别 Key 代替缺失的翻译 Key。默认阿里云翻译已在[阿里云章节](#alibaba-cloud)说明。
+
+<a id="grok-text-translation"></a>
+
+### Grok 文字翻译
+
+1. 在支持独立文字翻译的配置中，在「文字翻译」选择 **xAI Grok**。可以搭配 xAI ASR，也可以搭配其他支持的识别服务。
+2. 填入 xAI API Key，以及该 Key 实际可用的 Chat Completions 模型 ID；模型字段初值为 `grok-4.3`。Mimi 使用固定的 xAI 文字端点，无需填写服务地址。
+3. 点击「**保存翻译配置**」，再检查文字翻译。模型和 Key 属于这个文字服务，与识别分别保存；可以使用已有 xAI Key，无需为每个模型另建 Key。
 
 <a id="apple-translation"></a>
 
@@ -311,7 +323,7 @@ Apple Speech 只在**Apple 芯片、macOS 26 或更新版本、系统识别引�
 
 ### 仅显示原文
 
-在支持独立文字翻译的配置中，开启「**跳过翻译**」即可停止发送文字翻译请求；Apple / 自定义识别也可选择「**不翻译（仅原文）**」。Android 在 Alibaba Cloud 的文字翻译选项中选择「**不翻译（仅原文）**」。
+在支持独立文字翻译的配置中，开启「**跳过翻译**」即可停止发送文字翻译请求；Apple / 自定义识别及 xAI ASR 也可选择「**不翻译（仅原文）**」。Android 在阿里云 ASR 和 xAI ASR 的文字翻译选项中选择「**不翻译（仅原文）**」。
 
 「字幕显示 → 仅原文」只改变显示方式，不等于关闭翻译请求。需要减少翻译调用时，请使用前面的跳过 / 不翻译设置。云端语音识别的用量仍会继续计算。
 
@@ -340,7 +352,7 @@ Android 的八个内置云语音服务使用上文对应凭证，但没有 Apple
 
 ## 当前模型与调用方式
 
-下表列出桌面端的默认和可选调用方式。模型 ID 用于确认权限和理解用量；内置配置会自动选用，只有 Azure 部署和自定义服务需要自己填写名称。服务商可更新同名模型，模型 ID 本身不能保证识别质量或某个语言的可用性。
+下表列出桌面端的默认和可选调用方式。模型 ID 用于确认权限和理解用量；内置识别会自动选用模型；Azure 部署名和独立文字模型在对应字段设置。服务商可更新同名模型，模型 ID 本身不能保证识别质量或某个语言的可用性。
 
 | 桌面服务 | 识别 / 原文与翻译所用模型或接口 | 在 Mimi 中如何选择 |
 | --- | --- | --- |
@@ -352,7 +364,8 @@ Android 的八个内置云语音服务使用上文对应凭证，但没有 Apple
 | Baidu Translate | 实时语音翻译 `/ws/realtime_speech_trans` | 内置服务接口；请求未指定公开模型 ID |
 | OpenAI Realtime | 翻译：`gpt-realtime-translate`；原文转写：`gpt-realtime-whisper` | 内置固定，使用专用 Realtime 翻译接口 |
 | Azure OpenAI | 翻译：用户部署的 `gpt-realtime-translate`；原文：用户指定的兼容实时转写部署 | 填写两个实际部署名；Mimi 不替用户选择转写模型 |
-| xAI Grok | 流式识别：`grok-voice-transcribe-2.0`；文字模型默认 `grok-4.3`，可编辑 | 两步使用同一个 xAI Key；仍可选择旧 Grok Voice 模式 |
+| xAI ASR | 识别：`grok-voice-transcribe-2.0`；文字翻译另选 | 选择 ASR 后配置文字服务，分别保存两阶段的 Key |
+| xAI Grok Voice | `grok-voice-latest`；识别和翻译来自同一 Voice 会话 | 已有 Voice 配置保留此模式 |
 | Apple Speech | macOS `SpeechTranscriber` 与已下载语言包；文字翻译单独配置 | 选择本机语言包；无云端模型 ID |
 | 自定义 DashScope / OpenAI Realtime 识别 | 识别使用用户填入的模型 ID；文字翻译单独配置 | 端点、模型与识别 Key 均由用户填写 |
 
@@ -374,6 +387,7 @@ Android 正式会话与桌面使用同一个共享 Rust 服务工厂。旧 Kotli
 | 文字翻译服务 | Mimi 实际选择 |
 | --- | --- |
 | 阿里云分步模式（桌面 / Android） | `qwen-mt-lite` |
+| xAI Grok | 默认 `grok-4.3`；在文字翻译服务内修改并保存模型 |
 | Apple 翻译 | macOS Translation 框架与已下载的系统资源；无云端模型 ID |
 | DeepL | 官方文本翻译 API；Mimi 不指定 `model_type` 或模型 ID |
 | DeepLX | 配置地址提供的 `/translate` 服务；Mimi 不选择其上游模型 |

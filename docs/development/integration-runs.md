@@ -4746,4 +4746,46 @@
   quality, prolonged playback and physical Windows/Linux/Android acceptance
   remain pending. Next check: compare a continuous speech sample and the same
   sample with pauses using an explicitly configured xAI development account.
-  Keep the delivery PR and issue #313 open; no merge or release was requested.
+  Merge and release were not authorized during this run. The maintainer later
+  approved merging PR #314, regression testing and publishing a version for the
+  issue reporter to try; that delivery is recorded separately below.
+
+### 2026-10-24 — independent xAI recognition and translation correction
+
+- Follow-up candidate `fix/xai-independent-text-translation` is based on merged
+  main `c7545294`. These native checks used its dirty development tree. The
+  maintainer identified that the first candidate bound recognition to Grok and
+  used a separate model editor. The correction reuses the ordinary independent
+  text-service form: xAI ASR can select another translator, and other supported
+  recognizers can select Grok. Voice hides and preserves that selection.
+- Signed macOS watch/UI-only preview verified speech-key save and hydration,
+  Grok model/key save, switching to DeepL and back with the saved custom model
+  and masked key retained, explicit Save, and Voice/ASR restoration. A saved
+  inactive route exposes metadata but cannot reveal its key before selection is
+  saved. The final model was restored to `grok-4.3` through the normal Save action.
+  All preview keys were synthetic in-memory fixtures.
+- Native inspection found and repaired speech-key hydration incorrectly using
+  an ASR-key reveal field, a heading naming Alibaba for xAI plus DeepL, and
+  inactive-route hydration discarding the saved model. Focused regressions and
+  the same native steps passed after correction. Ego Lite layout checks covered
+  64 locale/theme/width/mode combinations; these browser fixtures do not replace
+  native provider or audio acceptance.
+- Final Android `testDebugUnitTest` passed 37 suites / 266 tests, including 27
+  actual runtime JNI and 21 profile-repository cases. Shared tests exercise
+  separate speech/text credentials, route combinations, Original without MT,
+  migration retry/deletion, language intersections and the existing bounded queue.
+- Final canonical `./scripts/check.sh` passed: core 106 plus shared contracts,
+  runtime 879, Rust JNI 27, desktop 686, and 153 frontend files / 2,726 tests,
+  including strict checks and the production build. Desktop/runtime each retain
+  one existing ignored case. Local loopback tests required command-scoped
+  `NO_PROXY=127.0.0.1,localhost,::1`: a same-binary comparison traced the initial
+  network failures to the host proxy's ignored bypass list. System proxy settings
+  and test assertions were not changed; the prevention rule is in common
+  regressions.
+- The watch server and UI-only app were stopped. The ordinary embedded dev app
+  was rebuilt with `MIMI_UI_TEST=0` and `MIMI_AUTO_START=0`, opened at
+  `tauri://localhost`, showed idle, and quit normally. The original production
+  app was reopened and showed idle; its installed bundle, permissions and
+  credentials were preserved. No real provider request, capture or recording
+  occurred. Live xAI latency/quality, full in-place updates and physical
+  Windows/Linux/Android acceptance remain pending.

@@ -8,7 +8,7 @@
     <string name="guide_detail_volcano">Doubao Simultaneous Interpretation 2.0 fournit le texte original et la traduction en temps réel.\nLe service de traduction ne peut pas être remplacé séparément.</string>
     <string name="guide_detail_tencent">Tencent Cloud reconnaît et traduit la parole en temps réel.\nLe service de traduction ne peut pas être remplacé séparément.</string>
     <string name="guide_detail_baidu">Baidu reconnaît et traduit la parole en temps réel.\nLe service de traduction ne peut pas être remplacé séparément.</string>
-    <string name="guide_detail_xai">Reconnaissance vocale xAI en continu et modèle texte Grok au choix.\nGrok Voice peut aussi traduire après les pauses de parole.</string>
+    <string name="guide_detail_xai">Reconnaissance vocale xAI en continu avec un service de traduction de texte au choix.\\nGrok Voice peut aussi traduire après les pauses de parole.</string>
     <string name="guide_help_dashscope">Activez Model Studio et créez une clé API. La traduction simultanée nécessite aussi un ID d’espace Beijing.</string>
     <string name="guide_help_openai">Créez un projet API OpenAI et une clé avec accès Realtime. Les abonnements ChatGPT n’incluent pas l’utilisation de l’API.</string>
     <string name="guide_help_gemini">Créez une clé API Gemini dans Google AI Studio et vérifiez la disponibilité de l’API Live pour votre projet.</string>
@@ -16,7 +16,7 @@
     <string name="guide_help_volcano">Vérifiez votre compte et activez l’interprétation simultanée 2.0 dans la nouvelle console Doubao Voice. Mimi utilise la nouvelle clé API, pas l’ancien couple AppID/jeton d’accès.</string>
     <string name="guide_help_tencent">La traduction vocale en temps réel exige l’AppID du compte et une paire SecretID / SecretKey issue du même compte. Trouvez l’AppID dans les informations du compte, pas l’UIN, et la paire dans les clés API CAM. Activez le service dans la console ASR. Une seule clé de modèle Hunyuan ne suffit pas pour cette API. La facturation à l’usage doit être activée explicitement.</string>
     <string name="guide_help_baidu">Créez une application de traduction automatique dans Baidu AI Cloud avec accès à la traduction vocale en temps réel. AppKey désigne l’API Key de l’application, pas la Secret Key.</string>
-    <string name="guide_help_xai">Créez une clé API dans la console xAI. Vérifiez les crédits et l’accès aux modèles vocaux et texte choisis.</string>
+    <string name="guide_help_xai">Obtenez une clé API dans la console xAI et vérifiez l’accès et les crédits des modèles xAI utilisés. Enregistrez séparément la clé de traduction de texte Grok ; vous pouvez réutiliser la clé existante de reconnaissance ou utiliser des clés différentes.</string>
     <string name="profiles_alibaba_mode">Reconnaissance et traduction</string>
     <string name="profiles_alibaba_asr_mt">ASR + MT</string>
     <string name="profiles_alibaba_live">Traduction simultanée</string>

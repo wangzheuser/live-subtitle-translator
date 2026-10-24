@@ -246,25 +246,7 @@ async fn probe_xai_speech(
             .await
             .map_err(|error| recognition_reason(&error))?;
         if include_translation {
-            let probe = configuration
-                .xai_text_probe_configuration()
-                .map_err(|_| ConnectionCheckReason::InvalidConfiguration)?;
-            let TextTranslationProbeCredentials::Independent(credentials) = &probe.credentials
-            else {
-                return Err(ConnectionCheckReason::InvalidConfiguration);
-            };
-            let (source, phrase) = fixed_test_phrase(probe.target_language);
-            let translation = probe_independent_text_translation(
-                credentials,
-                &text_network,
-                source,
-                probe.target_language,
-                phrase,
-            )
-            .await?;
-            if translation.trim().is_empty() {
-                return Err(ConnectionCheckReason::ServiceRejected);
-            }
+            probe_text_translation(configuration, &text_network).await?;
         }
         Ok(())
     })
@@ -416,6 +398,15 @@ pub fn text_probe_network_endpoint(
         .network_endpoint(),
         TextTranslationProbeCredentials::Independent(credentials) => match credentials {
             TextTranslationCredentials::Apple => return Ok(None),
+            TextTranslationCredentials::XAI { api_key, model } => OpenAICompatibleClient::new(
+                crate::core::provider::XAI_TEXT_ENDPOINT,
+                api_key,
+                model,
+                source,
+                target,
+            )
+            .map_err(|_| ConnectionCheckReason::InvalidConfiguration)?
+            .network_endpoint(),
             TextTranslationCredentials::DeepL { api_key } => {
                 DeepLClient::new(api_key, source, target)
                     .map_err(|_| ConnectionCheckReason::InvalidConfiguration)?
@@ -506,18 +497,18 @@ async fn probe_text_translation(
     configuration: &LiveTranslationConfiguration,
     network: &ProviderNetwork,
 ) -> Result<(), ConnectionCheckReason> {
-    if matches!(
-        configuration.text_credentials,
-        Some(TextTranslationCredentials::Apple)
-    ) {
-        return probe_apple_translation(
-            configuration.source_language,
-            configuration.target_language,
-        )
-        .await
-        .map(|_| ());
+    if let Some(credentials) = &configuration.text_credentials {
+        let target = if configuration.target_language.translates_audio() {
+            configuration.target_language
+        } else {
+            TargetLanguage::SimplifiedChinese
+        };
+        let (source, phrase) = fixed_test_phrase(target);
+        return probe_independent_text_translation(credentials, network, source, target, phrase)
+            .await
+            .map(|_| ());
     }
-    if configuration.provider.is_standalone_asr() && configuration.text_credentials.is_none() {
+    if configuration.is_standalone_asr() && configuration.text_credentials.is_none() {
         return if configuration.target_language == TargetLanguage::Original {
             Ok(())
         } else {
@@ -693,6 +684,23 @@ async fn probe_independent_text_translation(
 ) -> Result<String, ConnectionCheckReason> {
     match credentials {
         TextTranslationCredentials::Apple => probe_apple_translation(source, target).await,
+        TextTranslationCredentials::XAI { api_key, model } => {
+            let mut client = OpenAICompatibleClient::new(
+                crate::core::provider::XAI_TEXT_ENDPOINT,
+                api_key,
+                model,
+                source,
+                target,
+            )
+            .map_err(|_| ConnectionCheckReason::InvalidConfiguration)?;
+            client
+                .set_network(network.clone())
+                .map_err(|_| ConnectionCheckReason::InvalidConfiguration)?;
+            client
+                .translate(phrase, Some(source))
+                .await
+                .map_err(|error| openai_compatible_reason(&error))
+        }
         TextTranslationCredentials::DeepL { api_key } => {
             let mut client = DeepLClient::new(api_key, source, target)
                 .map_err(|_| ConnectionCheckReason::InvalidConfiguration)?;
@@ -1110,6 +1118,53 @@ mod tests {
             assert_eq!(connection_reason(&error), ConnectionCheckReason::AuthenticationRejected);
             assert_eq!(error.to_string(), "credential_authentication_failed");
         }
+    }
+
+    #[tokio::test]
+    async fn typed_grok_text_probe_uses_its_fixed_endpoint_and_selected_text_proxy() {
+        use crate::core::network_proxy::{ProxyConfig, ProxyMode};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let configuration = TextTranslationProbeConfiguration {
+            credentials: TextTranslationProbeCredentials::Independent(
+                TextTranslationCredentials::XAI {
+                    api_key: "synthetic-independent-text-key".into(),
+                    model: "chosen-grok-model".into(),
+                },
+            ),
+            qwen_mt_model: Default::default(),
+            source_language: SourceLanguage::English,
+            target_language: TargetLanguage::Japanese,
+            network_proxy: ProxyConfig {
+                mode: ProxyMode::Custom,
+                url: Some(format!("http://{}", listener.local_addr().unwrap())),
+            },
+        };
+        assert_eq!(
+            text_probe_network_endpoint(&configuration)
+                .unwrap()
+                .as_deref(),
+            Some(crate::core::provider::XAI_TEXT_ENDPOINT)
+        );
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut header = Vec::new();
+            while !header.ends_with(b"\r\n\r\n") {
+                header.push(socket.read_u8().await.unwrap());
+                assert!(header.len() < 8192);
+            }
+            assert!(String::from_utf8(header)
+                .unwrap()
+                .starts_with("CONNECT api.x.ai:443 HTTP/1.1"));
+            socket
+                .write_all(b"HTTP/1.1 502 Fixture\r\nContent-Length: 0\r\n\r\n")
+                .await
+                .unwrap();
+        });
+        let diagnostic = check_text_service(&configuration).await;
+        assert_eq!(diagnostic.service, ServiceAvailability::Unavailable);
+        assert_eq!(diagnostic.reason, Some(ConnectionCheckReason::Unreachable));
+        server.await.unwrap();
     }
 
     #[test]

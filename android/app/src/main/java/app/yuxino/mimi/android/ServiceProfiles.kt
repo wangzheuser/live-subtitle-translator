@@ -13,11 +13,24 @@ data class ServiceProfile(val id: String, val name: String, val provider: Servic
 
 internal class ProfileContents(
     val speech: ServiceConfiguration,
-    val selectedTranslation: TextTranslationProvider = TextTranslationProvider.BUILTIN,
+    val selectedTranslation: TextTranslationProvider = if (speech.provider == ServiceProvider.XAI && speech.usesIndependentTextTranslation)
+        TextTranslationProvider.XAI else TextTranslationProvider.BUILTIN,
     val translations: Map<TextTranslationProvider, TranslationConfiguration> = emptyMap(),
     val qwenMtModel: String = "lite",
+    val xaiIndependentTranslationMigrated: Boolean = true,
 ) {
     override fun toString() = "ProfileContents(redacted)"
+
+    /** One-time, same-profile compatibility projection. Ordinary route reads never borrow a speech key. */
+    fun withIndependentXaiTranslation(): ProfileContents {
+        if (speech.provider != ServiceProvider.XAI || xaiIndependentTranslationMigrated) return this
+        if (selectedTranslation != TextTranslationProvider.BUILTIN) return ProfileContents(
+            speech, selectedTranslation, translations, qwenMtModel, true)
+        val routes = translations.toMutableMap()
+        routes.putIfAbsent(TextTranslationProvider.XAI, TranslationConfiguration(
+            model = speech.xaiTextModel, apiKey = speech.value("apiKey"), provider = TextTranslationProvider.XAI))
+        return ProfileContents(speech, TextTranslationProvider.XAI, routes, qwenMtModel, true)
+    }
 }
 
 /** A successful write must be durable; catalog replacement must be atomic. */
@@ -60,7 +73,7 @@ internal class ServiceProfileRepository(private val disk: ProfilePersistence) {
                 speech.optString("alibabaWorkspaceId"), speech.optString("xaiSpeechMode", "voice"),
                 speech.optString("xaiTextModel", "grok-4.3")),
                 TextTranslationProvider.fromStorageId(entry.details.getString("selectedTranslation")), translations,
-                entry.details.getString("qwenMtModel"))
+                entry.details.getString("qwenMtModel"), entry.details.optBoolean("xaiIndependentTranslationMigrated", false))
         } catch (_: Exception) {
             throw IllegalStateException("profile_credentials_unavailable")
         }
@@ -97,6 +110,20 @@ internal class ServiceProfileRepository(private val disk: ProfilePersistence) {
         return publish(Catalog(activeId?.takeIf { id -> entries.any { it.profile.id == id } } ?: entries.firstOrNull()?.profile?.id, entries))
     }
 
+    /** Old catalogs explicitly wrote builtin, so a separate nonsecret checkpoint distinguishes them. */
+    @Synchronized fun migrateXaiAsrTranslations(): Boolean {
+        val current = catalog()
+        var changed = false
+        val entries = current.entries.map { entry ->
+            if (entry.profile.provider != ServiceProvider.XAI || entry.details.optBoolean("xaiIndependentTranslationMigrated", false) ||
+                entry.details.getJSONObject("speech").optString("xaiSpeechMode", "voice") != "asrMt") return@map entry
+            changed = true
+            // prepare verifies the new secret before publish can expose its metadata/checkpoint.
+            prepare(entry.profile, contents(entry.profile.id).withIndependentXaiTranslation()) ?: return false
+        }
+        return !changed || publish(current.copy(entries = entries))
+    }
+
     @Synchronized fun activate(id: String): Boolean {
         val current = catalog()
         if (current.entries.none { it.profile.id == id }) return false
@@ -130,6 +157,7 @@ internal class ServiceProfileRepository(private val disk: ProfilePersistence) {
             .put("alibabaRealtimeMode", speech.alibabaRealtimeMode).put("alibabaWorkspaceId", speech.alibabaWorkspaceId)
             .put("xaiSpeechMode", speech.xaiSpeechMode).put("xaiTextModel", speech.xaiTextModel))
             .put("selectedTranslation", contents.selectedTranslation.storageId).put("qwenMtModel", contents.qwenMtModel)
+            .put("xaiIndependentTranslationMigrated", contents.xaiIndependentTranslationMigrated)
             .put("translations", JSONObject().apply { contents.translations.forEach { (provider, value) ->
                 put(provider.storageId, JSONObject().put("endpoint", value.endpoint).put("model", value.model).put("localHttp", value.allowLocalHttp))
             } })

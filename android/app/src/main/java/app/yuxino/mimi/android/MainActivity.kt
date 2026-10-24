@@ -300,7 +300,8 @@ class MainActivity : AppCompatActivity() {
             val translation = SettingsStore.textTranslationProvider(this@MainActivity)
             val separate = SettingsStore.configuration(this@MainActivity).usesIndependentTextTranslation &&
                 translation != app.yuxino.mimi.android.provider.TextTranslationProvider.BUILTIN &&
-                translation != app.yuxino.mimi.android.provider.TextTranslationProvider.NONE
+                translation != app.yuxino.mimi.android.provider.TextTranslationProvider.NONE &&
+                translationProviderIcon(translation) != serviceProviderIcon(selectedProvider)
             visibility = if (separate) View.VISIBLE else View.GONE
             if (separate) setImageResource(translationProviderIcon(translation))
         }

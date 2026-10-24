@@ -40,10 +40,11 @@ internal fun providerHelp(provider: ServiceProvider): ProviderHelp = when (provi
 }
 
 internal fun providerTitle(context: android.content.Context, provider: ServiceProvider): String {
-    if (provider == ServiceProvider.DASHSCOPE && SettingsStore.configuration(context).usesIndependentTextTranslation) {
+    val configuration = SettingsStore.configuration(context)
+    if (provider == configuration.provider && configuration.usesIndependentTextTranslation) {
         when (val translation = runCatching { SettingsStore.textTranslationProvider(context) }.getOrDefault(TextTranslationProvider.BUILTIN)) {
-            TextTranslationProvider.BUILTIN -> Unit
-            TextTranslationProvider.NONE -> return context.getString(R.string.translation_service_original)
+            TextTranslationProvider.BUILTIN -> if (provider == ServiceProvider.XAI) return context.getString(R.string.translation_xai_original)
+            TextTranslationProvider.NONE -> return context.getString(if (provider == ServiceProvider.XAI) R.string.translation_xai_original else R.string.translation_service_original)
             else -> return context.getString(R.string.translation_service_name, context.getString(
                 if (translation == TextTranslationProvider.OPENAI_COMPATIBLE) R.string.translation_service_custom else translationProviderLabel(translation)))
         }
@@ -69,7 +70,8 @@ internal fun overlayServiceLabel(context: android.content.Context): String {
     val speech = speechProviderName(context, provider)
     val translation = SettingsStore.textTranslationProvider(context)
     return if (SettingsStore.configuration(context).usesIndependentTextTranslation && translation != TextTranslationProvider.BUILTIN &&
-        translation != TextTranslationProvider.NONE) "$speech · ${context.getString(translationProviderLabel(translation))}"
+        translation != TextTranslationProvider.NONE && translationProviderIcon(translation) != serviceProviderIcon(provider))
+        "$speech · ${context.getString(translationProviderLabel(translation))}"
     else speech
 }
 

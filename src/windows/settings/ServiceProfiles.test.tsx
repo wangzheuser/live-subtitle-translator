@@ -5,11 +5,12 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { diagnosticCopy, profileErrorMessage } from "../../lib/connectionDiagnostics";
 import { speechLanguageGuidance, targetLanguageOptionLabel } from "../../lib/speechLanguageGuidance";
-import { I18N, providerDisplayName, setStoredUiLanguage } from "../../lib/i18n";
+import { I18N, UI_LANGUAGES, providerDisplayName, setStoredUiLanguage } from "../../lib/i18n";
 import { openAlibabaSetupPage, getAppleSpeechSupport, prepareAppleSpeechLanguage, profileCredentialEditorState, profileRevealCredential, testProfileConnection } from "../../lib/ipc";
 import { SERVICE_PROVIDERS, sourceLanguagesForSettings, targetLanguagesForSettings } from "../../lib/providerCapabilities";
 import { SOURCE_LANGUAGE_DISPLAY_NAMES, TARGET_LANGUAGE_DISPLAY_NAMES } from "../../lib/types";
 import type { AppleSpeechSupport, ServiceProfile, SettingsSnapshot } from "../../lib/types";
+import { textTranslationDisplayName } from "../../lib/textTranslationName";
 import { ProfileLanguageSettings } from "./ProfileLanguageSettings";
 import { ServiceProfiles } from "./ServiceProfiles";
 
@@ -2321,50 +2322,90 @@ it("keeps first-time setup available after failed creation and restores the chos
   expect(host.querySelector(".provider-picker__heading button.settings-link")).toBeNull();
 });
 
-it("preserves legacy xAI Voice until mode is explicitly changed, then exposes its saved text model", async () => {
+it("keeps legacy xAI Voice until explicitly switched and then shows the shared text-service selector", async () => {
   const xai: ServiceProfile = { id: "xai", name: "xAI", provider: "xAIRealtime", credentialState: "present" };
   const snapshot = { ...settings, profiles: [xai], activeProfileId: xai.id };
-  actions.updateProfile.mockResolvedValue({ ...snapshot, profiles: [{ ...xai, xaiSpeechMode: "asrMt", xaiTextModel: "grok-4.3" }] });
+  actions.updateProfile.mockResolvedValue({ ...snapshot, profiles: [{ ...xai, xaiSpeechMode: "asrMt", textTranslation: "xAI" }] });
   await render(snapshot);
   expect(host.querySelector('.xai-speech-settings [role="combobox"]')?.textContent).toBe("Grok Voice");
-  expect(host.querySelector('#profile-xai-model-xai')).toBeNull();
-  expect(host.querySelectorAll('.connection-check button')).toHaveLength(1);
+  expect(host.querySelector('.service-stage--translation')).toBeNull();
   await act(async () => host.querySelector<HTMLButtonElement>('.xai-speech-settings [role="combobox"]')!.click());
-  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(node => node.textContent === "Streaming recognition + text translation")!.click());
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(node => node.textContent === "Streaming speech recognition (ASR)")!.click());
   expect(actions.updateProfile).toHaveBeenCalledExactlyOnceWith(xai.id, undefined, { xaiSpeechMode: "asrMt" });
-  await render({ ...snapshot, profiles: [{ ...xai, xaiSpeechMode: "asrMt", xaiTextModel: "grok-4.3" }] });
-  expect(host.querySelector<HTMLInputElement>('#profile-xai-model-xai')?.value).toBe("grok-4.3");
+  await render({ ...snapshot, profiles: [{ ...xai, xaiSpeechMode: "asrMt", textTranslation: "xAI", speechCredentialState: "present", textCredentialState: "present" }] });
+  expect(host.querySelector('.service-stage--translation [role="combobox"]')?.textContent).toBe("xAI Grok");
+  expect(host.querySelector('#profile-xai-model-xai')).toBeNull();
   expect(host.querySelectorAll('.connection-check button')).toHaveLength(2);
   expect(host.querySelectorAll('.service-proxies .network-proxy-form')).toHaveLength(2);
 });
 
-it("checks xAI recognition and text independently with the same unsaved key", async () => {
-  const xai: ServiceProfile = { id: "xai", name: "xAI", provider: "xAIRealtime", credentialState: "present", xaiSpeechMode: "asrMt", xaiTextModel: "custom-text-model" };
+it("checks xAI recognition with only the speech draft and saves independent text model/key only on explicit submit", async () => {
+  vi.useFakeTimers();
+  const xai: ServiceProfile = { id: "xai", name: "xAI", provider: "xAIRealtime", credentialState: "present", speechCredentialState: "present", textCredentialState: "present", xaiSpeechMode: "asrMt", textTranslation: "xAI" };
+  vi.mocked(profileCredentialEditorState).mockImplementation(async request => request.textTranslation
+    ? { savedFields: ["token"], model: "grok-4.3" } : { savedFields: ["apiKey"] });
   vi.mocked(testProfileConnection).mockResolvedValue({ credential: "present", service: "available", reason: null, elapsedMs: 90 });
-  await render({ ...settings, profiles: [xai], activeProfileId: xai.id });
-  await change('#profile-api-key-xai-apiKey', "synthetic-unsaved-xai-key");
+  const snapshot = { ...settings, profiles: [xai], activeProfileId: xai.id };
+  actions.saveProfileCredentials.mockResolvedValue(snapshot);
+  actions.selectProfile.mockResolvedValue(snapshot);
+  await render(snapshot);
+  await change('#profile-api-key-xai-apiKey', "synthetic-speech-draft");
   await click(I18N.settings.checkSpeechRecognition);
-  expect(testProfileConnection).toHaveBeenLastCalledWith(xai.id, "speech", { kind: "apiKey", apiKey: "synthetic-unsaved-xai-key" });
-  await click(I18N.settings.checkTextTranslation);
-  expect(testProfileConnection).toHaveBeenLastCalledWith(xai.id, "text", { kind: "apiKey", apiKey: "synthetic-unsaved-xai-key" });
+  expect(testProfileConnection).toHaveBeenLastCalledWith(xai.id, "speech", { kind: "apiKey", apiKey: "synthetic-speech-draft" });
+  await change('#profile-api-key-xai-text-model', "custom-text-model");
+  await change('#profile-api-key-xai-text-token', "synthetic-text-key");
+  await act(async () => vi.advanceTimersByTimeAsync(500));
+  expect(actions.updateProfile).not.toHaveBeenCalled();
   expect(actions.saveProfileCredentials).not.toHaveBeenCalled();
+  await click(I18N.settings.checkTextTranslation);
+  expect(testProfileConnection).toHaveBeenLastCalledWith(xai.id, "text", { kind: "alibabaTranslation", apiKey: "", textTranslation: "xAI", endpoint: "", model: "custom-text-model", token: "synthetic-text-key" });
+  await click(I18N.settings.saveTranslationConfiguration);
+  expect(actions.saveProfileCredentials).toHaveBeenLastCalledWith(xai.id, { kind: "alibabaTranslation", apiKey: "", textTranslation: "xAI", endpoint: "", model: "custom-text-model", token: "synthetic-text-key" });
 });
 
-it("retains a rejected xAI text model draft and retries only that metadata field", async () => {
-  vi.useFakeTimers();
-  const xai: ServiceProfile = { id: "xai", name: "xAI", provider: "xAIRealtime", credentialState: "present", xaiSpeechMode: "asrMt", xaiTextModel: "grok-4.3" };
-  const snapshot = { ...settings, profiles: [xai], activeProfileId: xai.id };
-  actions.updateProfile.mockRejectedValueOnce(new Error("profile-write-failed")).mockResolvedValue({ ...snapshot, profiles: [{ ...xai, xaiTextModel: "custom-text-model" }] });
-  await render(snapshot);
-  await change('#profile-xai-model-xai', "");
-  await act(async () => vi.advanceTimersByTimeAsync(350));
-  expect(actions.updateProfile).not.toHaveBeenCalled();
-  expect(host.querySelector('.xai-speech-settings [role="alert"]')?.textContent).toBe(I18N.settings.openAICompatibleModelInvalid);
-  await change('#profile-xai-model-xai', "custom-text-model");
-  await act(async () => vi.advanceTimersByTimeAsync(350));
-  expect(host.querySelector<HTMLInputElement>('#profile-xai-model-xai')?.value).toBe("custom-text-model");
-  expect(host.querySelector('.xai-speech-settings [role="alert"]')).not.toBeNull();
-  await click(I18N.settings.retryUpdate);
-  expect(actions.updateProfile).toHaveBeenLastCalledWith(xai.id, undefined, { xaiTextModel: "custom-text-model" });
-  expect(actions.saveProfileCredentials).not.toHaveBeenCalled();
+it("does not bind xAI ASR to Grok and lets other recognition select Grok in the same editor", async () => {
+  for (const provider of ["xAIRealtime", "customOpenAIASR"] as const) {
+    const current: ServiceProfile = { id: provider, name: provider, provider, credentialState: "present", speechCredentialState: "present", textCredentialState: "present", xaiSpeechMode: provider === "xAIRealtime" ? "asrMt" : undefined, textTranslation: "deepL" };
+    await render({ ...settings, profiles: [current], activeProfileId: current.id });
+    await act(async () => host.querySelector<HTMLButtonElement>('.service-stage--translation [role="combobox"]')!.click());
+    expect([...document.querySelectorAll('[role="option"]')].map(node => node.textContent)).toContain("xAI Grok");
+    expect([...document.querySelectorAll('[role="option"]')].map(node => node.getAttribute('data-value'))).not.toContain("voice");
+    await act(async () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(node => node.textContent === "xAI Grok")!.click());
+    expect(host.querySelector<HTMLInputElement>('.service-stage--translation input[id$="-model"]')?.value).toBe("grok-4.3");
+    expect(host.querySelector('.service-stage--translation input[id$="-endpoint"]')).toBeNull();
+    expect(actions.saveProfileCredentials).not.toHaveBeenCalled();
+  }
+});
+
+it("retains independent Grok drafts on rejected saves and shows the error beside the configuration", async () => {
+  const xai: ServiceProfile = { id: "xai", name: "xAI", provider: "xAIRealtime", credentialState: "missing", speechCredentialState: "present", textCredentialState: "missing", xaiSpeechMode: "asrMt", textTranslation: "xAI" };
+  vi.mocked(profileCredentialEditorState).mockImplementation(async request => request.textTranslation ? { savedFields: [], model: "grok-4.3" } : { savedFields: ["apiKey"] });
+  actions.saveProfileCredentials.mockRejectedValue("credential_store_unavailable");
+  await render({ ...settings, profiles: [xai], activeProfileId: xai.id });
+  await change('#profile-api-key-xai-text-model', "custom-text-model");
+  await change('#profile-api-key-xai-text-token', "synthetic-text-draft");
+  await click(I18N.settings.saveTranslationConfiguration);
+  expect(host.querySelector<HTMLInputElement>('#profile-api-key-xai-text-model')?.value).toBe("custom-text-model");
+  expect(host.querySelector<HTMLInputElement>('#profile-api-key-xai-text-token')?.value).toBe("synthetic-text-draft");
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain(diagnosticCopy().storage);
+  expect(actions.selectProfile).not.toHaveBeenCalled();
+});
+
+
+it.each(UI_LANGUAGES)("keeps xAI recognition identity in every independent translation description in %s", async language => {
+  setStoredUiLanguage(language);
+  for (const route of ["deepL", "deepLX", "chatMock", "openAICompatible", "xAI", "followService"] as const) {
+    const xai: ServiceProfile = { id: "xai", name: "xAI", provider: "xAIRealtime", credentialState: "present", speechCredentialState: "present", textCredentialState: "present", xaiSpeechMode: "asrMt", textTranslation: route };
+    await render({ ...settings, profiles: [xai], activeProfileId: xai.id });
+    const description = host.querySelector('.service-detail__name-help .settings-help-control__description')?.textContent;
+    expect(description).toContain(`${I18N.settings.speechRecognition}: ${providerDisplayName("xAIRealtime")}`);
+    expect(description).toContain(I18N.settings.customSpeechTranslationHelp);
+    expect(description).not.toContain(I18N.settings.deepLChain);
+    expect(description).not.toContain(I18N.settings.deepLXChain);
+    expect(description).not.toContain(I18N.settings.openAICompatibleChain);
+    expect(description).toContain(`${I18N.settings.textTranslationLabel}: ${route === "followService" ? I18N.settings.customSpeechNoTranslation : textTranslationDisplayName(xai)}`);
+    const voice = { ...xai, xaiSpeechMode: "voice" as const };
+    await render({ ...settings, profiles: [voice], activeProfileId: voice.id });
+    expect(host.querySelector('.service-detail__name-help .settings-help-control__description')?.textContent).toBe(I18N.settings.providerXAIDescription);
+  }
 });

@@ -18,12 +18,18 @@ provide common synthetic wire and display cases.
 
 ## xAI recognition and text translation
 
-Desktop and Android expose the same xAI speech mode and editable Grok text model.
-New profiles use xAI streaming STT plus the existing bounded text pipeline;
-profiles saved without a mode retain Grok Voice. Both xAI stages intentionally
-use that profile's xAI key, with separate proxy snapshots and connection checks.
-Original-only captions skip the text request. This does not enable arbitrary
-text-service replacement for the integrated Grok Voice route.
+Desktop and Android expose xAI streaming ASR through their existing independent
+text-service editor. New xAI profiles select ASR and Grok text translation;
+profiles saved without a mode retain Grok Voice. ASR can use other supported text
+services, and Grok is available to other supported independent recognizers.
+Each stage stores its own key and has a separate proxy snapshot and check.
+The same existing xAI key may be entered in both fields. Old STT profiles receive
+one verified same-profile migration; later deletion never borrows the speech key.
+Original-only captions skip text credentials and requests. Grok Voice retains its
+integrated route and hides, without deleting, the independent selection.
+
+Android currently exposes independent recognition through Alibaba ASR and xAI
+ASR. This does not add desktop-only Apple/custom recognizer entry points there.
 
 ## Native audio target differences
 

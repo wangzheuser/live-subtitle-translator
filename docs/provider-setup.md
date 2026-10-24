@@ -12,10 +12,10 @@ Choose a service, get its credentials, and set it up in Mimi. You only need to e
 | --- | --- |
 | One service for recognition and translation | [Volcano Engine](#volcano-engine), [Gemini](#google-gemini), [Tencent Cloud](#tencent-cloud), [Baidu](#baidu-translate), or [OpenAI](#openai-realtime); use [Azure OpenAI](#azure-openai) if you have Azure deployments |
 | Use Alibaba simultaneous translation | [LiveTranslate](#alibaba-livetranslate) returns original and translated text from one service; available on desktop and Android in the current development build |
-| Use DeepL or another text translator | [Alibaba Cloud’s ASR + MT mode](#alibaba-cloud) lets you change the translator independently |
+| Use DeepL, Grok, or another text translator | [Alibaba Cloud’s ASR + MT mode](#alibaba-cloud) or [xAI streaming recognition](#xai-grok), with text translation configured separately |
 | Process locally on a Mac | [Apple Speech](#apple-speech) recognizes speech; [Apple Translation](#apple-translation) translates text. Requires Apple silicon, macOS 26+, and the language packs |
 | Use your own recognition endpoint | [Custom recognition](#custom-recognition), with translation configured separately; the service must support the matching realtime speech protocol |
-| Use your xAI account | [xAI Grok](#xai-grok) streaming recognition with a selectable Grok text model |
+| Use your xAI account | [xAI streaming recognition](#xai-grok) with your choice of text translator, or [Grok text translation](#grok-text-translation) with another supported recognizer |
 
 Choose based on the languages you need, your accounts, and your budget. [Text translators](#text-translation) such as DeepL and Index-Translate only process text; they cannot listen to audio by themselves.
 
@@ -50,7 +50,7 @@ Cloud recognition receives audio from the selected source, and remote text trans
 | [Custom Recognition (DashScope Protocol)](#custom-recognition) | Your DashScope-compatible service | Full WebSocket URL, recognition model, and API key |
 | [Custom Recognition (OpenAI Realtime Compatible)](#custom-recognition) | Your Realtime-compatible service | Full WebSocket URL, recognition model, and API key |
 
-Only setting up text translation? Go to [Apple Translation](#apple-translation), [DeepL](#deepl), [DeepLX](#deeplx), [ChatMock](#chatmock), [OpenAI-compatible API / Index-Translate](#openai-compatible), or [Original text only](#original-only). To check which models Mimi calls, see [Current models and request paths](#current-models).
+Only setting up text translation? Go to [Grok](#grok-text-translation), [Apple Translation](#apple-translation), [DeepL](#deepl), [DeepLX](#deeplx), [ChatMock](#chatmock), [OpenAI-compatible API / Index-Translate](#openai-compatible), or [Original text only](#original-only). To check which models Mimi calls, see [Current models and request paths](#current-models).
 
 <a id="alibaba-cloud"></a>
 
@@ -196,13 +196,17 @@ This service connects to **Azure OpenAI**, not an Azure Speech resource. A norma
 
 Links: [xAI Console](https://console.x.ai/) · [Official quickstart](https://docs.x.ai/developers/quickstart) · [Streaming STT](https://docs.x.ai/developers/model-capabilities/audio/speech-to-text) · [Grok Voice](https://docs.x.ai/developers/model-capabilities/audio/speech-to-speech)
 
-1. Sign in to xAI Console and select or create a team.
-2. Check the team's API usage, billing settings, and access to streaming speech recognition and the chosen text model, then create an API key.
-3. Add **xAI Grok** in Mimi, keep **Streaming recognition + text translation**, enter the **API Key**, and choose your **Text model**. Save and check recognition and translation separately.
+1. Sign in to xAI Console and select or create a team. Check API access and credits for the xAI models you intend to use, then obtain an API key.
+2. Add **xAI Grok** in Mimi. New configurations select **Streaming speech recognition (ASR)** and **xAI Grok** text translation. Enter the recognition key under **Speech recognition** and save it.
+3. Under **Text translation**, keep **xAI Grok** or choose another supported text service. For Grok, enter its API key, choose the text model (default `grok-4.3`), and click **Save translation configuration**. Model edits remain drafts until saved, just like other text services.
+4. Recognition and translation save their credentials separately. You may enter the same existing xAI key in both fields or use different keys; Mimi does not borrow a missing translation key from recognition. Check each stage separately.
+5. Choose **No translation (original only)** or **Skip translation** when you do not need translated text. Recognition continues without text translation requests.
 
-This mode uses xAI's streaming speech recognition (`grok-voice-transcribe-2.0`) and sends confirmed speech segments to the chosen Grok text model. Both stages use this configuration's xAI API key. The default text model is `grok-4.3`; enter an actual Chat Completions model ID available to your team. Original-only captions skip text translation.
+The streaming mode uses `grok-voice-transcribe-2.0` for recognition. Confirmed segments go to the independently selected text service; changing that service or its model does not change recognition. Grok text translation is also available with Alibaba ASR, Apple Speech, and custom recognition. See [Grok text translation](#grok-text-translation).
 
-Existing configurations retain **Grok Voice**, which translates after speech pauses using `grok-voice-latest`. Change the mode explicitly to use streaming recognition and text translation. Check allowances and charges in the console and [xAI API pricing](https://docs.x.ai/developers/pricing); a consumer subscription alone does not establish API availability.
+Existing Voice configurations retain **Grok Voice**, which uses `grok-voice-latest` and translates after speech pauses. Change the speech mode explicitly to try ASR, then configure text translation. If you tested the earlier unreleased combined ASR/Grok mode, Mimi copies that profile's saved key and model into its independent text settings once; later credential deletions are preserved.
+
+Check allowances and charges in the console and [xAI API pricing](https://docs.x.ai/developers/pricing); a consumer subscription alone does not establish API availability.
 
 <a id="apple-speech"></a>
 
@@ -234,9 +238,17 @@ A normal webpage URL, HTTP file-transcription endpoint, or Chat Completions endp
 
 ## Independent text translation
 
-On desktop, **Alibaba Cloud’s ASR + MT mode, Apple Speech, and both custom recognition options** support independent text translation. Other built-in speech services use their own translation pipelines. Android currently offers independent text translation only within Alibaba Cloud configurations.
+On desktop, **Alibaba Cloud’s ASR + MT mode, xAI streaming recognition, Apple Speech, and both custom recognition options** support independent text translation. Android supports it with **Alibaba ASR and xAI ASR**. Integrated modes such as Grok Voice use their own translation pipelines.
 
-Complete the **Speech recognition** section first, then choose a service under **Text translation**. When you select DeepL, DeepLX, ChatMock, or an OpenAI-compatible API, Mimi does not use the recognition key in place of translation credentials. Default Alibaba Cloud translation is covered in the [Alibaba Cloud section](#alibaba-cloud).
+Complete the **Speech recognition** section first, then choose a service under **Text translation**. When you select Grok, DeepL, DeepLX, ChatMock, or an OpenAI-compatible API, save its translation credentials separately. Mimi does not use the recognition key in place of a missing translation key. Default Alibaba Cloud translation is covered in the [Alibaba Cloud section](#alibaba-cloud).
+
+<a id="grok-text-translation"></a>
+
+### Grok text translation
+
+1. In a configuration that supports independent text translation, select **xAI Grok** under **Text translation**. This choice works with xAI ASR and with other supported recognizers.
+2. Enter an xAI API key and a Chat Completions model ID available to that key; the model field starts with `grok-4.3`. Mimi uses xAI's fixed text endpoint, so no service address is required.
+3. Click **Save translation configuration**, then check text translation. The model and key are saved for this text service, independently of recognition. You can use an existing xAI key; a separate key per model is not required.
 
 <a id="apple-translation"></a>
 
@@ -311,7 +323,7 @@ If a key was previously saved for this same address, choose **Remove translation
 
 ### Original text only
 
-In configurations that support independent text translation, enable **Skip translation** to stop sending text translation requests. Apple Speech and custom recognition also offer **No translation (original only)**. On Android, select **No translation (original only)** in Alibaba Cloud's text translation options.
+In configurations that support independent text translation, enable **Skip translation** to stop sending text translation requests. Apple Speech, custom recognition, and xAI ASR also offer **No translation (original only)**. On Android, select **No translation (original only)** in Alibaba ASR or xAI ASR text translation options.
 
 **Subtitle display → Original only** changes only what is displayed; it does not disable translation requests. To reduce translation calls, use Skip translation or No translation as described above. Cloud recognition usage continues to accrue.
 
@@ -340,7 +352,7 @@ If the problem continues, report it in [Issues](https://github.com/yuxino/mimi/i
 
 ## Current models and request paths
 
-This table describes the desktop app's default and optional request paths. Model IDs help you check access and understand usage. Built-in configurations select their models automatically; only Azure deployments and custom services require you to enter names. Providers can update models under the same ID, and an ID alone does not guarantee recognition quality or support for a particular language.
+This table describes the desktop app's default and optional request paths. Model IDs help you check access and understand usage. Built-in recognition selects its model automatically; Azure deployment names and independent text models use their corresponding fields. Providers can update models under the same ID, and an ID alone does not guarantee recognition quality or support for a particular language.
 
 | Desktop service | Models or APIs used for recognition / original text and translation | How to select them in Mimi |
 | --- | --- | --- |
@@ -352,7 +364,8 @@ This table describes the desktop app's default and optional request paths. Model
 | Baidu Translate | Realtime speech translation at `/ws/realtime_speech_trans` | Built-in service endpoint; the request does not specify a public model ID |
 | OpenAI Realtime | Translation: `gpt-realtime-translate`; original transcription: `gpt-realtime-whisper` | Fixed built-in models using the dedicated Realtime translation endpoint |
 | Azure OpenAI | Translation: your deployment of `gpt-realtime-translate`; original text: your compatible realtime transcription deployment | Enter both actual deployment names; Mimi does not choose the transcription model for you |
-| xAI Grok | Streaming recognition: `grok-voice-transcribe-2.0`; text: `grok-4.3` by default, editable | Same xAI key for both stages; legacy Grok Voice remains available |
+| xAI ASR | Recognition: `grok-voice-transcribe-2.0`; text translation is configured separately | Select ASR, then choose a text service and save each stage’s key |
+| xAI Grok Voice | `grok-voice-latest`; recognition and translation share one Voice session | Existing Voice configurations retain this mode |
 | Apple Speech | macOS `SpeechTranscriber` with downloaded language packs; text translation is configured separately | Select a local language pack; there is no cloud model ID |
 | Custom DashScope / OpenAI Realtime recognition | Recognition uses the model ID you enter; text translation is configured separately | Enter the endpoint, model, and recognition key yourself |
 
@@ -374,6 +387,7 @@ Production Android sessions use the same shared Rust provider factory as desktop
 | Text translation service | What Mimi selects |
 | --- | --- |
 | Alibaba Cloud two-stage mode (desktop / Android) | `qwen-mt-lite` |
+| xAI Grok | Default `grok-4.3`; edit and save the model in the text translation service |
 | Apple Translation | macOS Translation framework and downloaded system resources; no cloud model ID |
 | DeepL | Official text translation API; Mimi does not specify `model_type` or a model ID |
 | DeepLX | The `/translate` service at the configured address; Mimi does not select its upstream model |

@@ -227,7 +227,7 @@ export type ServiceProvider =
   | "customOpenAIASR"
   | "deepLX";
 
-export type TextTranslation = "followService" | "apple" | "deepL" | "deepLX" | "openAICompatible" | "chatMock";
+export type TextTranslation = "followService" | "apple" | "deepL" | "deepLX" | "openAICompatible" | "chatMock" | "xAI";
 
 /** Write-only payload sent to the native secure credential store. */
 export type ProviderCredentialsInput =
@@ -267,7 +267,6 @@ export type ProfileOptionsDraft = ProfileNetworkProxyDraft & {
   qwenMtModel?: QwenMTModel;
   /** Historical profiles keep Grok Voice; new profiles explicitly select ASR + text translation. */
   xaiSpeechMode?: XAISpeechMode;
-  xaiTextModel?: string;
   /** Opt-in integrated audio route; historical profiles keep ASR + MT. */
   alibabaRealtimeMode?: AlibabaRealtimeMode;
   /** Non-secret Beijing workspace identifier; required by experimental realtime models. */
@@ -279,6 +278,8 @@ export type ProfileOptionsDraft = ProfileNetworkProxyDraft & {
 };
 
 export interface ServiceProfile {
+  /** Native one-time migration marker; never a credential fallback instruction. */
+  xaiIndependentTranslationMigrated?: boolean;
   id: string;
   name: string;
   provider: ServiceProvider;
@@ -286,6 +287,7 @@ export interface ServiceProfile {
   qwenMtModel?: QwenMTModel;
   /** Historical profiles keep Grok Voice; new profiles explicitly select ASR + text translation. */
   xaiSpeechMode?: XAISpeechMode;
+  /** Read compatibility only; text models belong to the independent translation configuration. */
   xaiTextModel?: string;
   /** Opt-in integrated audio route; historical profiles keep ASR + MT. */
   alibabaRealtimeMode?: AlibabaRealtimeMode;

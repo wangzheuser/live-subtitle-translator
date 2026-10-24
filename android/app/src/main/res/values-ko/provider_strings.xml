@@ -8,7 +8,7 @@
     <string name="guide_detail_volcano">豆包 동시통역 2.0으로 원문과 번역문을 실시간 출력합니다.\n번역 서비스만 별도로 변경할 수 없습니다.</string>
     <string name="guide_detail_tencent">Tencent Cloud가 음성을 실시간으로 인식하고 번역합니다.\n번역 서비스만 별도로 변경할 수 없습니다.</string>
     <string name="guide_detail_baidu">Baidu가 음성을 실시간으로 인식하고 번역합니다.\n번역 서비스만 별도로 변경할 수 없습니다.</string>
-    <string name="guide_detail_xai">xAI 스트리밍 음성 인식과 선택한 Grok 텍스트 모델로 번역합니다.\n말이 멈춘 뒤 번역하는 Grok Voice도 선택할 수 있습니다.</string>
+    <string name="guide_detail_xai">xAI 스트리밍 음성 인식에 원하는 텍스트 번역 서비스를 별도로 선택할 수 있습니다.\\n말이 멈춘 뒤 번역하는 Grok Voice도 선택할 수 있습니다.</string>
     <string name="guide_help_dashscope">Model Studio를 활성화하고 API 키를 만드세요. 동시통역에는 베이징 워크스페이스 ID도 필요합니다.</string>
     <string name="guide_help_openai">Realtime 접근 권한이 있는 OpenAI API 프로젝트와 키를 생성하세요. ChatGPT 구독에는 API 사용량이 포함되지 않습니다.</string>
     <string name="guide_help_gemini">Google AI Studio에서 Gemini API 키를 생성하고 프로젝트에서 Live API를 사용할 수 있는지 확인하세요.</string>
@@ -16,7 +16,7 @@
     <string name="guide_help_volcano">계정을 인증하고 새 Doubao Voice 콘솔에서 동시통역 2.0을 활성화하세요. Mimi는 기존 AppID/액세스 토큰이 아닌 새 API 키를 사용합니다.</string>
     <string name="guide_help_tencent">실시간 음성 번역에는 계정의 AppID와 같은 계정에서 발급한 SecretID / SecretKey가 필요합니다. AppID는 계정 정보에서 확인하며 UIN과 다릅니다. 키 쌍은 CAM API 키에서 확인하세요. ASR 콘솔에서 서비스를 활성화하세요. Hunyuan 모델 API 키 하나로는 이 API를 인증할 수 없습니다. 종량제도 직접 활성화해야 합니다.</string>
     <string name="guide_help_baidu">Baidu AI Cloud에서 실시간 음성 번역 권한이 있는 기계 번역 앱을 생성하세요. AppKey는 앱의 API Key이며 Secret Key가 아닙니다.</string>
-    <string name="guide_help_xai">xAI 콘솔에서 API 키를 만들고 잔액과 선택한 음성 인식 및 텍스트 모델의 접근 권한을 확인하세요.</string>
+    <string name="guide_help_xai">xAI 콘솔에서 API 키를 얻고 사용할 xAI 모델의 권한과 잔액을 확인하세요. Grok 텍스트 번역 키는 별도로 저장하며, 인식과 같은 기존 키 또는 서로 다른 키를 사용할 수 있습니다.</string>
     <string name="profiles_alibaba_mode">인식 및 번역</string>
     <string name="profiles_alibaba_asr_mt">ASR + MT</string>
     <string name="profiles_alibaba_live">동시통역</string>

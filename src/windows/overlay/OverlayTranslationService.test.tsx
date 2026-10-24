@@ -87,7 +87,18 @@ it.each(["customDashScopeASR", "customOpenAIASR"] as const)(
 );
 
 it("keeps one xAI provider badge for recognition and translation using the same service", async () => {
-  await render({ provider: "xAIRealtime", textTranslation: "followService", xaiSpeechMode: "asrMt", xaiTextModel: "grok-4.3" });
+  await render({ provider: "xAIRealtime", textTranslation: "xAI", xaiSpeechMode: "asrMt" });
   expect(host.querySelectorAll('.overlay-service__stage')).toHaveLength(1);
   expect(host.querySelector('[data-stage="combined"] [data-provider="xAIRealtime"]')).not.toBeNull();
+});
+
+
+it("keeps independent xAI combinations distinct and followService recognition-only", async () => {
+  await render({ provider: "xAIRealtime", xaiSpeechMode: "asrMt", textTranslation: "deepL" });
+  expect([...host.querySelectorAll('[data-provider]')].map(node => node.getAttribute('data-provider'))).toEqual(["xAIRealtime", "deepL"]);
+  await render({ provider: "customOpenAIASR", textTranslation: "xAI" });
+  expect([...host.querySelectorAll('[data-provider]')].map(node => node.getAttribute('data-provider'))).toEqual(["customOpenAIASR", "xAI"]);
+  await render({ provider: "xAIRealtime", xaiSpeechMode: "asrMt", textTranslation: "followService" });
+  expect(host.querySelectorAll('.overlay-service__stage')).toHaveLength(1);
+  expect(host.querySelector('[data-stage="recognition"]')).not.toBeNull();
 });

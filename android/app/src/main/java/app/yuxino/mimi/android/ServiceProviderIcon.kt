@@ -19,5 +19,6 @@ internal fun translationProviderIcon(provider: app.yuxino.mimi.android.provider.
     app.yuxino.mimi.android.provider.TextTranslationProvider.DEEPL -> R.drawable.ic_translation_deepl
     app.yuxino.mimi.android.provider.TextTranslationProvider.DEEPLX -> R.drawable.ic_translation_deeplx
     app.yuxino.mimi.android.provider.TextTranslationProvider.NONE -> R.drawable.ic_translation_captions
+    app.yuxino.mimi.android.provider.TextTranslationProvider.XAI -> R.drawable.ic_provider_xai
     else -> R.drawable.ic_service_languages
 }

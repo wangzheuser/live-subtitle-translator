@@ -20,7 +20,9 @@ beforeEach(() => {
   vi.stubGlobal("scrollIntoView", vi.fn());
   Element.prototype.scrollIntoView = vi.fn();
   vi.mocked(profileRevealCredential).mockReset();
-  vi.mocked(profileCredentialEditorState).mockReset().mockImplementation(async ({ textTranslation }) => ({ savedFields: textTranslation ? ["token"] : ["apiKey", "asrApiKey"] }));
+  vi.mocked(profileCredentialEditorState).mockReset().mockImplementation(async ({ textTranslation }) => ({ savedFields: textTranslation
+    ? textTranslation === (props.profile.textTranslation ?? (props.profile.provider === "deepLX" ? "deepLX" : "followService")) ? ["token"] : []
+    : ["apiKey", "asrApiKey"] }));
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
   props = { profile, inputId: "test", disabled: false, busy: false, feedback: null, onSave: vi.fn().mockResolvedValue(null), onRequestDelete: vi.fn(), onConfirmDelete: vi.fn(), confirmingDelete: false, onCancelDelete: vi.fn() };
 });
@@ -36,12 +38,12 @@ async function change(selector: string, value: string) {
 function picker() { return host.querySelector<HTMLButtonElement>('.service-stage--translation [role="combobox"]')!; }
 async function chooseTranslation(value: TextTranslation) {
   await act(() => picker().click());
-  const label = value === "chatMock" ? "ChatMock" : value === "openAICompatible" ? I18N.settings.textTranslationOpenAICompatible : value === "deepLX" ? I18N.settings.textTranslationCustom : value === "deepL" ? "DeepL" : I18N.settings.textTranslationFollow;
+  const label = value === "xAI" ? "xAI Grok" : value === "chatMock" ? "ChatMock" : value === "openAICompatible" ? I18N.settings.textTranslationOpenAICompatible : value === "deepLX" ? I18N.settings.textTranslationCustom : value === "deepL" ? "DeepL" : I18N.settings.textTranslationFollow;
   const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(node => node.textContent === label)!;
   await act(async () => { option.click(); });
 }
 async function key(value: string) {
-  await act(() => picker().dispatchEvent(new KeyboardEvent("keydown", { key: value, bubbles: true })));
+  await act(async () => { picker().dispatchEvent(new KeyboardEvent("keydown", { key: value, bubbles: true })); });
 }
 async function submit() { await act(async () => { host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); }); }
 
@@ -638,4 +640,56 @@ it.each(["appleSpeech", "customDashScopeASR", "customOpenAIASR"] as const)("does
   expect(host.textContent).not.toContain("unavailable-translation");
   await chooseTranslation("deepL");
   expect(textConnectionCheck).toHaveBeenCalled();
+});
+
+it("offers Grok with its own required key/model and a fixed endpoint for Alibaba recognition", async () => {
+  await render();
+  await act(() => picker().click());
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(node => node.textContent === "xAI Grok")!.click());
+  expect(host.querySelector('#test-endpoint')).toBeNull();
+  expect(host.querySelector<HTMLInputElement>('#test-model')?.value).toBe("grok-4.3");
+  expect(host.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true);
+  await change('#test-token', "synthetic-grok-key");
+  await submit();
+  expect(props.onSave).toHaveBeenLastCalledWith({ kind: "alibabaTranslation", apiKey: "", textTranslation: "xAI", endpoint: "", token: "synthetic-grok-key", model: "grok-4.3" });
+});
+
+
+it("restores a previously saved Grok destination without reading its key or selecting it before Save", async () => {
+  const textConnectionCheck = vi.fn().mockReturnValue(null);
+  vi.mocked(profileCredentialEditorState).mockImplementation(async ({ profileId, textTranslation }) => {
+    expect(profileId).toBe(profile.id);
+    return textTranslation === "xAI" ? { savedFields: ["token"], model: "grok-model-ui-test" }
+      : { savedFields: textTranslation ? ["token"] : ["apiKey"] };
+  });
+  await render({ ...props, profile: { ...profile, textTranslation: "deepL" }, textConnectionCheck });
+  await chooseTranslation("xAI");
+  expect(profileCredentialEditorState).toHaveBeenLastCalledWith({ profileId: profile.id, textTranslation: "xAI" });
+  expect(host.querySelector<HTMLInputElement>('#test-model')!.value).toBe("grok-model-ui-test");
+  expect(host.querySelector<HTMLInputElement>('#test-token')!.value).toBe("");
+  expect(host.querySelector<HTMLInputElement>('#test-token')!.placeholder).toBe("••••••••");
+  expect(host.querySelector<HTMLButtonElement>('.service-stage--translation .saved-credential-input__toggle')!.disabled).toBe(true);
+  expect(host.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(false);
+  expect(props.profile.textTranslation).toBe("deepL");
+  expect(props.onSave).not.toHaveBeenCalled();
+  expect(profileRevealCredential).not.toHaveBeenCalled();
+  expect(textConnectionCheck).toHaveBeenLastCalledWith({ kind: "alibabaTranslation", apiKey: "", textTranslation: "xAI", endpoint: "", token: "", model: "grok-model-ui-test" });
+  await submit();
+  expect(props.onSave).toHaveBeenCalledExactlyOnceWith({ kind: "alibabaTranslation", apiKey: "", textTranslation: "xAI", endpoint: "", token: "", model: "grok-model-ui-test" });
+});
+
+it("does not reuse an inactive destination's saved key after its restored endpoint changes", async () => {
+  const textConnectionCheck = vi.fn().mockReturnValue(null);
+  vi.mocked(profileCredentialEditorState).mockImplementation(async ({ textTranslation }) => textTranslation === "openAICompatible"
+    ? { savedFields: ["token"], endpoint: "https://saved.example/v1", model: "saved-model" }
+    : { savedFields: textTranslation ? ["token"] : ["apiKey"] });
+  await render({ ...props, profile: { ...profile, textTranslation: "deepL" }, textConnectionCheck });
+  await chooseTranslation("openAICompatible");
+  expect(host.querySelector<HTMLInputElement>('#test-endpoint')!.value).toBe("https://saved.example/v1");
+  expect(host.querySelector<HTMLInputElement>('#test-model')!.value).toBe("saved-model");
+  await change('#test-endpoint', "https://new.example/v1");
+  expect(host.querySelector<HTMLInputElement>('#test-token')!.placeholder).toBe(I18N.settings.optionalTranslationKeyPlaceholder);
+  expect(host.querySelector('.service-stage--translation .saved-credential-input__toggle')).toBeNull();
+  expect(profileRevealCredential).not.toHaveBeenCalled();
+  expect(textConnectionCheck).toHaveBeenLastCalledWith({ kind: "alibabaTranslation", apiKey: "", textTranslation: "openAICompatible", endpoint: "https://new.example/v1", token: "", model: "saved-model" });
 });

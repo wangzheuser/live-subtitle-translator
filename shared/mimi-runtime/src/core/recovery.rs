@@ -276,6 +276,7 @@ pub enum MTBudgetRoute {
     DeepLX,
     OpenAICompatible,
     ChatMock,
+    XAI,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -290,24 +291,11 @@ impl MTBudgetScope {
         profile_id: String,
         configuration: &LiveTranslationConfiguration,
     ) -> Option<Self> {
-        let route = if configuration.uses_xai_asr() {
+        let route = if let Some(credentials) = &configuration.text_credentials {
             if !configuration.target_language.translates_audio() {
                 return None;
             }
-            MTBudgetRoute::OpenAICompatible
-        } else if matches!(
-            configuration.text_credentials,
-            Some(TextTranslationCredentials::Apple)
-        ) {
-            if !configuration.target_language.translates_audio() {
-                return None;
-            }
-            MTBudgetRoute::Apple
-        } else if configuration.provider.is_standalone_asr() {
-            if !configuration.target_language.translates_audio() {
-                return None;
-            }
-            match configuration.text_credentials.as_ref()? {
+            match credentials {
                 TextTranslationCredentials::Apple => MTBudgetRoute::Apple,
                 TextTranslationCredentials::DeepL { .. } => MTBudgetRoute::DeepL,
                 TextTranslationCredentials::DeepLX { .. } => MTBudgetRoute::DeepLX,
@@ -315,7 +303,10 @@ impl MTBudgetScope {
                     MTBudgetRoute::OpenAICompatible
                 }
                 TextTranslationCredentials::ChatMock { .. } => MTBudgetRoute::ChatMock,
+                TextTranslationCredentials::XAI { .. } => MTBudgetRoute::XAI,
             }
+        } else if configuration.is_standalone_asr() {
+            return None;
         } else {
             match &configuration.credentials {
                 ProviderCredentials::DeepL { .. } => MTBudgetRoute::DeepL,
@@ -487,5 +478,57 @@ pub fn provider_recovery_minimum_delay(code: &str) -> Duration {
         | "apple_speech_stream_closed"
         | "apple_speech_result_backlog" => Duration::from_millis(600),
         _ => Duration::ZERO,
+    }
+}
+
+#[cfg(test)]
+mod independent_budget_tests {
+    use super::*;
+    use crate::core::models::{SourceLanguage, TargetLanguage};
+    use crate::core::provider::XAISpeechMode;
+    #[test]
+    fn xai_asr_budget_uses_the_selected_text_route_and_original_has_no_budget() {
+        let configuration = LiveTranslationConfiguration::for_provider(
+            ProviderKind::XAIRealtime,
+            "speech-key",
+            SourceLanguage::English,
+            TargetLanguage::Japanese,
+            TranslationMode::Turbo,
+        )
+        .with_xai_speech(XAISpeechMode::AsrMt, "legacy-unused");
+        assert!(MTBudgetScope::for_configuration("profile".into(), &configuration).is_none());
+        for (credentials, route) in [
+            (
+                TextTranslationCredentials::DeepL {
+                    api_key: "text:fx".into(),
+                },
+                MTBudgetRoute::DeepL,
+            ),
+            (
+                TextTranslationCredentials::OpenAICompatible {
+                    endpoint: "http://127.0.0.1:1".into(),
+                    model: "model".into(),
+                    api_key: "text".into(),
+                },
+                MTBudgetRoute::OpenAICompatible,
+            ),
+            (
+                TextTranslationCredentials::XAI {
+                    api_key: "text".into(),
+                    model: "grok".into(),
+                },
+                MTBudgetRoute::XAI,
+            ),
+        ] {
+            let mut configuration = configuration.clone().with_text_credentials(credentials);
+            assert!(
+                MTBudgetScope::for_configuration("profile".into(), &configuration)
+                    .unwrap()
+                    .route
+                    == route
+            );
+            configuration.target_language = TargetLanguage::Original;
+            assert!(MTBudgetScope::for_configuration("profile".into(), &configuration).is_none());
+        }
     }
 }

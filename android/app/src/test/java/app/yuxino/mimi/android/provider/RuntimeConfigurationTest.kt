@@ -7,36 +7,43 @@ class RuntimeConfigurationTest {
     private val alibaba = ServiceConfiguration(ServiceProvider.DASHSCOPE, mapOf("apiKey" to "synthetic-speech-key"),
         "wss://legacy.example.invalid/realtime", "qwen3.5-livetranslate-flash-realtime")
 
-    @Test fun xaiSpeechModeAndTextModelCrossTheRuntimeBoundaryWithoutChangingTheKeyShape() {
+    @Test fun xaiSpeechAndGrokTextKeepIndependentKeysAndModelsWhileVoiceIgnoresTheTranslator() {
         val voice = ServiceConfiguration(ServiceProvider.XAI, mapOf("apiKey" to "synthetic-xai-key"))
-        val streaming = ServiceConfiguration(ServiceProvider.XAI, voice.credentials, xaiSpeechMode = "asrMt", xaiTextModel = "grok-custom-text")
+        val streaming = ServiceConfiguration(ServiceProvider.XAI, voice.credentials, xaiSpeechMode = "asrMt")
+        val translator = TranslationConfiguration(provider = TextTranslationProvider.XAI, model = "grok-custom-text", apiKey = "synthetic-text-key")
         for (speech in listOf(voice, streaming)) {
-            val configuration = buildRuntimeConfiguration(speech, TranslationConfiguration(provider = TextTranslationProvider.BUILTIN), "en", "zh", "lite")
+            val configuration = buildRuntimeConfiguration(speech, translator, "en", "zh", "lite")
             assertEquals(speech.xaiSpeechMode, configuration.getString("xaiSpeechMode"))
             assertEquals(speech.xaiTextModel, configuration.getString("xaiTextModel"))
             assertEquals("apiKey", configuration.getJSONObject("credentials").getString("kind"))
             assertEquals("synthetic-xai-key", configuration.getJSONObject("credentials").getString("apiKey"))
-            assertTrue(configuration.isNull("textCredentials"))
+            if (speech === voice) assertTrue(configuration.isNull("textCredentials")) else {
+                val text = configuration.getJSONObject("textCredentials")
+                assertEquals(setOf("kind", "model", "apiKey"), text.keys().asSequence().toSet())
+                assertEquals("xAI", text.getString("kind"))
+                assertEquals("grok-custom-text", text.getString("model"))
+                assertEquals("synthetic-text-key", text.getString("apiKey"))
+                assertFalse(text.toString().contains("synthetic-xai-key"))
+            }
             assertEquals("system", configuration.getJSONObject("networkProxy").getString("mode"))
             assertEquals("system", configuration.getJSONObject("textNetworkProxy").getString("mode"))
         }
         assertEquals("voice", voice.xaiSpeechMode)
     }
 
-    @Test fun xaiRecognitionProbeIgnoresUnsavedTextModelWhileTextProbeKeepsItsDraft() {
-        for (model in listOf("", "bad\nmodel", "x".repeat(257))) {
-            val draft = ServiceConfiguration(ServiceProvider.XAI, mapOf("apiKey" to "synthetic-current-key"),
-                xaiSpeechMode = "asrMt", xaiTextModel = model)
-            val recognition = buildXaiProbeConfiguration(draft, "synthetic-saved-model", "en", "zh", true)
-            assertEquals("original", recognition.getString("targetLanguage"))
-            assertEquals("synthetic-saved-model", recognition.getString("xaiTextModel"))
-            assertEquals("synthetic-current-key", recognition.getJSONObject("credentials").getString("apiKey"))
-            assertEquals("en", recognition.getString("sourceLanguage"))
-            assertTrue(recognition.isNull("textCredentials"))
-            val text = buildXaiProbeConfiguration(draft, "synthetic-saved-model", "en", "zh", false)
-            assertEquals("zh", text.getString("targetLanguage"))
-            assertEquals(model, text.getString("xaiTextModel"))
-        }
+    @Test fun recognitionProbeOwnsOnlySpeechFieldsAndTextProbeOwnsOnlyTextFields() {
+        val speech = ServiceConfiguration(ServiceProvider.XAI, mapOf("apiKey" to "synthetic-current-key"), xaiSpeechMode = "asrMt")
+        val recognition = buildXaiProbeConfiguration(speech, "en")
+        assertEquals("original", recognition.getString("targetLanguage"))
+        assertEquals("synthetic-current-key", recognition.getJSONObject("credentials").getString("apiKey"))
+        assertEquals("en", recognition.getString("sourceLanguage"))
+        assertTrue(recognition.isNull("textCredentials"))
+        val text = buildTextProbeConfiguration(TranslationConfiguration(provider = TextTranslationProvider.XAI,
+            model = "grok-custom-text", apiKey = "synthetic-text-key"), "en", "zh", "lite")
+        assertEquals("synthetic-text-key", text.getJSONObject("credentials").getString("apiKey"))
+        assertEquals("grok-custom-text", text.getJSONObject("credentials").getString("model"))
+        assertFalse(text.toString().contains("synthetic-current-key"))
+        assertFalse(text.has("sessionConfiguration"))
     }
 
     @Test fun alibabaUsesIndependentTextModelWithoutBorrowingTheOldRealtimeOverride() {
@@ -62,13 +69,16 @@ class RuntimeConfigurationTest {
             TranslationConfiguration(provider = TextTranslationProvider.DEEPLX, endpoint = "https://example.invalid/translate", apiKey = "synthetic-text-token"),
             TranslationConfiguration(provider = TextTranslationProvider.OPENAI_COMPATIBLE, endpoint = "https://example.invalid/v1", model = "synthetic-model", apiKey = "synthetic-text-key"),
             TranslationConfiguration(provider = TextTranslationProvider.CHAT_MOCK, endpoint = "http://127.0.0.1:8000/v1", model = "synthetic-model", allowLocalHttp = true),
+            TranslationConfiguration(provider = TextTranslationProvider.XAI, model = "grok-custom-text", apiKey = "synthetic-text-key"),
         )
-        for (route in routes) {
-            val config = buildRuntimeConfiguration(alibaba, route, "auto", "fr", "plus")
-            assertEquals(if (route.provider == TextTranslationProvider.DEEPLX) "deepLX" else "alibabaCloud", config.getString("provider"))
+        val xai = ServiceConfiguration(ServiceProvider.XAI, mapOf("apiKey" to "synthetic-speech-key"), xaiSpeechMode = "asrMt")
+        for (speechConfiguration in listOf(alibaba, xai)) for (route in routes) {
+            val config = buildRuntimeConfiguration(speechConfiguration, route, "auto", "fr", "plus")
+            assertEquals(speechConfiguration.provider.wireProvider, config.getString("provider"))
             val speech = config.getJSONObject("credentials")
             val text = config.getJSONObject("textCredentials")
-            assertEquals("synthetic-speech-key", speech.getString("asrApiKey"))
+            assertEquals(setOf("kind", "apiKey"), speech.keys().asSequence().toSet())
+            assertEquals("synthetic-speech-key", speech.getString("apiKey"))
             assertFalse(text.has("asrApiKey"))
             assertEquals(route.provider.runtimeRoute(), text.getString("kind"))
             assertEquals(route.apiKey, text.getString(if (route.provider == TextTranslationProvider.DEEPLX) "token" else "apiKey"))
@@ -81,6 +91,18 @@ class RuntimeConfigurationTest {
         assertEquals("original", config.getString("targetLanguage"))
         assertTrue(config.isNull("textCredentials"))
         assertEquals("apiKey", config.getJSONObject("credentials").getString("kind"))
+        val xai = ServiceConfiguration(ServiceProvider.XAI, mapOf("apiKey" to "synthetic-speech-key"), xaiSpeechMode = "asrMt")
+        for (route in listOf(TextTranslationProvider.BUILTIN, TextTranslationProvider.NONE)) {
+            val original = buildRuntimeConfiguration(xai, TranslationConfiguration(provider = route), "en", "zh", "lite")
+            assertEquals("original", original.getString("targetLanguage"))
+            assertTrue(original.isNull("textCredentials"))
+        }
+        for (speech in listOf(alibaba, xai)) {
+            // A disabled stage does not validate an unrelated, unfinished translator draft.
+            val original = buildRuntimeConfiguration(speech, TranslationConfiguration(provider = TextTranslationProvider.XAI,
+                model = "bad\nmodel"), "en", "original", "lite")
+            assertTrue(original.isNull("textCredentials"))
+        }
     }
 
     @Test fun allExistingServicesMapTheirSavedFieldsToPcCredentialTags() {
@@ -103,6 +125,19 @@ class RuntimeConfigurationTest {
         assertEquals(allowed.endpoint, buildRuntimeConfiguration(alibaba, allowed, "auto", "zh", "lite").getJSONObject("textCredentials").getString("endpoint"))
         assertThrows(IllegalArgumentException::class.java) {
             buildRuntimeConfiguration(alibaba, allowed.copy(endpoint = "http://public.example.invalid/v1"), "auto", "zh", "lite")
+        }
+    }
+
+    @Test fun grokUsesItsOwnRequiredKeyAndModelWithoutAcceptingAnEndpointOverride() {
+        val config = TranslationConfiguration(provider = TextTranslationProvider.XAI,
+            endpoint = "http://untrusted.example.invalid/v1", allowLocalHttp = true,
+            model = "grok-custom", apiKey = "synthetic-xai-text-key")
+        assertEquals("", validateTranslationConfiguration(config))
+        val credentials = config.runtimeCredentials()!!
+        assertEquals(setOf("kind", "apiKey", "model"), credentials.keys().asSequence().toSet())
+        assertThrows(IllegalArgumentException::class.java) { config.copy(apiKey = "").runtimeCredentials() }
+        for (model in listOf("", "bad\nmodel", "x".repeat(257))) {
+            assertThrows(IllegalArgumentException::class.java) { config.copy(model = model).runtimeCredentials() }
         }
     }
 }

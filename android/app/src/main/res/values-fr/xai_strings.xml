@@ -2,8 +2,10 @@
     <string name="xai_mode">Reconnaissance et traduction</string>
     <string name="xai_asr_mt">Reconnaissance en continu + traduction de texte</string>
     <string name="xai_voice">Grok Voice</string>
-    <string name="xai_text_model">Modèle de traduction de texte</string>
-    <string name="xai_help">Le texte reconnu en continu est traduit par le modèle Grok choisi. Les deux étapes utilisent la même clé API xAI. Grok Voice traduit après les pauses de parole.</string>
+    <string name="xai_help">La reconnaissance en continu peut utiliser tout service de traduction de texte ci-dessous. Grok Voice traduit après les pauses de parole.</string>
     <string name="xai_check_speech">Vérifier la reconnaissance</string>
-    <string name="xai_model_invalid">Saisissez un identifiant de modèle de texte de 256 octets maximum, sans caractères de contrôle.</string>
+    <string name="translation_xai">xAI Grok</string>
+    <string name="translation_help_xai">Choisissez un modèle de texte Grok et saisissez une clé API xAI distincte pour la traduction. Compatible avec tout service de reconnaissance pris en charge.</string>
+    <string name="translation_help_xai_original">Afficher uniquement le texte reconnu, sans appeler de service de traduction de texte.</string>
+    <string name="translation_xai_original">xAI (texte original)</string>
 </resources>

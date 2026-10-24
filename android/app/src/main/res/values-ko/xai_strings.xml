@@ -2,8 +2,10 @@
     <string name="xai_mode">인식 및 번역</string>
     <string name="xai_asr_mt">스트리밍 인식 + 텍스트 번역</string>
     <string name="xai_voice">Grok Voice</string>
-    <string name="xai_text_model">텍스트 번역 모델</string>
-    <string name="xai_help">스트리밍 인식 결과를 선택한 Grok 텍스트 모델로 번역합니다. 두 단계 모두 같은 xAI API Key를 사용합니다. Grok Voice는 말이 멈춘 뒤 구간별로 번역합니다.</string>
+    <string name="xai_help">스트리밍 인식은 아래의 모든 텍스트 번역 서비스와 조합할 수 있습니다. Grok Voice는 말이 멈춘 뒤 구간별로 번역합니다.</string>
     <string name="xai_check_speech">음성 인식 확인</string>
-    <string name="xai_model_invalid">제어 문자 없이 256바이트 이하의 텍스트 모델 ID를 입력하세요.</string>
+    <string name="translation_xai">xAI Grok</string>
+    <string name="translation_help_xai">Grok 텍스트 모델을 선택하고 번역용 xAI API Key를 별도로 입력하세요. 지원하는 모든 음성 인식 서비스와 조합할 수 있습니다.</string>
+    <string name="translation_help_xai_original">인식된 원문만 표시하며 텍스트 번역 서비스를 호출하지 않습니다.</string>
+    <string name="translation_xai_original">xAI (원문만)</string>
 </resources>

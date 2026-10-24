@@ -6,6 +6,7 @@ import { audioInputErrorMessage } from "./audioInput";
 import { credentialErrorMessage } from "./connectionDiagnostics";
 import { shareUnchangedSubtitleHistory } from "./sessionSnapshot";
 import { observeSessionStoreApplied } from "./developmentTrace";
+import { openAICompatibleModelIsValid } from "./providerCredentials";
 import { DEFAULT_NETWORK_PROXY, validateNetworkProxy } from "./networkProxy";
 /**
  * Global zustand store. In Tauri it forwards every action to the Rust backend
@@ -50,7 +51,7 @@ import {
   capabilitiesForProfile,
   isChatCompletionsTranslation,
   isCustomSpeechProvider,
-  isStandaloneAsrProvider,
+  isIndependentAsrProfile,
   effectiveProviderForProfile,
   textTranslationForProfile,
   sourceLanguagesForSettings,
@@ -517,7 +518,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       activeProfileId: current.profiles.length ? current.activeProfileId : id,
       profiles: [
         ...current.profiles,
-        { id, name, provider, credentialState: "missing", ...(provider === "xAIRealtime" ? { xaiSpeechMode: "asrMt" as const, xaiTextModel: "grok-4.3" } : {}), ...(provider === "alibabaCloud" ? { alibabaRealtimeMode: "liveTranslate" as const, alibabaWorkspaceId: "" } : {}), ...(isCustomSpeechProvider(provider) ? { speechCredentialState: "missing" as const, textCredentialState: "missing" as const } : {}) },
+        { id, name, provider, credentialState: "missing", ...(provider === "xAIRealtime" ? { xaiSpeechMode: "asrMt" as const, textTranslation: "xAI" as const, xaiIndependentTranslationMigrated: true, speechCredentialState: "missing" as const, textCredentialState: "missing" as const } : {}), ...(provider === "alibabaCloud" ? { alibabaRealtimeMode: "liveTranslate" as const, alibabaWorkspaceId: "" } : {}), ...(isCustomSpeechProvider(provider) ? { speechCredentialState: "missing" as const, textCredentialState: "missing" as const } : {}) },
       ],
     };
     set({ settings: snapshot });
@@ -575,11 +576,10 @@ export const useStore = create<StoreState>()((set, get) => ({
       if (!["disabled", "liveTranslate"].includes(mode) || workspace.length > 63
         || (workspace !== "" && !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(workspace)) || (mode !== "disabled" && workspace === "")) throw new Error("alibaba-realtime-invalid");
     }
-    if (options?.xaiSpeechMode !== undefined || options?.xaiTextModel !== undefined) {
+    if (options?.xaiSpeechMode !== undefined) {
       const profile = current.profiles.find(profile => profile.id === profileId);
       if (profile?.provider !== "xAIRealtime") throw new Error("provider-mismatch");
       if (options.xaiSpeechMode !== undefined && !["voice", "asrMt"].includes(options.xaiSpeechMode)) throw new Error("provider-mismatch");
-      if (options.xaiTextModel !== undefined && (!options.xaiTextModel.trim() || new TextEncoder().encode(options.xaiTextModel.trim()).length > 256 || /\p{Cc}/u.test(options.xaiTextModel))) throw new Error("invalid-openai-compatible-model");
     }
     const declaration = options?.customSpeechSourceLanguages ?? null;
     if (hasDeclaration) {
@@ -610,7 +610,6 @@ export const useStore = create<StoreState>()((set, get) => ({
           }
           return { ...profile, ...(name === undefined ? {} : { name: name.trim() }), ...proxies, textTranslationNames,
             ...(options?.alibabaWorkspaceId === undefined ? {} : { alibabaWorkspaceId: options.alibabaWorkspaceId.trim() }),
-            ...(options?.xaiTextModel === undefined ? {} : { xaiTextModel: options.xaiTextModel.trim() }),
             ...(hasDeclaration ? { customSpeechSourceLanguages: declaration === null ? null : SOURCE_LANGUAGE_CODES.filter(code => declaration.includes(code)) } : {}),
             ...(speechRecognitionName === undefined ? {} : { speechRecognitionName: speechRecognitionName.trim() || undefined }) };
         })() : profile,
@@ -659,7 +658,7 @@ export const useStore = create<StoreState>()((set, get) => ({
         || !targetLanguagesForSettings(proposed).includes(preset.targetLanguage)) throw new Error("profile_language_preset_unsupported");
     }
     const snapshot = settingsAfterMockProfileSelection(current, effectiveProviderForProfile(selected));
-    if (isStandaloneAsrProvider(selected.provider)) {
+    if (isIndependentAsrProfile(selected)) {
       const capabilities = capabilitiesForProfile(selected, current.targetLanguage);
       snapshot.sourceLanguage = capabilities.sourceLanguages.includes(current.sourceLanguage) ? current.sourceLanguage : capabilities.sourceLanguages[0] ?? current.sourceLanguage;
       snapshot.targetLanguage = capabilities.targetLanguages.includes(current.targetLanguage) ? current.targetLanguage : capabilities.targetLanguages[0]!;
@@ -710,11 +709,14 @@ export const useStore = create<StoreState>()((set, get) => ({
     const current = get().settings;
     if (credentials.kind === "alibabaTranslation") {
       const profile = current.profiles.find((profile) => profile.id === profileId);
-      if (!profile || (!isStandaloneAsrProvider(profile.provider) && !["alibabaCloud", "deepLX"].includes(profile.provider))) throw new Error("provider-mismatch");
-      if (isStandaloneAsrProvider(profile.provider) ? credentials.apiKey.trim() : !credentials.apiKey.trim() && (profile.speechCredentialState ?? profile.credentialState) !== "present") throw new Error("credential-empty");
+      if (!profile || (!isIndependentAsrProfile(profile) && !["alibabaCloud", "deepLX"].includes(profile.provider))) throw new Error("provider-mismatch");
+      if (isIndependentAsrProfile(profile) ? credentials.apiKey.trim() : !credentials.apiKey.trim() && (profile.speechCredentialState ?? profile.credentialState) !== "present") throw new Error("credential-empty");
       if (credentials.textTranslation === "apple" && (credentials.endpoint.trim() || credentials.token.trim() || credentials.model.trim())) throw new Error("provider-mismatch");
       if (credentials.textTranslation === "deepLX" && !credentials.endpoint.trim() && textTranslationForProfile(profile) !== "deepLX") throw new Error("credential-empty");
       if (credentials.textTranslation === "deepL" && !credentials.token.trim() && textTranslationForProfile(profile) !== "deepL") throw new Error("credential-empty");
+      if (credentials.textTranslation === "xAI" && credentials.model && !openAICompatibleModelIsValid(credentials.model)) throw new Error("invalid-openai-compatible-model");
+      if (credentials.textTranslation === "xAI" && credentials.endpoint) throw new Error("provider-mismatch");
+      if (credentials.textTranslation === "xAI" && (textTranslationForProfile(profile) !== "xAI" || profile.textCredentialState !== "present") && (!credentials.token.trim() || !credentials.model.trim())) throw new Error("credential-empty");
       if (isChatCompletionsTranslation(credentials.textTranslation) && textTranslationForProfile(profile) !== credentials.textTranslation && (!credentials.endpoint.trim() || !credentials.model.trim())) throw new Error("credential-empty");
     } else if (credentials.kind === "customSpeech") {
       const profile = current.profiles.find(profile => profile.id === profileId);
@@ -727,10 +729,17 @@ export const useStore = create<StoreState>()((set, get) => ({
       ...current,
       profiles: current.profiles.map((profile) =>
         profile.id === profileId
-          ? { ...profile, credentialState: "present", ...(credentials.kind === "alibabaTranslation" ? { textTranslation: credentials.textTranslation, ...(isStandaloneAsrProvider(profile.provider) ? { textCredentialState: "present" as const, credentialState: profile.speechCredentialState ?? "missing" } : {}) } : {}), ...(credentials.kind === "customSpeech" ? { speechCredentialState: "present" as const, credentialState: textTranslationForProfile(profile) === "followService" || profile.textCredentialState === "present" ? "present" as const : "missing" as const } : {}) }
+          ? { ...profile, credentialState: "present", ...(credentials.kind === "alibabaTranslation" ? { textTranslation: credentials.textTranslation, ...(isIndependentAsrProfile(profile) ? { textCredentialState: "present" as const, credentialState: profile.speechCredentialState ?? "missing" } : {}) } : {}), ...((credentials.kind === "customSpeech" || credentials.kind === "apiKey" && isIndependentAsrProfile(profile)) ? { speechCredentialState: "present" as const, credentialState: textTranslationForProfile(profile) === "followService" || profile.textCredentialState === "present" ? "present" as const : "missing" as const } : {}) }
           : profile,
       ),
     };
+    if (current.activeProfileId === profileId && credentials.kind === "alibabaTranslation") {
+      snapshot.languageCapabilities = undefined;
+      const sources = sourceLanguagesForSettings(snapshot);
+      if (!sources.includes(snapshot.sourceLanguage)) snapshot.sourceLanguage = sources[0] ?? snapshot.sourceLanguage;
+      const targets = targetLanguagesForSettings(snapshot);
+      if (!targets.includes(snapshot.targetLanguage)) snapshot.targetLanguage = targets[0] ?? snapshot.targetLanguage;
+    }
     set({ settings: snapshot });
     return snapshot;
   },
@@ -752,7 +761,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       ...current,
       profiles: current.profiles.map((profile) =>
         profile.id === profileId
-          ? { ...profile, credentialState: "missing", ...(isCustomSpeechProvider(profile.provider) ? { speechCredentialState: "missing" as const, textCredentialState: "missing" as const } : profile.provider === "appleSpeech" ? { textCredentialState: "missing" as const } : {}) }
+          ? { ...profile, credentialState: "missing", ...(isCustomSpeechProvider(profile.provider) || isIndependentAsrProfile(profile) && profile.provider !== "appleSpeech" ? { speechCredentialState: "missing" as const, textCredentialState: "missing" as const } : profile.provider === "appleSpeech" ? { textCredentialState: "missing" as const } : {}) }
           : profile,
       ),
     };

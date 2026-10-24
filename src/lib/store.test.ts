@@ -498,24 +498,21 @@ it("rejects an incompatible saved pair without changing the active profile", asy
   } finally { useStore.setState(original, true); }
 });
 
-it("creates xAI ASR previews and saves mode/model without rewriting historical profiles or credentials", async () => {
+it("creates independent xAI text previews while preserving old Voice and separate credential readiness", async () => {
   const original = useStore.getState();
   try {
     const legacy = { id: "xai-legacy", name: "Legacy xAI", provider: "xAIRealtime" as const, credentialState: "present" as const };
-    useStore.setState({ session: { ...original.session, isActive: false, isPaused: false, status: { kind: "idle" } },
-      settings: { ...original.settings, profiles: [legacy], activeProfileId: legacy.id } });
+    useStore.setState({ session: { ...original.session, isActive: false, isPaused: false, status: { kind: "idle" } }, settings: { ...original.settings, profiles: [legacy], activeProfileId: legacy.id } });
     const created = await useStore.getState().createProfile("xAIRealtime", "New xAI");
-    expect(created.profiles.at(-1)).toMatchObject({ xaiSpeechMode: "asrMt", xaiTextModel: "grok-4.3" });
+    expect(created.profiles.at(-1)).toMatchObject({ xaiSpeechMode: "asrMt", textTranslation: "xAI", speechCredentialState: "missing", textCredentialState: "missing" });
     expect(created.profiles[0]).toEqual(legacy);
-    await useStore.getState().updateProfile(legacy.id, undefined, { xaiSpeechMode: "asrMt", xaiTextModel: "  custom-xai-model  " });
-    await useStore.getState().switchTargetLanguage("original");
+    await useStore.getState().updateProfile(legacy.id, undefined, { xaiSpeechMode: "asrMt" });
+    await useStore.getState().saveProfileCredentials(legacy.id, { kind: "alibabaTranslation", apiKey: "", textTranslation: "followService", endpoint: "", token: "", model: "" });
+    expect(useStore.getState().settings.targetLanguage).toBe("original");
     const switched = await useStore.getState().updateProfile(legacy.id, undefined, { xaiSpeechMode: "voice" });
     expect(switched.targetLanguage).not.toBe("original");
-    expect(switched.profiles[0]).toMatchObject({ xaiSpeechMode: "voice", xaiTextModel: "custom-xai-model", credentialState: "present" });
     const before = structuredClone(useStore.getState().settings);
-    await expect(useStore.getState().updateProfile(legacy.id, undefined, { xaiTextModel: "\n" })).rejects.toThrow();
+    await expect(useStore.getState().saveProfileCredentials(legacy.id, { kind: "alibabaTranslation", apiKey: "", textTranslation: "xAI", endpoint: "", token: "synthetic-text-key", model: "bad\nmodel" })).rejects.toThrow();
     expect(useStore.getState().settings).toEqual(before);
-    useStore.setState({ session: { ...useStore.getState().session, isActive: true } });
-    await expect(useStore.getState().updateProfile(legacy.id, undefined, { xaiSpeechMode: "asrMt" })).rejects.toThrow();
   } finally { useStore.setState(original, true); }
 });

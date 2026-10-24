@@ -272,16 +272,9 @@ impl TranslationClient {
                 .map_err(TranslationClientError::MT);
             }
             ProviderKind::AlibabaCloud => {
-                if matches!(
-                    configuration.text_credentials,
-                    Some(TextTranslationCredentials::Apple)
-                ) {
-                    return HighQualityTranslationClient::new_apple(
-                        credentials
-                            .alibaba_key()
-                            .ok_or(ProviderCredentialsError::ProviderMismatch)?,
-                        configuration.source_language,
-                        configuration.target_language,
+                if configuration.text_credentials.is_some() {
+                    return HighQualityTranslationClient::new_alibaba_independent(
+                        configuration,
                         events,
                     )
                     .map(Self::HighQuality)

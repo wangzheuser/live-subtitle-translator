@@ -49,21 +49,28 @@ class NativeRuntimeJniTest {
 
     @Test fun xaiStreamingModeAndLegacyVoiceUseTheirActualSharedFactoriesAcrossJni() {
         val streaming = configuration(ServiceProvider.XAI).put("xaiSpeechMode", "asrMt")
-            .put("xaiTextModel", "grok-custom-text").put("sourceLanguage", "en")
+            .put("xaiTextModel", "legacy-profile-model").put("sourceLanguage", "en")
+            .put("textCredentials", TranslationConfiguration(provider = TextTranslationProvider.XAI,
+                model = "grok-custom-text", apiKey = "synthetic-independent-text-key").runtimeCredentials())
         val endpoints = NativeRuntimeConfiguration.endpoints(streaming)
         assertEquals("wss://api.x.ai/v1/stt", endpoints.getString("speechEndpoint"))
         assertEquals("https://api.x.ai/v1/chat/completions", endpoints.getString("textEndpoint"))
         val models = endpoints.getJSONArray("modelNames")
         assertEquals(listOf("grok-voice-transcribe-2.0", "grok-custom-text"), (0 until models.length()).map(models::getString))
         assertFalse(endpoints.toString().contains("synthetic-apiKey"))
+        assertFalse(endpoints.toString().contains("synthetic-independent-text-key"))
+        assertFalse(models.toString().contains("legacy-profile-model"))
         val handle = create(streaming)
         try { assertEquals("connecting", NativeRuntimeConfiguration.poll(handle).getString("connectionStatus")) }
         finally { NativeRuntimeConfiguration.command("stop", handle) }
 
         val original = JSONObject(streaming.toString()).put("targetLanguage", "original")
-        assertTrue(NativeRuntimeConfiguration.endpoints(original).isNull("textEndpoint"))
+        val originalEndpoints = NativeRuntimeConfiguration.endpoints(original)
+        assertTrue(originalEndpoints.isNull("textEndpoint"))
+        assertEquals("[\"grok-voice-transcribe-2.0\"]", originalEndpoints.getJSONArray("modelNames").toString())
         val textProbe = NativeRuntimeConfiguration.exchange(JSONObject().put("operation", "text_probe_endpoint")
-            .put("configuration", JSONObject().put("sessionConfiguration", original)))
+            .put("configuration", buildTextProbeConfiguration(TranslationConfiguration(provider = TextTranslationProvider.XAI,
+                model = "grok-probe-model", apiKey = "synthetic-probe-key"), "en", "zh", "lite")))
         assertEquals("https://api.x.ai/v1/chat/completions", textProbe.getString("textEndpoint"))
         assertFalse(textProbe.has("speechEndpoint"))
 
@@ -74,16 +81,69 @@ class NativeRuntimeJniTest {
         assertTrue(voice.getJSONArray("modelNames").toString().contains("grok-voice-latest"))
     }
 
+    @Test fun xaiRuntimeNeverFillsAMissingTextKeyFromTheSpeechKeyAcrossActualJni() {
+        val speech = ServiceConfiguration(ServiceProvider.XAI, mapOf("apiKey" to "synthetic-speech-only-key"), xaiSpeechMode = "asrMt")
+        val missing = buildRuntimeConfiguration(speech, TranslationConfiguration(provider = TextTranslationProvider.NONE), "en", "zh", "lite")
+            .put("targetLanguage", "zh")
+        assertThrows(IllegalArgumentException::class.java) { create(missing) }
+        missing.put("textCredentials", JSONObject().put("kind", "xAI").put("apiKey", "").put("model", "grok-custom-text"))
+        assertThrows(IllegalArgumentException::class.java) { create(missing) }
+        missing.put("targetLanguage", "original")
+        assertTrue(NativeRuntimeConfiguration.endpoints(missing).isNull("textEndpoint"))
+    }
+
+    @Test fun xaiRecognitionAcceptsExistingTextServicesAndGrokTextAcceptsAlibabaAcrossActualJni() {
+        val speech = ServiceConfiguration(ServiceProvider.XAI, mapOf("apiKey" to "synthetic-speech-key"), xaiSpeechMode = "asrMt")
+        val routes = listOf(
+            TranslationConfiguration(provider = TextTranslationProvider.DEEPL, apiKey = "synthetic-text-key:fx") to "https://api-free.deepl.com/v2/translate",
+            TranslationConfiguration(provider = TextTranslationProvider.DEEPLX, endpoint = "https://deeplx.example.invalid/translate") to "https://deeplx.example.invalid/translate",
+            TranslationConfiguration(provider = TextTranslationProvider.OPENAI_COMPATIBLE, endpoint = "https://custom.example.invalid/v1", model = "custom-model") to "https://custom.example.invalid/v1/chat/completions",
+            TranslationConfiguration(provider = TextTranslationProvider.CHAT_MOCK, endpoint = "http://127.0.0.1:8000/v1", model = "local-model", allowLocalHttp = true) to "http://127.0.0.1:8000/v1/chat/completions",
+            TranslationConfiguration(provider = TextTranslationProvider.XAI, apiKey = "synthetic-grok-key", model = "grok-custom-text") to "https://api.x.ai/v1/chat/completions",
+        )
+        for ((text, expected) in routes) {
+            val configuration = buildRuntimeConfiguration(speech, text, "en", "zh", "lite")
+            val endpoints = NativeRuntimeConfiguration.endpoints(configuration)
+            assertEquals(text.provider.storageId, "wss://api.x.ai/v1/stt", endpoints.getString("speechEndpoint"))
+            assertEquals(text.provider.storageId, expected, endpoints.getString("textEndpoint"))
+            assertFalse(endpoints.toString().contains("synthetic-"))
+        }
+        val alibaba = ServiceConfiguration(ServiceProvider.DASHSCOPE, mapOf("apiKey" to "synthetic-alibaba-key"))
+        val grok = routes.last().first
+        val endpoints = NativeRuntimeConfiguration.endpoints(buildRuntimeConfiguration(alibaba, grok, "en", "zh", "lite"))
+        assertEquals("https://api.x.ai/v1/chat/completions", endpoints.getString("textEndpoint"))
+        assertTrue(endpoints.getJSONArray("modelNames").toString().contains("grok-custom-text"))
+        for (route in listOf(TextTranslationProvider.BUILTIN, TextTranslationProvider.NONE)) {
+            val original = buildRuntimeConfiguration(speech, TranslationConfiguration(provider = route), "en", "zh", "lite")
+            assertTrue(NativeRuntimeConfiguration.endpoints(original).isNull("textEndpoint"))
+        }
+    }
+
     @Test fun xaiModeCapabilitiesAndNormalizationStayInTheSharedCatalogAcrossJni() {
         val voice = NativeRuntimeConfiguration.capabilities("xAIRealtime", "followService", "zh")
         assertEquals(24_000, voice.getInt("sampleRateHz"))
         val streaming = NativeRuntimeConfiguration.capabilities("xAIRealtime", "followService", "zh", xaiSpeechMode = "asrMt")
         assertEquals(16_000, streaming.getInt("sampleRateHz"))
         val targets = streaming.getJSONArray("targetLanguages")
-        assertTrue((0 until targets.length()).map(targets::getString).contains("original"))
-        assertTrue(streaming.getJSONArray("sourceLanguages").toString().contains("auto"))
+        assertEquals(listOf("original"), (0 until targets.length()).map(targets::getString))
+        val recognition = streaming.getJSONArray("sourceLanguages").let { values ->
+            (0 until values.length()).map(values::getString).toSet()
+        }
+        assertTrue("auto" in recognition)
         assertEquals("original", NativeRuntimeConfiguration.normalize("xAIRealtime", "followService", "en", "original",
             xaiSpeechMode = "asrMt").getString("targetLanguage"))
+        val deepL = NativeRuntimeConfiguration.capabilities("xAIRealtime", "deepL", "zh", xaiSpeechMode = "asrMt")
+        assertEquals(16_000, deepL.getInt("sampleRateHz"))
+        val deepLSources = deepL.getJSONArray("sourceLanguages").let { values -> (0 until values.length()).map(values::getString).toSet() }
+        val deepLTargets = deepL.getJSONArray("targetLanguages").let { values -> (0 until values.length()).map(values::getString).toSet() }
+        assertEquals(recognition.intersect(DEEPL_SOURCE_CODES.toSet() + "auto"), deepLSources)
+        assertEquals(DEEPL_TARGET_CODES.toSet() + "original", deepLTargets)
+        val deepLX = NativeRuntimeConfiguration.capabilities("xAIRealtime", "deepLX", "zh", xaiSpeechMode = "asrMt")
+        val deepLXSources = deepLX.getJSONArray("sourceLanguages").let { values -> (0 until values.length()).map(values::getString).toSet() }
+        assertEquals(recognition.intersect(DEEPLX_SOURCE_CODES.toSet() + "auto"), deepLXSources)
+        assertFalse("yue" in deepLXSources)
+        val grok = NativeRuntimeConfiguration.capabilities("xAIRealtime", "xAI", "zh", xaiSpeechMode = "asrMt")
+        assertTrue(grok.getJSONArray("targetLanguages").toString().contains("zh_tw"))
         for (invalid in listOf("", "unknown")) {
             assertThrows(IllegalArgumentException::class.java) {
                 NativeRuntimeConfiguration.capabilities("xAIRealtime", "followService", "zh", xaiSpeechMode = invalid)
@@ -294,7 +354,9 @@ class NativeRuntimeJniTest {
             endpoint = "https://synthetic.example.invalid/translate", apiKey = "synthetic-text-key")
         val config = buildRuntimeConfiguration(legacy, text, "auto", "zh", "lite")
         assertEquals("disabled", config.getString("alibabaRealtimeMode"))
-        assertEquals("deepLX", config.getString("provider"))
+        assertEquals("alibabaCloud", config.getString("provider"))
+        assertEquals("apiKey", config.getJSONObject("credentials").getString("kind"))
+        assertFalse(config.getJSONObject("credentials").has("asrApiKey"))
         assertEquals("deepLX", config.getJSONObject("textCredentials").getString("kind"))
         val handle = create(config)
         try { assertTrue(NativeRuntimeConfiguration.command("poll", handle).has("snapshot")) }

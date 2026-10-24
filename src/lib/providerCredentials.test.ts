@@ -240,3 +240,12 @@ it("bounds OpenAI-compatible model names by bytes and rejects control characters
     expect(openAICompatibleModelIsValid(value), value).toBe(true);
   }
 });
+
+
+it.each(["xAIRealtime", "customOpenAIASR", "appleSpeech"] as const)("builds independent Grok text credentials for %s without sending its recognition key", provider => {
+  const profile = { id: "speech", name: "Speech", provider, xaiSpeechMode: "asrMt", credentialState: "missing", speechCredentialState: "present", textCredentialState: "missing", textTranslation: "xAI" } as const;
+  expect(buildAlibabaTranslationCredentials(profile, { ...emptyCredentialDraft(), apiKey: "never-speech-key", token: "synthetic-text-key", model: "grok-4.3", endpoint: "https://never.example" }, "xAI"))
+    .toEqual({ kind: "alibabaTranslation", apiKey: "", textTranslation: "xAI", endpoint: "", token: "synthetic-text-key", model: "grok-4.3" });
+  expect(buildAlibabaTranslationCredentials(profile, { ...emptyCredentialDraft(), apiKey: "never-speech-key", model: "grok-4.3" }, "xAI")).toBeNull();
+  expect(buildAlibabaTranslationCredentials(profile, { ...emptyCredentialDraft(), token: "synthetic-text-key" }, "xAI")).toBeNull();
+});

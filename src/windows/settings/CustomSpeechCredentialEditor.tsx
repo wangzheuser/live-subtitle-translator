@@ -5,7 +5,7 @@ import { I18N, providerDisplayName } from "../../lib/i18n";
 import { credentialUnavailableHelp } from "../../lib/connectionDiagnostics";
 import type { ProviderCredentialsInput } from "../../lib/types";
 import { buildCustomSpeechCredentials, customSpeechEndpointIsValid, emptyCredentialDraft, openAICompatibleModelIsValid } from "../../lib/providerCredentials";
-import { AlibabaCredentialEditor } from "./AlibabaCredentialEditor";
+import { SpeechAndTextCredentialEditor, TextTranslationEditor } from "./SpeechAndTextCredentialEditor";
 import { SavedCredentialInput } from "./SavedCredentialInput";
 import { useCredentialEditorState } from "./useCredentialEditorState";
 import { ConfigInput, type ConfigInputElement } from "./ConfigInput";
@@ -16,7 +16,7 @@ import { DestructiveConfirmation } from "./DestructiveConfirmation";
 import { AutoSaveNameField } from "./AutoSaveNameField";
 
 /** Independent ASR and text credentials; neither form can write the other's key. */
-export function CustomSpeechCredentialEditor(props: ComponentProps<typeof AlibabaCredentialEditor> & {
+export function CustomSpeechCredentialEditor(props: ComponentProps<typeof SpeechAndTextCredentialEditor> & {
   onSaveRecognitionName?: (name: string) => Promise<unknown>;
 }) {
   const { profile, inputId, disabled, busy, feedback, onSave, onRequestDelete, onConfirmDelete, confirmingDelete, onCancelDelete, connectionCheck } = props;
@@ -115,7 +115,7 @@ export function CustomSpeechCredentialEditor(props: ComponentProps<typeof Alibab
         </span>}
       </form>}
     </section>
-    <AlibabaCredentialEditor key={translationEpoch} {...props} inputId={`${inputId}-text`} storageNoteId={noteId} textOnly feedback={null} connectionCheck={undefined} />
+    <TextTranslationEditor key={translationEpoch} {...props} inputId={`${inputId}-text`} storageNoteId={noteId} feedback={null} connectionCheck={undefined} />
     {feedback && <div ref={feedbackRef} tabIndex={-1}><InlineFeedback tone={feedback.tone}>{feedback.message}</InlineFeedback></div>}
     {confirmingDelete && <DestructiveConfirmation message={I18N.settings.deleteCredentialsConfirm} disabled={disabled} onCancel={onCancelDelete} onConfirm={() => { discard(); setTranslationEpoch(current => current + 1); void onConfirmDelete(); }} />}
   </div>;

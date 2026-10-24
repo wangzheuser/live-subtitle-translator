@@ -2,8 +2,10 @@
     <string name="xai_mode">辨識與翻譯</string>
     <string name="xai_asr_mt">串流辨識 + 文字翻譯</string>
     <string name="xai_voice">Grok Voice</string>
-    <string name="xai_text_model">文字翻譯模型</string>
-    <string name="xai_help">串流辨識將辨識文字交給所選 Grok 文字模型翻譯，兩步使用同一個 xAI API Key。Grok Voice 在講話停頓後分段翻譯。</string>
+    <string name="xai_help">串流辨識可搭配下方任意文字翻譯服務。Grok Voice 在講話停頓後分段翻譯。</string>
     <string name="xai_check_speech">檢查語音辨識</string>
-    <string name="xai_model_invalid">請輸入有效文字模型 ID，最多 256 位元組，不含控制字元。</string>
+    <string name="translation_xai">xAI Grok</string>
+    <string name="translation_help_xai">選擇 Grok 文字模型並單獨填寫 xAI API Key，可搭配任意辨識服務。</string>
+    <string name="translation_help_xai_original">僅顯示辨識原文，不呼叫文字翻譯服務。</string>
+    <string name="translation_xai_original">xAI（僅原文）</string>
 </resources>

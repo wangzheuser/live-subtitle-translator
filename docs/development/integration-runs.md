@@ -4952,3 +4952,30 @@
   after public acceptance. Current signed packages, useful build dependencies,
   other worktrees, global runtimes and user data remain. The task-owned headless
   emulator shut down normally with its AVD data preserved.
+
+### 2026-10-25 — text translation setup presets
+
+- Source `e92ec5dc4299a55891438cbaf10b4fa5080fccec`, [PR #319](https://github.com/yuxino/Mimi/pull/319):
+  desktop and Android keep ChatMock last and offer six shared OpenAI-compatible
+  setup presets. No new provider protocol, recording, capture or API request was
+  introduced by selecting a preset.
+- [Desktop CI](https://github.com/yuxino/Mimi/actions/runs/40187234907) passed
+  macOS, Windows, Windows ARM, Linux and MSRV checks. The PR merged as
+  `cff05195c90d19d2c0ea7f51cfb619ea7123cedc` after both CI workflows passed.
+- Complete local `./scripts/check.sh` passed: Rust formatting/clippy/tests,
+  2,763 frontend tests, lint, typecheck, production build and diff checks.
+  Nine shared-copy generator regressions also passed. Focused regressions cover
+  changed/equivalent destination key ownership, returning to an earlier preset,
+  keyless local models, Custom fields and pending Android Spinner callbacks.
+- Ego Lite inspected real desktop components with synthetic bridges: Chinese
+  light-theme service order, Chinese dark-theme 520 px setup menu, and German
+  light-theme 520 px setup menu. The complete eight-language browser matrix was
+  interrupted and is not accepted. Screenshots and the canonical check log stay
+  outside Git; the temporary browser space/server and disposable outputs closed.
+- [Android CI](https://github.com/yuxino/Mimi/actions/runs/40187234899) passed
+  debug/release unit tests with JNI, lint and build/packaging invariants. Local
+  Android Gradle could not start without a JDK. Native Android interaction,
+  signed macOS preview, Windows/Linux interaction and real provider
+  availability/accuracy/latency remain unverified by this run. The existing
+  production app and its settings were preserved; no release or install
+  was performed. PR CI records cross-platform compilation and Android checks.

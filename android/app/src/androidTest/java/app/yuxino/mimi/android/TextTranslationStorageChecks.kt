@@ -55,7 +55,13 @@ internal fun runTextTranslationStorageChecks(context: Context) = withTextTransla
     val integrated = ServiceConfiguration(ServiceProvider.OPENAI, mapOf("apiKey" to "synthetic-integrated-key"))
     val integratedId = checkNotNull(SettingsStore.saveProfile(context, null, "Integrated fixture", integrated, activate = true))
     check(!SettingsStore.originalTextOnly(context))
-    check(SettingsStore.textTranslationProvider(context) == TextTranslationProvider.BUILTIN)
+    // Integrated mode retains the independent editor's selection for a later
+    // mode switch; the effective runtime must use only this speech profile.
+    val integratedRuntime = SettingsStore.runtimeConfiguration(context)
+    check(integratedRuntime.getString("provider") == "openAIRealtime")
+    check(integratedRuntime.getString("speechTranslationMode") == "simultaneous")
+    check(integratedRuntime.isNull("textCredentials"))
+    check(integratedRuntime.getJSONObject("credentials").getString("apiKey") == "synthetic-integrated-key")
     check(SettingsStore.translationConfiguration(context, TextTranslationProvider.DEEPL).apiKey.isEmpty()); assertDrafts()
     check(SettingsStore.activateProfile(context, id)); check(SettingsStore.originalTextOnly(context))
     val before = profileDisk().readCatalog()

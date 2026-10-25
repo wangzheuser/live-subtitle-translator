@@ -28,6 +28,7 @@ import java.io.File
 /** Real picker, recreation and service UI checks on a blank emulator; never starts capture. */
 internal class InterfaceLanguageChecks(private val instrumentation: Instrumentation) {
     private val context get() = instrumentation.targetContext
+    private var stage = "preconditions"
     @Volatile private var settings: MainActivity? = null
     private val activities = mutableSetOf<Activity>()
     private val callbacks = object : Application.ActivityLifecycleCallbacks {
@@ -54,13 +55,14 @@ internal class InterfaceLanguageChecks(private val instrumentation: Instrumentat
         val theme = arguments?.getString("theme") ?: "light"
         var failure: Throwable? = null
         try {
-            check(!MimiService.isRunning && !SettingsStore.isConfigured(context)) { "Use a blank idle emulator" }
+            check(!MimiService.isRunning && SettingsStore.profiles(context).isEmpty()) { "Use a blank idle emulator" }
             onUi {
                 app.registerActivityLifecycleCallbacks(callbacks)
                 AppCompatDelegate.setDefaultNightMode(if (theme == "dark")
                     AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO)
             }
             check(prefs.edit().putBoolean("seen", true).commit())
+            stage = "launch_home"
             val home = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
             onUi { home.findViewById<View>(R.id.tab_service).performClick() }
@@ -73,6 +75,7 @@ internal class InterfaceLanguageChecks(private val instrumentation: Instrumentat
                 // Check every self-name, including rows below a narrow popup's viewport.
                 val names = listOf("简体中文", "繁體中文", "English", "日本語", "Deutsch", "한국어", "Français", "ภาษาไทย")
                 onUi { check((1 until picker().adapter.count).map { picker().adapter.getItem(it).toString() } == names) }
+                stage = "language_picker"
                 onUi { settings!!.findViewById<View>(R.id.tab_general).performClick(); picker().performClick() }
                 instrumentation.waitForIdleSync()
                 onUi {
@@ -85,12 +88,15 @@ internal class InterfaceLanguageChecks(private val instrumentation: Instrumentat
                 capture("picker-$theme")
                 instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
                 onUi { openCaptionStyles(settings!!) }
+                stage = "normal_preview_created"
                 context.startService(Intent(context, MimiService::class.java).setAction(MimiService.ACTION_UI_PREVIEW))
-                await { WindowInspector.getGlobalWindowViews().any { it.tag == "mimi-overlay" && it.findViewWithTag<View>("compact-subtitle") != null } }
+                await { WindowInspector.getGlobalWindowViews().any { it.tag == "mimi-overlay" && it.findViewWithTag<View>("expanded-subtitles") != null } }
+                stage = "preview_history"
                 context.startService(Intent(context, MimiService::class.java).setAction(MimiService.ACTION_UI_PREVIEW_HISTORY))
                 await { SubtitleBus.historySnapshot().isNotEmpty() }
                 val history = SubtitleBus.historySnapshot()
                 for (tag in InterfaceLanguage.tags.filter { it.isNotEmpty() } + "") {
+                    stage = "select_language_${tag.ifEmpty { "system" }}"
                     select(tag)
                     assertLanguage(tag)
                     onUi {
@@ -131,7 +137,7 @@ internal class InterfaceLanguageChecks(private val instrumentation: Instrumentat
         }
         instrumentation.finish(if (failure == null) Activity.RESULT_OK else Activity.RESULT_CANCELED, Bundle().apply {
             putString("stream", if (failure == null) "Interface language passed (API ${Build.VERSION.SDK_INT}/$theme): native picker, saved locale and localized UI; no capture or providers.\n"
-                else "Interface language failed: ${failure.javaClass.simpleName}: ${failure.message}\n")
+                else "Interface language failed at $stage: ${failure.javaClass.simpleName}: ${failure.message}; ${failure.stackTrace.firstOrNull { it.className.contains("InterfaceLanguageChecks") }}\n")
         })
     }
 
@@ -184,6 +190,7 @@ internal class InterfaceLanguageChecks(private val instrumentation: Instrumentat
     }
 
     private fun checkServiceEditor(tag: String, theme: String) {
+        stage = "localized_settings_${tag.ifEmpty { "system" }}"
         val overlay = WindowInspector.getGlobalWindowViews().first { it.tag == "mimi-overlay" }
         await { !overlay.isShown }
         onUi { settings!!.findViewById<View>(R.id.tab_general).performClick()
@@ -204,13 +211,17 @@ internal class InterfaceLanguageChecks(private val instrumentation: Instrumentat
         instrumentation.waitForIdleSync()
         capture("${tag.ifEmpty { "system" }}-settings-$theme")
         onUi { settings!!.findViewById<View>(R.id.tab_service).performClick() }
+        stage = "localized_azure_editor_${tag.ifEmpty { "system" }}"
         val monitor = instrumentation.addMonitor(ServiceSettingsActivity::class.java.name, null, false)
-        onUi { settings!!.findViewById<View>(R.id.service_panel).findViewWithTag<View>("configure-azure").performClick() }
-        val editor = instrumentation.waitForMonitorWithTimeout(monitor, 5000) as? ServiceSettingsActivity
-            ?: error("Service editor did not open")
-        instrumentation.removeMonitor(monitor)
+        val editor = try {
+            onUi { check(checkNotNull(settings!!.findViewById<View>(R.id.service_panel)
+                .findViewWithTag<View>("add-azure")) { "Blank service picker has no Azure entry" }.performClick()) }
+            instrumentation.waitForMonitorWithTimeout(monitor, 5000) as? ServiceSettingsActivity
+                ?: error("Service editor did not open")
+        } finally { instrumentation.removeMonitor(monitor) }
         onUi { check(containsText(editor.window.decorView, editor.getString(R.string.guide_field_endpoint))) }
         capture("${tag.ifEmpty { "system" }}-editor-$theme")
+        stage = "localized_azure_help_${tag.ifEmpty { "system" }}"
         onUi { editor.window.decorView.findViewWithTag<View>("speech-help").performClick() }
         instrumentation.waitForIdleSync()
         onUi { check(WindowInspector.getGlobalWindowViews().any {
@@ -225,6 +236,7 @@ internal class InterfaceLanguageChecks(private val instrumentation: Instrumentat
     }
 
     private fun captureOverlay(tag: String, theme: String) {
+        stage = "localized_overlay_${tag.ifEmpty { "system" }}"
         // Exercise the real own-page hide/restore path instead of forcing the
         // screenshot fixture over editors and hiding it for only one UI tick.
         val external = instrumentation.startActivitySync(Intent(context, CaptureProbeActivity::class.java)
@@ -266,6 +278,7 @@ internal class InterfaceLanguageChecks(private val instrumentation: Instrumentat
                 else java.util.Locale.forLanguageTag(tag)
             val language = locale?.language
             check(settings!!.resources.configuration.locales[0].language == language)
+            assertDebugAppLabels()
             val index = if (tag.isEmpty()) 0 else InterfaceLanguage.indexOf(locale)
             check(picker().selectedItemPosition == index)
             val label = when (InterfaceLanguage.tags[InterfaceLanguage.indexOf(locale)]) {
@@ -291,6 +304,19 @@ internal class InterfaceLanguageChecks(private val instrumentation: Instrumentat
         }
     }
 
+    private fun assertDebugAppLabels() {
+        val localized = checkNotNull(settings)
+        val manager = localized.packageManager
+        val application = manager.getApplicationInfo(localized.packageName, 0)
+        val launcher = checkNotNull(manager.resolveActivity(Intent(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_LAUNCHER).setPackage(localized.packageName), 0)).activityInfo
+        fun label(info: android.content.pm.PackageItemInfo): String =
+            info.nonLocalizedLabel?.toString()
+                ?: localized.getText(info.labelRes.takeIf { it != 0 } ?: application.labelRes).toString()
+        check(label(application) == "mimi Dev") { "Localized debug application name lost its Dev suffix" }
+        check(label(launcher) == "mimi Dev") { "Localized debug launcher name lost its Dev suffix" }
+    }
+
     private fun containsText(view: View, text: String): Boolean =
         (view is TextView && view.text.toString() == text) ||
             (view is TextInputLayout && view.hint?.toString() == text) ||
@@ -310,7 +336,7 @@ internal class InterfaceLanguageChecks(private val instrumentation: Instrumentat
             if (ready) return
             SystemClock.sleep(50)
         } while (SystemClock.elapsedRealtime() < deadline)
-        error("Timed out waiting for localized activity")
+        error("Timed out waiting for localized activity at $stage")
     }
 
     private fun capture(name: String) {

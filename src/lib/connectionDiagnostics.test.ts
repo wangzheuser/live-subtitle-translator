@@ -3,7 +3,7 @@ import { afterEach, expect, it } from "vitest";
 import { I18N, UI_LANGUAGES, setStoredUiLanguage } from "./i18n";
 import { sessionErrorSettingsTarget, sessionActionErrorMessage, languageActionErrorMessage, connectionDiagnosticMessage, credentialErrorMessage, credentialUnavailableHelp, profileErrorMessage, diagnosticCopy, diagnosticPlatform } from "./connectionDiagnostics";
 
-it.each(["zh", "en", "ja"] as const)("gives Tencent activation, quota and concurrency recovery without provider text in %s", language => {
+it.each(UI_LANGUAGES)("gives Tencent activation, quota and concurrency recovery without provider text in %s", language => {
   setStoredUiLanguage(language);
   const reasons = {
     tencent_configuration_rejected: "invalidConfiguration",
@@ -21,6 +21,25 @@ it.each(["zh", "en", "ja"] as const)("gives Tencent activation, quota and concur
   for (const label of ["tencent_configuration_rejected", "tencent_service_activation_required", "tencent_quota_exhausted"])
     expect(sessionErrorSettingsTarget(label)).toBe("service");
   expect(sessionErrorSettingsTarget("tencent_capacity_exceeded")).toBeNull();
+});
+
+it.each(UI_LANGUAGES)("keeps shared quota and rate-limit recovery independent of Tencent ASR in %s", language => {
+  setStoredUiLanguage(language);
+  const messages = (["quotaExhausted", "concurrencyLimited"] as const).map(reason =>
+    connectionDiagnosticMessage({ credential: "present", service: "unavailable", reason }));
+  for (const message of messages) {
+    expect(message).not.toMatch(/Tencent|腾讯|騰訊|\bASR\b/i);
+    expect(message).not.toBe(diagnosticCopy().unavailable);
+  }
+  const limited = messages[1];
+  expect(limited).toMatch(/later|稍后|稍後|しばらく|später|잠시 후|plus tard|ภายหลัง/i);
+  expect(limited).toMatch(/requests|请求|請求|リクエスト|Anfragen|요청|requêtes|คำขอ/i);
+  const activation = connectionDiagnosticMessage({
+    credential: "present", service: "unavailable", reason: "serviceNotActivated",
+  });
+  expect(activation).toMatch(/Tencent|腾讯|騰訊/i);
+  expect(activation).toContain("ASR");
+  expect(messages).not.toContain(activation);
 });
 
 it.each(UI_LANGUAGES)("gives Apple resource and language recovery in %s without exposing runtime labels", language => {

@@ -35,6 +35,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
     private var screenshots = 0
     private var savedFixture = false
     private var connectionFixture = false
+    private var stage = "preconditions"
     private val activities = mutableListOf<Activity>()
 
     fun run(arguments: Bundle?) {
@@ -62,10 +63,15 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
                 AppCompatDelegate.setDefaultNightMode(if (theme == "dark")
                     AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO)
             }
+            stage = if (connectionFixture) "connection" else "storage"
             if (connectionFixture) checkConnection() else {
                 runTextTranslationStorageChecks(context)
+                stage = "forms"
                 checkForms()
-                if (savedFixture) checkSavedCredentials()
+                if (savedFixture) {
+                    stage = "saved_credentials"
+                    checkSavedCredentials()
+                }
             }
         } catch (error: Throwable) {
             failure = error
@@ -84,7 +90,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
                 "Text translation connection UI passed ($theme): $screenshots native screenshots; local HTTP fixture, no external provider or audio; OpenAI/DeepLX POST, progress/duration, cancelled stale response, 401 and quota guidance verified; no credentials or configuration saved.\n"
             else if (failure == null)
                 "ChatMock settings passed ($theme): $screenshots native screenshots; independent recognition/translation fields, local validation, help dialog and discarded drafts; ${if (savedFixture) "synthetic save/reopen/key-isolation fixture restored" else "no credentials saved"}; no provider request or capture started.\n"
-            else "ChatMock settings failed: ${failure.javaClass.simpleName}: ${failure.message}\n")
+            else "ChatMock settings failed: ${failureSummary(requireNotNull(failure))}\n")
         })
     }
 
@@ -97,6 +103,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
         val originalEnabled = SettingsStore.useChatMockTranslation(context)
         val originalQwenModel = SettingsStore.qwenMtModel(context)
         ChatMockLoopbackFixture().use { server ->
+            stage = "connection_chatmock_progress"
             val editor = open(ServiceProvider.DASHSCOPE)
             onUi { selectMode(editor, TextTranslationProvider.CHAT_MOCK) }
             instrumentation.waitForIdleSync()
@@ -120,12 +127,14 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
             capture("chatmock-check-progress-$theme")
             server.releaseResponse(0)
             awaitCheckResult(editor)
+            stage = "connection_chatmock_success"
             val elapsed = assertTimedResult(editor, R.string.translation_check_success)
             check(elapsed >= 200 && elapsed <= SystemClock.elapsedRealtime() - startedAt + 100) {
                 "Successful check duration does not measure the real held HTTP request"
             }
             capture("chatmock-check-success-$theme")
 
+            stage = "connection_cancelled_stale_response"
             onUi { field<TextInputEditText>(editor, "translation-model").setText("synthetic-slow") }
             click(editor, "translation-check")
             server.awaitRequest(1)
@@ -147,6 +156,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
             }
             capture("chatmock-check-cancelled-$theme")
 
+            stage = "connection_chatmock_auth"
             onUi { field<TextInputEditText>(editor, "translation-model").setText("synthetic-auth") }
             click(editor, "translation-check")
             server.awaitRequest(2)
@@ -155,6 +165,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
             assertTimedResult(editor, R.string.translation_check_auth)
             capture("chatmock-check-auth-$theme")
             server.awaitResponse(2)
+            stage = "connection_deeplx_success"
             onUi { selectMode(editor, TextTranslationProvider.DEEPLX) }
             instrumentation.waitForIdleSync()
             onUi {
@@ -170,16 +181,25 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
             assertTimedResult(editor, R.string.translation_check_success)
             capture("translation-deeplx-check-success-$theme")
             server.awaitResponse(3)
+            stage = "connection_deeplx_quota"
             click(editor, "translation-check")
             server.awaitRequest(4); server.releaseResponse(4)
             awaitCheckResult(editor)
             assertTimedResult(editor, R.string.translation_check_busy)
             capture("translation-deeplx-check-quota-$theme")
             server.awaitResponse(4)
+            stage = "connection_deeplx_rate_limit"
+            click(editor, "translation-check")
+            server.awaitRequest(5); server.releaseResponse(5)
+            awaitCheckResult(editor)
+            assertTimedResult(editor, R.string.translation_check_busy)
+            capture("translation-deeplx-check-rate-limit-$theme")
+            server.awaitResponse(5)
             server.assertHealthy()
             onUi { editor.finish() }
             instrumentation.waitForIdleSync()
         }
+        stage = "connection_settings_unchanged"
         check(sameSpeechConfiguration(SettingsStore.configuration(context, ServiceProvider.DASHSCOPE), originalSpeech))
         check(SettingsStore.translationConfiguration(context) == originalTranslation)
         check(TextTranslationProvider.entries.all { SettingsStore.translationConfiguration(context, it) == originalTranslations[it] })
@@ -208,6 +228,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
             val text = status.text.toString()
             elapsed = Regex("([0-9]+)\\s*ms").find(text)?.groupValues?.get(1)?.toLongOrNull()
                 ?: error("Connection result omitted elapsed milliseconds")
+            stage = "$stage:expected=${context.resources.getResourceEntryName(messageId)}:actual=${connectionOutcome(text, elapsed)}"
             check(text == context.getString(messageId, elapsed)) { "Connection result did not match the expected outcome" }
             check(status.isShown && status.textSize / status.resources.displayMetrics.scaledDensity >= 14f)
         }
@@ -235,6 +256,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
         val mode = field<Spinner>(editor, "translation-mode")
         val speechKey = field<TextInputEditText>(editor, "credential-apiKey")
         val translationKey = field<TextInputEditText>(editor, "translation-key")
+        stage = "forms_default_translation_choices"
         onUi {
             check(mode.selectedItemPosition == 0 && mode.count == 7) { "Built-in translation must remain the default among seven text choices" }
             check((0 until mode.count).map { mode.getItemAtPosition(it).toString() } ==
@@ -244,6 +266,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
                     .map { editor.getString(translationProviderLabel(it)) }) { "Text services are not in the expected order" }
             check(!translationKey.isShown) { "Custom fields must follow the selected translation mode" }
             val qwen = field<Spinner>(editor, "qwen-mt-model")
+            stage = "forms_builtin_qwen_visible"
             check(qwen.isShown && qwen.count == 3)
             for (legacy in listOf("credential-baseUrl", "credential-model", "credential-hotwords")) {
                 check(editor.window.decorView.findViewWithTag<View>(legacy) == null) { "Unused legacy speech setting is editable" }
@@ -255,6 +278,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
             check(speechKey !== translationKey) { "Recognition and translation share a credential input" }
         }
         capture("chatmock-builtin-$theme")
+        stage = "forms_translation_provider_menu"
         onUi { check(mode.performClick()) }
         instrumentation.waitForIdleSync()
         capture("translation-provider-menu-$theme")
@@ -263,6 +287,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
         onUi { selectMode(editor, TextTranslationProvider.CHAT_MOCK) }
         instrumentation.waitForIdleSync()
         unchanged()
+        stage = "forms_chatmock_fields"
         onUi {
             check(translationKey.isShown) { "ChatMock selection did not reveal its fields" }
             check(!field<View>(editor, "qwen-mt-model").isShown)
@@ -277,9 +302,12 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
         click(editor, "translation-check")
         onUi { check(field<TextView>(editor, "translation-status").text.toString() == context.getString(R.string.translation_required)) }
         unchanged()
+        stage = "forms_provider_drafts"
         checkProviderDrafts(editor)
+        stage = "forms_compatible_presets"
         checkCompatiblePresets(editor)
 
+        stage = "forms_chatmock_help"
         onUi { check(editor.window.decorView.findViewWithTag<View>("translation-help").performLongClick()) }
         instrumentation.waitForIdleSync()
         onUi {
@@ -301,6 +329,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
         instrumentation.waitForIdleSync()
 
         // Empty fields are rejected before a request can be constructed.
+        stage = "forms_empty_translation_validation"
         onUi {
             field<TextInputEditText>(editor, "translation-endpoint").setText("")
             field<TextInputEditText>(editor, "translation-model").setText("")
@@ -316,6 +345,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
         unchanged()
 
         // The form holds synthetic drafts only. Toggling local HTTP never saves or connects.
+        stage = "forms_local_http_consent"
         onUi {
             speechKey.setText("synthetic-unsaved-speech-key")
             field<TextInputEditText>(editor, "translation-endpoint").setText("http://127.0.0.1:18000/v1")
@@ -349,6 +379,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
         unchanged()
 
         val reopened = open(ServiceProvider.DASHSCOPE)
+        stage = "forms_reopened_drafts_discarded"
         onUi {
             check(field<Spinner>(reopened, "translation-mode").selectedItemPosition == 0) { "Unsaved mode survived reopening" }
             check(field<Spinner>(reopened, "qwen-mt-model").selectedItem.toString() ==
@@ -375,6 +406,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
     /** Opt-in fixture: only synthetic keys on an already-verified blank emulator. */
     private fun checkSavedCredentials() = withTextTranslationSettingsSnapshot(context) {
         try {
+            stage = "saved_chatmock"
             val editor = open(ServiceProvider.DASHSCOPE)
             onUi { selectMode(editor, TextTranslationProvider.CHAT_MOCK) }
             instrumentation.waitForIdleSync()
@@ -396,6 +428,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
                 "Translation key was not saved separately"
             }
             val reopened = open(ServiceProvider.DASHSCOPE)
+            stage = "saved_chatmock_reopened"
             onUi {
                 check(field<Spinner>(reopened, "translation-mode").selectedItem.toString() == "ChatMock")
                 checkSecretField(field(reopened, "credential-apiKey"))
@@ -412,6 +445,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
                 "Unsaved removal deleted the stored key"
             }
             val compatible = open(ServiceProvider.DASHSCOPE)
+            stage = "saved_compatible_isolation"
             onUi { selectMode(compatible, TextTranslationProvider.OPENAI_COMPATIBLE) }
             instrumentation.waitForIdleSync()
             onUi {
@@ -427,6 +461,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
             check(compatible.isFinishing && SettingsStore.textTranslationProvider(context) == TextTranslationProvider.OPENAI_COMPATIBLE)
             check(SettingsStore.translationConfiguration(context, TextTranslationProvider.CHAT_MOCK).apiKey == "synthetic-saved-translation-key")
             val deepL = open(ServiceProvider.DASHSCOPE)
+            stage = "saved_deepl_isolation"
             onUi { selectMode(deepL, TextTranslationProvider.DEEPL) }
             instrumentation.waitForIdleSync()
             onUi {
@@ -439,6 +474,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
             check(SettingsStore.translationConfiguration(context, TextTranslationProvider.CHAT_MOCK).apiKey == "synthetic-saved-translation-key")
             check(SettingsStore.translationConfiguration(context, TextTranslationProvider.OPENAI_COMPATIBLE).apiKey == "synthetic-compatible-key")
             val deepLX = open(ServiceProvider.DASHSCOPE)
+            stage = "saved_deeplx_isolation"
             onUi {
                 checkSecretField(field(deepLX, "translation-key"))
                 check(!field<View>(deepLX, "translation-endpoint").isShown)
@@ -458,6 +494,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
             check(deepLX.isFinishing && SettingsStore.textTranslationProvider(context) == TextTranslationProvider.DEEPLX)
             check(SettingsStore.translationConfiguration(context, TextTranslationProvider.DEEPL).apiKey == "synthetic-deepl-saved:fx")
             val changed = open(ServiceProvider.DASHSCOPE)
+            stage = "saved_changed_endpoint_forgets_key"
             onUi { checkSecretField(field(changed, "translation-key")) }
             show(changed, "translation-key")
             capture("translation-deeplx-saved-$theme")
@@ -480,6 +517,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
             val appearance = (instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
                 .putExtra("settings_section", "appearance").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity).also { activities += it }
             instrumentation.waitForIdleSync()
+            stage = "saved_original_only_appearance"
             onUi { check(previewTranslation(appearance).visibility == View.VISIBLE) }
             val originalOnly = open(ServiceProvider.DASHSCOPE)
             onUi { selectMode(originalOnly, TextTranslationProvider.NONE) }
@@ -499,6 +537,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
             try {
                 check(firstRun.edit().putBoolean("seen", true).commit())
                 val home = appearance
+                stage = "saved_original_only_home"
                 onUi { home.findViewById<View>(R.id.tab_caption).performClick() }
                 instrumentation.waitForIdleSync()
                 onUi {
@@ -518,6 +557,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
 
     private fun checkProviderDrafts(editor: ServiceSettingsActivity) {
         fun select(provider: TextTranslationProvider) {
+            stage = "forms_route_${provider.name}"
             onUi { selectMode(editor, provider) }
             instrumentation.waitForIdleSync()
             onUi {
@@ -608,8 +648,11 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
         val model = field<TextInputEditText>(editor, "translation-model")
         val key = field<TextInputEditText>(editor, "translation-key")
         val localHttp = field<CheckBox>(editor, "translation-local-http")
+        stage = "forms_preset_setup_links"
         checkSetupLinks(editor, picker, endpoint, model, key)
+        stage = "forms_preset_icons"
         checkPresetIcons(editor, picker)
+        stage = "forms_preset_draft_selection"
         onUi {
             check(picker.isShown && picker.count == TextTranslationPresets.entries.size + 1)
             localHttp.isChecked = false
@@ -810,6 +853,20 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
     private fun sameSpeechConfiguration(actual: ServiceConfiguration, expected: ServiceConfiguration): Boolean =
         actual.provider == expected.provider && actual.credentials == expected.credentials &&
             actual.endpoint == expected.endpoint && actual.model == expected.model
+
+    /** Match fixed UI resources only; never include service responses or fields. */
+    private fun connectionOutcome(text: String, elapsed: Long): String = listOf(
+        R.string.translation_check_success, R.string.translation_check_auth,
+        R.string.translation_check_not_found, R.string.translation_check_busy,
+        R.string.translation_check_timeout, R.string.translation_check_response,
+        R.string.translation_check_failure,
+    ).firstOrNull { text == context.getString(it, elapsed) }
+        ?.let(context.resources::getResourceEntryName) ?: "unknown_fixed_label"
+
+    private fun failureSummary(error: Throwable): String {
+        val frame = error.stackTrace.firstOrNull { it.className.startsWith("app.yuxino.mimi.android.") }
+        return "$stage:${error.javaClass.simpleName}@${frame?.fileName ?: "unknown"}:${frame?.lineNumber ?: -1}"
+    }
 
     private fun checkSecretField(input: TextInputEditText) {
         check(input.text.isNullOrEmpty()) { "Credential field must start empty" }

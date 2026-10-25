@@ -13,6 +13,8 @@ internal class SavedSessionsViewModel(application: Application) : AndroidViewMod
     private val worker = Executors.newSingleThreadExecutor()
     private val sessions = SavedSessions(application.filesDir)
     private var cleared = false
+    private class ExportRequest(val id: String, val markdown: Boolean, val destination: Uri)
+    private var pendingExport: ExportRequest? = null
     var observer: (() -> Unit)? = null
     var items: List<SavedSessionItem> = emptyList(); private set
     var selected: SavedSessionItem? = null; private set
@@ -34,6 +36,7 @@ internal class SavedSessionsViewModel(application: Application) : AndroidViewMod
                         if (failure == null) failed = true else failure()
                     }
                     observer?.invoke()
+                    startPendingExport()
                 }
             }
         }
@@ -60,18 +63,49 @@ internal class SavedSessionsViewModel(application: Application) : AndroidViewMod
         notice = R.string.session_history_deleted
     }, { notice = R.string.session_history_delete_error })
 
-    fun export(id: String, markdown: Boolean, destination: Uri) = run({
+    fun export(id: String, markdown: Boolean, destination: Uri) {
+        if (cleared) return
+        // A document result can arrive while onStart's archive refresh is active.
+        // Retain only one accepted destination; never replace it silently.
+        if (pendingExport != null) {
+            notice = R.string.session_history_export_error
+            observer?.invoke()
+            return
+        }
+        val request = ExportRequest(id, markdown, destination)
+        if (busy) pendingExport = request else startExport(request)
+    }
+
+    private fun startPendingExport() {
+        if (busy || cleared) return
+        val request = pendingExport ?: return
+        pendingExport = null
+        startExport(request)
+    }
+
+    private fun startExport(request: ExportRequest) = run({ copyExport(request) },
+        { notice = R.string.session_history_exported }, { notice = R.string.session_history_export_error })
+
+    private fun copyExport(request: ExportRequest) {
         val resolver = getApplication<Application>().contentResolver
-        exportSavedSession({ sessions.export(id, markdown) }, { file ->
-            checkNotNull(resolver.openOutputStream(destination, "wt")).use { output ->
+        exportSavedSession({ sessions.export(request.id, request.markdown) }, { file ->
+            checkNotNull(resolver.openOutputStream(request.destination, "wt")).use { output ->
                 file.inputStream().use { input -> input.copyTo(output) }
             }
         })
-    }, { notice = R.string.session_history_exported }, { notice = R.string.session_history_export_error })
+    }
 
     override fun onCleared() {
-        cleared = true; observer = null; page = null; items = emptyList()
-        // A running SAF copy still executes its finally block and deletes its private temporary file.
-        worker.shutdown()
+        val acceptedExport = pendingExport
+        cleared = true; pendingExport = null; observer = null; page = null; items = emptyList()
+        // Back closes the reader, not an already accepted document result. Put
+        // its bounded metadata on the same worker before shutdown, without any
+        // completion callback retaining or reviving the closed Activity.
+        try {
+            if (acceptedExport != null) worker.execute { runCatching { copyExport(acceptedExport) } }
+        } finally {
+            // Both running and accepted copies still execute their file cleanup.
+            worker.shutdown()
+        }
     }
 }

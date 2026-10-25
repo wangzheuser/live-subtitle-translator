@@ -73,7 +73,7 @@ class UiSmokeInstrumentation : Instrumentation() {
     override fun onStart() {
         super.onStart()
         if (captureArguments?.getString("service_draft_recreation") == "true") {
-            ServiceDraftRecreationChecks(this).run()
+            ServiceDraftRecreationChecks(this).run(captureArguments)
             return
         }
         if (captureArguments?.getString("copyProfileScreenshots") == "true") {
@@ -150,8 +150,11 @@ class UiSmokeInstrumentation : Instrumentation() {
             SavedSessionOverlayChecks(this).run()
             return
         }
-        if (captureArguments?.getString("saved_sessions") == "true") {
-            SavedSessionChecks(this).run()
+        if (captureArguments?.getString("saved_sessions") == "true" || captureArguments?.getString("saved_export_refresh") == "true" ||
+            captureArguments?.getString("saved_export_refresh_close") == "true") {
+            val closeAfterReturn = captureArguments?.getString("saved_export_refresh_close") == "true"
+            SavedSessionChecks(this).run(exportRefreshRace = closeAfterReturn || captureArguments?.getString("saved_export_refresh") == "true",
+                closeAfterExportReturn = closeAfterReturn)
             return
         }
         if (captureArguments?.getString("capture_sources") == "true") {
@@ -563,10 +566,21 @@ class UiSmokeInstrumentation : Instrumentation() {
         onUi {
             val clipboard = targetContext.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
             val diagnostic = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: error("No diagnostic copied")
-            check(diagnostic.startsWith("mimi Android capture diagnostics v1\n"))
-            check("input=system" in diagnostic)
-            check("microphone=false" in diagnostic && "observation=STOPPED" in diagnostic)
-            check(diagnostic.lines().size == 10) { "Unexpected diagnostic fields" }
+            val lines = diagnostic.lineSequence().filter { it.isNotBlank() }.toList()
+            check(lines.firstOrNull() == "Mimi Android capture diagnostics v2")
+            val entries = lines.drop(1).map { line ->
+                line.split('=', limit = 2).also { check(it.size == 2) { "Malformed diagnostic metadata" } }
+            }
+            val fields = entries.associate { it[0] to it[1] }
+            check(entries.size == fields.size) { "Duplicate diagnostic fields" }
+            check(fields.keys == setOf("androidApi", "input", "microphone", "running", "observation",
+                "pcmAgeMs", "soundAgeMs", "captureError")) { "Unexpected diagnostic fields in stopped state" }
+            check(fields["androidApi"] == android.os.Build.VERSION.SDK_INT.toString())
+            check(fields["input"] == "system")
+            check(fields["microphone"] == "false" && fields["running"] == "false" && fields["observation"] == "STOPPED")
+            check(fields["pcmAgeMs"] == "unknown" && fields["soundAgeMs"] == "unknown")
+            check(fields["captureError"] in setOf("none", "capture.start_failed", "capture.permission_or_lock_changed",
+                "capture.projection_stopped", "capture.read_failed")) { "Diagnostic error must remain a sanitized label" }
             clipboard.clearPrimaryClip()
         }
         // Android's clipboard preview is another UID's touchable window. Let

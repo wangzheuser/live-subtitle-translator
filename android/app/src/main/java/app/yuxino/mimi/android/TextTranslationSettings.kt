@@ -69,7 +69,7 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
         }
     }
     private var presetSelection = -1
-    private var customPreset = false
+    private var customPreset = editorDraft?.customPreset ?: false
     private val qwenModels = listOf("lite", "flash", "plus")
     private val qwenModel = Spinner(activity).apply { tag = "qwen-mt-model"; background = null; setPadding(0, 0, 0, 0) }
     private val qwenModelRow = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; tag = "qwen-mt-model-row" }
@@ -150,9 +150,7 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
         }
         mode.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (providers[position] != selected) {
-                    applyPendingPreset(); rememberDraft(); selected = providers[position]; renderDraft()
-                }
+                applyPendingProvider()
             }
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
@@ -177,15 +175,25 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
     }
 
     fun editorDraft(): TextTranslationEditorDraft {
+        applyPendingProvider()
         applyPendingPreset()
         rememberDraft()
-        // Spinner selection can change just before recreation, while its
-        // onItemSelected callback is still queued. The fields still belong to
-        // `selected`, but the next editor must open the newly chosen route.
-        val nextSelected = providers.getOrNull(mode.selectedItemPosition) ?: selected
-        return TextTranslationEditorDraft(nextSelected, qwenMtModel, drafts.mapValues { (_, state) ->
+        return TextTranslationEditorDraft(selected, qwenMtModel, drafts.mapValues { (_, state) ->
             TextTranslationRouteDraft(state.endpoint, state.model, state.key, state.localHttp, state.forgetKey)
-        })
+        }, customPreset)
+    }
+
+    private fun applyPendingProvider() {
+        if (rendering) return
+        val next = providers.getOrNull(mode.selectedItemPosition) ?: return
+        if (next == selected) return
+        // Spinner exposes a new selection before its callback is dispatched.
+        // Save, Check and recreation must commit the old fields to their own
+        // route before rendering and consuming the newly selected draft.
+        applyPendingPreset()
+        rememberDraft()
+        selected = next
+        renderDraft()
     }
 
     private fun renderDraft() {
@@ -251,6 +259,7 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
     }
 
     fun draft(validate: Boolean = true): TranslationConfiguration? {
+        applyPendingProvider()
         applyPendingPreset()
         rememberDraft()
         if (!hasNetworkProvider()) return TranslationConfiguration(provider = selected)

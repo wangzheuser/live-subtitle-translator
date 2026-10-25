@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Keep the official blue Qwen mark; use a neutral white backing instead of recoloring it. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#FFFFFF" />
+            <corners android:radius="4.5dp" />
+        </shape>
+    </item>
+    <item>
+        <bitmap android:src="@drawable/ic_provider_qwen_mark" android:gravity="fill" />
+    </item>
+</layer-list>

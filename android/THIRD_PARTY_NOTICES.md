@@ -13,18 +13,24 @@ The service cloud, language, caption and wave icons are adapted from Lucide 1.31
 Provider brand marks reuse the existing desktop assets documented in
 [provider-brand-assets.md](../docs/development/provider-brand-assets.md). SVG exports preserve the original artwork and colors; transparent padding is normalized for consistent Android display sizes.
 
-The DeepSeek, Kimi, SiliconFlow, Index Team, Ollama and Baidu AI Cloud preset marks are derived
-from the matching monochrome [Lobe Icons source assets](../src/assets/providers/NOTICE.md)
-at commit `cc639da879a3f404f5ded8ec41cdfdc63abd8317`, under the MIT license.
-Their path geometry is unchanged and their monochrome fills follow the interface
-text color. The full notice is in [native-licenses/lobe-icons.txt](native-licenses/lobe-icons.txt),
-packaged in every APK as `assets/lobe-icons.txt`.
+The compatible text presets reuse the official vendor artwork documented in
+[the provider source notice](../src/assets/providers/NOTICE.md). Native vectors
+preserve path geometry, colors and proportions, including the supplied Kimi,
+SiliconFlow, OpenRouter and LM Studio theme variants and LM Studio's original
+gradient. SiliconFlow shares the source SVG's visible-artwork viewBox without
+changing its paths. Qwen, Baidu AI Cloud and bilibili PNGs are copied unchanged;
+no upscaled source files are generated. Qianfan uses its cloud provider's mark,
+and Index-Translate uses the official bilibili parent-brand avatar, rather than
+inventing product-specific logos. Qwen and Ollama keep their original artwork on
+a neutral white backing in dark mode; their colors are not inverted. All service
+names and marks remain the property of their respective owners and imply no
+endorsement.
 
-OpenRouter and LM Studio preset marks use the official vendor SVGs documented
-in that source notice. Native vectors preserve their geometry, supplied colors
-and theme variants, including LM Studio's original gradient. The Lobe Icons MIT
-license does not apply to these official vendor assets. All service names and
-marks remain the property of their respective owners and imply no endorsement.
+The official Ollama SVG is distributed under the repository's MIT license
+(Copyright (c) Ollama), from commit
+`d44c2581904a98430e348d89cc2af1529b1808a0`. The complete notice is retained in
+[native-licenses/ollama.txt](native-licenses/ollama.txt) and packaged through the
+existing license-assets source directory as `assets/ollama.txt` in every APK.
 
 ISC License
 

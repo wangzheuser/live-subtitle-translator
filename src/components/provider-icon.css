@@ -36,11 +36,8 @@
   color: inherit;
 }
 
-.provider-icon__image--inverted {
-  filter: invert(1);
-}
-
-.provider-icon__image--deeplx {
+.provider-icon__image--deeplx,
+.provider-icon__image--backed {
   background: var(--provider-backing-background, transparent);
   border-radius: 6px;
 }

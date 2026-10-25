@@ -32,12 +32,15 @@ Compatibility identifies an API format, not OpenAI ownership or affiliation.
 The compatible route's Quick setup picker identifies concrete text services with
 their own marks in both the selected value and every dropdown row. Custom keeps
 the neutral language glyph. `TextTranslationPresetIcon` reuses existing company
-marks where appropriate and bundles additional artwork documented in
-[provider notices](../../src/assets/providers/NOTICE.md). Qianfan uses the Baidu
-AI Cloud mark, not the separate Baidu Translation app icon. Monochrome marks
-follow the selected light/dark theme; supplied OpenRouter and LM Studio variants
-keep their original colors and proportions. These are UI assets only: preset
-selection, credential ownership, model IDs and network behavior are unchanged.
+marks where appropriate and bundles first-party artwork documented in
+[provider notices](../../src/assets/providers/NOTICE.md). Qwen uses its own mark;
+Index-Translate uses the official Bilibili publisher avatar, and Qianfan uses the
+icon linked by its official cloud product page. Supplied Kimi, SiliconFlow,
+OpenRouter and LM Studio variants keep their original colors and proportions.
+Static blue/color marks are not inverted. Black Ollama and blue Qwen artwork
+use a white surface in dark settings to preserve their original appearance.
+These are UI assets only: preset selection, credential ownership, model IDs and
+network behavior are unchanged.
 
 Recognition and text translation call sites resolve their service separately.
 Legacy DeepLX profiles still use Alibaba Cloud's icon for speech recognition;
@@ -55,3 +58,18 @@ selector. SVGs become equivalent vector drawables or 128-pixel PNG exports; sour
 and geometry remain unchanged. Transparent padding is normalized for consistent visible
 size. Supplied OpenAI/DeepL dark variants and the DeepLX white backing remain theme-aware.
 Existing raster brand assets are copied directly. See `android/THIRD_PARTY_NOTICES.md`.
+
+## Selecting and reviewing a mark
+
+Prefer the product's official brand download, then artwork actually published
+by its official site or repository. A third-party icon name or resemblance does
+not prove that a file is the current official product mark. Record the exact
+first-party source and any conversion; distinguish a publisher mark from a
+product mark. Do not substitute a related app/model just because it shares a
+company. If no suitable product glyph is verified, use the official publisher
+mark and document that choice. Do not invent a logo and call it official.
+
+Inspect the actual bundled result at its small display size in light and dark
+settings, both selected and in the dropdown. Normalize only empty padding when
+necessary; keep the paths, proportions and source colors. Use supplied dark
+artwork or a neutral backing for contrast instead of inverting color assets.

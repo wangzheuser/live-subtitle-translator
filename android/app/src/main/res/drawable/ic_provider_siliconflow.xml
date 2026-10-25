@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Same geometry as src/assets/providers/siliconflow.svg; see android/THIRD_PARTY_NOTICES.md. -->
-<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-    <path android:pathData="M22.956 6.521H12.522c-.577 0-1.044.468-1.044 1.044v3.13c0 .577-.466 1.044-1.043 1.044H1.044c-.577 0-1.044.467-1.044 1.044v4.174C0 17.533.467 18 1.044 18h10.434c.577 0 1.044-.467 1.044-1.043v-3.13c0-.578.466-1.044 1.043-1.044h9.391c.577 0 1.044-.467 1.044-1.044V7.565c0-.576-.467-1.044-1.044-1.044z" android:fillType="evenOdd" android:fillColor="@color/mimi_text" />
+<!-- Official src/assets/providers/siliconflow.svg; original path geometry/colors. See android/THIRD_PARTY_NOTICES.md. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="142.22" android:viewportHeight="142.22">
+    <group android:translateX="-25" android:translateY="15.104995">
+        <clip-path android:pathData="M25,22 H167.22 V90.01001 H25 Z" />
+        <group>
+            <clip-path android:pathData="M0,0 H193 V112 H0 Z" />
+            <group>
+                <group>
+                    <path android:pathData="M161.05,22L99.21,22C95.79,22,93.03,24.77,93.03,28.18L93.03,46.730000000000004C93.03,50.15,90.26,52.91,86.85,52.91L31.18,52.91C27.759999999999998,52.91,25,55.68,25,59.09L25,83.83C25,87.25,27.77,90.01,31.18,90.01L93.02,90.01C96.44,90.01,99.2,87.24,99.2,83.83L99.2,65.28C99.2,61.86,101.97,59.1,105.38,59.1L161.04,59.1C164.46,59.1,167.22,56.33,167.22,52.92L167.22,28.18C167.22,24.759999999999998,164.45,22,161.04,22L161.05,22Z" android:fillColor="#6E29F5" android:fillType="nonZero" />
+                </group>
+            </group>
+        </group>
+    </group>
 </vector>

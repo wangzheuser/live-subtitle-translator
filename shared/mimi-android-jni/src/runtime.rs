@@ -21,7 +21,8 @@ use mimi_runtime::{
             volcano_engine::{VolcanoEngineEndpoint, VolcanoEngineServerEvent},
         },
         provider::{
-            AlibabaRealtimeMode, ProviderKind, ProviderPreferences, TextTranslation, XAISpeechMode,
+            AlibabaRealtimeMode, ProviderKind, ProviderPreferences, SpeechTranslationMode,
+            TextTranslation, XAISpeechMode,
         },
         recovery::{
             advance_lifecycle_sequence_if_current, provider_error_is_retryable,
@@ -735,6 +736,25 @@ pub fn exchange(request: &str) -> Result<String, &'static str> {
                 "sessionFinishTimeoutMs":mimi_runtime::core::health::SESSION_FINISH_TIMEOUT.as_millis() as u64})
         }
         "volcano_decode" => volcano_decode(&value)?,
+        "gemini_streaming_transcripts" => {
+            let frames = value["frames"]
+                .as_array()
+                .filter(|frames| frames.len() <= 256)
+                .ok_or("native_runtime_invalid_request")?;
+            let mut assembler =
+                mimi_runtime::core::protocols::gemini_transcribe::TranscriptAssembler::default();
+            let mut outputs = Vec::with_capacity(frames.len());
+            for frame in frames {
+                let event =
+                    mimi_runtime::core::protocols::gemini_transcribe::decode(&frame.to_string())
+                        .map_err(|_| "native_runtime_invalid_request")?;
+                let output = assembler
+                    .apply(event)
+                    .map_err(|_| "native_runtime_invalid_request")?;
+                outputs.push(output.into_iter().map(|output| json!({"sequence":output.sequence,"text":output.text,"isFinal":output.is_final})).collect::<Vec<_>>());
+            }
+            json!({"outputs":outputs})
+        }
         "xai_streaming_transcripts" => {
             let frames = value["frames"]
                 .as_array()
@@ -789,7 +809,7 @@ pub fn exchange(request: &str) -> Result<String, &'static str> {
                 let configuration = configuration
                     .validated()
                     .map_err(|_| "invalid_configuration")?;
-                if !configuration.uses_xai_asr() {
+                if !configuration.uses_independent_asr() {
                     return Err("invalid_configuration");
                 }
                 Some(configuration)
@@ -827,7 +847,7 @@ pub fn exchange(request: &str) -> Result<String, &'static str> {
             let worker = probe.clone();
             *probe.task.lock().unwrap() = Some(executor().spawn(async move {
                 let result = if let Some(configuration) = speech_configuration {
-                    mimi_runtime::clients::connection_diagnostics::check_xai_speech_with_network(
+                    mimi_runtime::clients::connection_diagnostics::check_independent_speech_with_network(
                         &configuration,
                         false,
                         speech_network,
@@ -902,8 +922,22 @@ pub fn exchange(request: &str) -> Result<String, &'static str> {
             if xai_mode != XAISpeechMode::Voice && provider != ProviderKind::XAIRealtime {
                 return Err("invalid_configuration");
             }
+            let speech_mode: SpeechTranslationMode = value
+                .get("speechTranslationMode")
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|_| "invalid_configuration")?
+                .unwrap_or_default();
+            if speech_mode != SpeechTranslationMode::Simultaneous
+                && !provider.supports_speech_translation_mode()
+            {
+                return Err("invalid_configuration");
+            }
             let capabilities_for_target = |target| {
-                if mode != AlibabaRealtimeMode::Disabled {
+                if speech_mode == SpeechTranslationMode::AsrMt {
+                    mimi_runtime::core::provider::realtime_asr_capabilities(provider, route, target)
+                } else if mode != AlibabaRealtimeMode::Disabled {
                     mode.capabilities()
                 } else if provider == ProviderKind::XAIRealtime && xai_mode == XAISpeechMode::AsrMt
                 {

@@ -30,3 +30,5 @@ pub mod deeplx_client;
 mod translation_contract_tests;
 
 pub mod xai_stt_client;
+
+pub mod gemini_transcribe_client;

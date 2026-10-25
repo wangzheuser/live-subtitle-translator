@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { PROVIDER_COPY } from "../../lib/generated/providerCopy";
 import { SettingsToastRegion } from "./SettingsToast";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -1077,8 +1078,9 @@ it.each(["zh", "en", "ja"] as const)("groups the service identity, credential st
   const integratedStage = connection.querySelector(".service-stage--integrated")!;
   expect(integratedStage.querySelector("h3")?.textContent).toBe(I18N.settings.voiceTranslation);
   expect(identity.querySelector('.provider-icon[data-provider="openAIRealtime"]')).not.toBeNull();
-  expect(integratedStage.querySelector(".settings-help-control__description")?.textContent).toBe(I18N.settings.textTranslationUnsupported);
-  expect(integratedStage.querySelector('[role="combobox"], p')).toBeNull();
+  expect(integratedStage.querySelector(".settings-help-control__description")?.textContent).toBe(PROVIDER_COPY[language].speechTranslationModeHelp);
+  expect(integratedStage.querySelector('.speech-translation-mode-settings [role="combobox"]')).not.toBeNull();
+  expect(integratedStage.querySelector("p")).toBeNull();
   expect(host.querySelector(".service-detail__name label")?.textContent).toBe(I18N.settings.profileName);
   expect(host.querySelector(".service-detail__name")?.closest("details")).toBeNull();
   expect(host.querySelector(".service-detail__save-name")).toBeNull();
@@ -2408,4 +2410,62 @@ it.each(UI_LANGUAGES)("keeps xAI recognition identity in every independent trans
     await render({ ...settings, profiles: [voice], activeProfileId: voice.id });
     expect(host.querySelector('.service-detail__name-help .settings-help-control__description')?.textContent).toBe(I18N.settings.providerXAIDescription);
   }
+});
+
+it.each(["openAIRealtime", "googleGeminiLive", "azureOpenAIRealtime"] as const)("defaults %s to simultaneous and preserves its independent translator through mode switches", async provider => {
+  const current: ServiceProfile = { id: provider, name: provider, provider, credentialState: "present", speechCredentialState: "present", textCredentialState: "present", textTranslation: "deepL" };
+  const snapshot = { ...settings, profiles: [current], activeProfileId: current.id };
+  actions.updateProfile.mockImplementation(async (_id, _name, options) => ({ ...snapshot, profiles: [{ ...current, ...options }] }));
+  await render(snapshot);
+  expect(host.querySelector('.speech-translation-mode-settings [role="combobox"]')?.textContent).toBe("Simultaneous translation");
+  expect(host.querySelector('.service-stage--translation')).toBeNull();
+  expect(host.querySelectorAll('.service-proxies .network-proxy-form')).toHaveLength(1);
+  await act(async () => host.querySelector<HTMLButtonElement>('.speech-translation-mode-settings [role="combobox"]')!.click());
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(node => node.textContent === "ASR + MT")!.click());
+  expect(actions.updateProfile).toHaveBeenCalledExactlyOnceWith(current.id, undefined, { speechTranslationMode: "asrMt" });
+  await render({ ...snapshot, profiles: [{ ...current, speechTranslationMode: "asrMt" }] });
+  expect(host.querySelector('.service-stage--translation [role="combobox"]')?.textContent).toBe("DeepL");
+  expect(host.querySelectorAll('.connection-check button')).toHaveLength(2);
+  expect(host.querySelectorAll('.service-proxies .network-proxy-form')).toHaveLength(2);
+  await act(async () => host.querySelector<HTMLButtonElement>('.speech-translation-mode-settings [role="combobox"]')!.click());
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(node => node.textContent === "Simultaneous translation")!.click());
+  expect(actions.updateProfile).toHaveBeenLastCalledWith(current.id, undefined, { speechTranslationMode: "simultaneous" });
+  await render({ ...snapshot, profiles: [{ ...current, speechTranslationMode: "simultaneous" }] });
+  expect(host.querySelector('.service-stage--translation')).toBeNull();
+  expect(actions.saveProfileCredentials).not.toHaveBeenCalled();
+});
+
+it.each(["rejected", "unacknowledged"])("reports a %s mode save in the transient toast and keeps the selected mode", async failure => {
+  const current: ServiceProfile = { id: "openai", name: "OpenAI", provider: "openAIRealtime", credentialState: "present" };
+  const snapshot = { ...settings, profiles: [current], activeProfileId: current.id };
+  if (failure === "rejected") actions.updateProfile.mockRejectedValue(new Error("sanitized-mode-failure"));
+  else actions.updateProfile.mockResolvedValue(snapshot);
+  await render(snapshot);
+  await act(async () => host.querySelector<HTMLButtonElement>('.speech-translation-mode-settings [role="combobox"]')!.click());
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(node => node.textContent === "ASR + MT")!.click());
+  expect(host.querySelector('.speech-translation-mode-settings [role="combobox"]')?.textContent).toBe("Simultaneous translation");
+  expect(document.querySelector('.settings-toast')?.textContent).toContain("Could not save the translation mode");
+});
+
+it("prevents mode changes while subtitles are active", async () => {
+  const current: ServiceProfile = { id: "gemini", name: "Gemini", provider: "googleGeminiLive", credentialState: "present" };
+  await act(async () => root.render(<ServiceProfiles settings={{ ...settings, profiles: [current], activeProfileId: current.id }} sessionIsActive />));
+  expect(host.querySelector<HTMLButtonElement>('.speech-translation-mode-settings [role="combobox"]')?.disabled).toBe(true);
+  expect(actions.updateProfile).not.toHaveBeenCalled();
+});
+
+it("lets Azure ASR check recognition without a translation deployment or text credentials", async () => {
+  const current: ServiceProfile = { id: "azure-asr", name: "Azure", provider: "azureOpenAIRealtime", speechTranslationMode: "asrMt", credentialState: "missing", speechCredentialState: "missing", textCredentialState: "missing" };
+  vi.mocked(profileCredentialEditorState).mockResolvedValue({ savedFields: [] });
+  vi.mocked(testProfileConnection).mockResolvedValue({ credential: "present", service: "available", reason: null, elapsedMs: 90 });
+  await render({ ...settings, profiles: [current], activeProfileId: current.id });
+  expect(host.querySelector('#profile-api-key-azure-asr-deployment')).toBeNull();
+  await change('#profile-api-key-azure-asr-endpoint', "https://synthetic.openai.azure.com");
+  await change('#profile-api-key-azure-asr-transcriptionDeployment', "transcribe");
+  await change('#profile-api-key-azure-asr-apiKey', "synthetic-speech-key");
+  await click(I18N.settings.checkSpeechRecognition);
+  expect(testProfileConnection).toHaveBeenLastCalledWith(current.id, "speech", {
+    kind: "azureOpenAI", endpoint: "https://synthetic.openai.azure.com", deployment: "", transcriptionDeployment: "transcribe", apiKey: "synthetic-speech-key",
+  });
+  expect(host.querySelector('.service-stage--translation [role="combobox"]')?.textContent).toBe(I18N.settings.textTranslationOpenAICompatible);
 });

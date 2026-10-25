@@ -608,3 +608,22 @@ fn livetranslate_catalog_and_wire_languages_follow_the_same_contract() {
         );
     }
 }
+
+#[test]
+fn gemini_streaming_fixtures_preserve_authoritative_segments() {
+    use super::gemini_transcribe::{decode, TranscriptAssembler};
+    for case in contract()["geminiStreamingTranscripts"].as_array().unwrap() {
+        let mut assembler = TranscriptAssembler::default();
+        let outputs: Vec<Value> = case["frames"].as_array().unwrap().iter().map(|frame| {
+            let outputs: Vec<Value> = assembler.apply(decode(&frame.to_string()).unwrap()).unwrap().into_iter()
+                .map(|output| serde_json::json!({"sequence":output.sequence,"text":output.text,"isFinal":output.is_final})).collect();
+            serde_json::json!(outputs)
+        }).collect();
+        assert_eq!(
+            serde_json::json!(outputs),
+            case["expectedOutputs"],
+            "{}",
+            case["id"]
+        );
+    }
+}

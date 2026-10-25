@@ -40,9 +40,13 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
         }
     }
     private var selected = (editorDraft?.selected ?: if (profileId == null) {
-        if (speechProvider == ServiceProvider.XAI) TextTranslationProvider.XAI else TextTranslationProvider.BUILTIN
+        when {
+            speechProvider == ServiceProvider.XAI -> TextTranslationProvider.XAI
+            speechProvider.supportsSpeechTranslationMode -> TextTranslationProvider.OPENAI_COMPATIBLE
+            else -> TextTranslationProvider.BUILTIN
+        }
     } else SettingsStore.profileTextTranslationProvider(activity, profileId)).let {
-        if (it in providers) it else TextTranslationProvider.NONE
+        if (it in providers) it else if (speechProvider.supportsSpeechTranslationMode) TextTranslationProvider.OPENAI_COMPATIBLE else TextTranslationProvider.NONE
     }
     private var rendering = false
     private val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
@@ -252,7 +256,8 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
             // The check uses only text-service fields. A speech key or an unsaved recognition mode is irrelevant.
             val (source, target) = speechProvider.normalize(SettingsStore.sourceLang(activity),
                 SettingsStore.targetLang(activity).takeUnless { it == "original" } ?: "zh", config.provider,
-                xaiSpeechMode = if (speechProvider == ServiceProvider.XAI) "asrMt" else "voice")
+                xaiSpeechMode = if (speechProvider == ServiceProvider.XAI) "asrMt" else "voice",
+                speechTranslationMode = if (speechProvider.supportsSpeechTranslationMode) "asrMt" else "simultaneous")
             buildTextProbeConfiguration(config, source, target, qwenMtModel)
         } catch (_: Exception) {
             check.isEnabled = true; check.setText(R.string.translation_check)

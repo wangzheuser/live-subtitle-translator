@@ -820,3 +820,17 @@ it.each(["alibabaCloud", "openAIRealtime"] as const)("preserves existing %s whit
   const liveLane = host.querySelector<HTMLElement>('[data-utterance-id] [aria-label] > span');
   expect(liveLane?.style.whiteSpace).not.toBe("pre-line");
 });
+
+it.each(["openAIRealtime", "googleGeminiLive", "azureOpenAIRealtime"] as const)("uses complete ASR plus MT previews for %s without applying simultaneous draft behavior", async provider => {
+  const subtitles: SubtitleSnapshot = { ...empty,
+    source: { text: "New raw recognition prefix.", isFinal: false },
+    translation: { text: "译", isFinal: false },
+    previewPair: { source: "Complete recognized phrase.", translation: "完整翻译短句。", utteranceId: "independent-preview" },
+  };
+  await mount(subtitles, "bilingual", { profiles: [{ id: provider, name: provider, provider, speechTranslationMode: "asrMt", textTranslation: "deepL", credentialState: "present" }], activeProfileId: provider });
+  expect(visibleLanes()).toEqual([subtitles.previewPair!.source, subtitles.previewPair!.translation]);
+  await mode("original");
+  expect(visibleLanes()).toEqual([subtitles.source.text]);
+  await mode("translation");
+  expect(visibleLanes()).toEqual([subtitles.previewPair!.translation]);
+});

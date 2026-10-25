@@ -48,6 +48,39 @@ class ServiceProfileRepositoryTest {
         assertTrue(repository.migrate(emptyList(), null)); assertTrue(repository.profiles().isEmpty())
     }
 
+    @Test fun realtimeModeRoundTripsAndLegacyProfilesKeepSimultaneousWithIndependentDrafts() {
+        for (provider in listOf(ServiceProvider.OPENAI, ServiceProvider.GEMINI, ServiceProvider.AZURE)) {
+            val disk = MemoryDisk(); val repository = ServiceProfileRepository(disk)
+            val credentials = provider.fields.associate { it.id to "synthetic-${it.id}" }
+            val text = TranslationConfiguration(endpoint = "https://synthetic.example.invalid/v1", model = "independent-model",
+                apiKey = "synthetic-text-key", provider = TextTranslationProvider.OPENAI_COMPATIBLE)
+            val initial = ProfileContents(ServiceConfiguration(provider, credentials))
+            assertEquals("simultaneous", initial.speech.speechTranslationMode)
+            assertEquals(TextTranslationProvider.OPENAI_COMPATIBLE, initial.effectiveTranslation)
+            val id = repository.save(null, "Simultaneous", initial)!!
+            val independent = ProfileContents(ServiceConfiguration(provider, credentials, speechTranslationMode = "asrMt"),
+                TextTranslationProvider.OPENAI_COMPATIBLE, mapOf(TextTranslationProvider.OPENAI_COMPATIBLE to text))
+            assertEquals(id, repository.save(id, "Independent", independent))
+            val copied = repository.duplicate(id, "Copy")!!
+            assertEquals("asrMt", ServiceProfileRepository(disk).contents(copied).speech.speechTranslationMode)
+            assertEquals("synthetic-text-key", repository.contents(copied).translations.getValue(TextTranslationProvider.OPENAI_COMPATIBLE).apiKey)
+            assertEquals(id, repository.save(id, "Simultaneous", ProfileContents(initial.speech,
+                independent.selectedTranslation, independent.translations)))
+            assertEquals("synthetic-text-key", repository.contents(id).translations.getValue(TextTranslationProvider.OPENAI_COMPATIBLE).apiKey)
+            val catalog = org.json.JSONObject(disk.catalog!!)
+            val details = catalog.getJSONArray("profiles").getJSONObject(0).getJSONObject("details")
+            details.getJSONObject("speech").remove("speechTranslationMode")
+            details.put("selectedTranslation", TextTranslationProvider.BUILTIN.storageId)
+            disk.catalog = catalog.toString()
+            val restored = ServiceProfileRepository(disk).contents(id)
+            assertEquals("simultaneous", restored.speech.speechTranslationMode)
+            assertEquals(TextTranslationProvider.OPENAI_COMPATIBLE, restored.effectiveTranslation)
+            assertEquals("synthetic-apiKey", restored.speech.value("apiKey"))
+            assertFalse(disk.catalog!!.contains("synthetic-apiKey"))
+            assertFalse(disk.catalog!!.contains("synthetic-text-key"))
+        }
+    }
+
     @Test fun xaiModesAndModelsPersistDuplicateAndPreserveLegacyVoice() {
         val disk = MemoryDisk(); val repository = ServiceProfileRepository(disk)
         val contents = ProfileContents(ServiceConfiguration(ServiceProvider.XAI, mapOf("apiKey" to "synthetic-xai-key"),

@@ -22,6 +22,16 @@ pub fn default_xai_text_model() -> String {
     DEFAULT_XAI_TEXT_MODEL.to_owned()
 }
 
+/// Missing metadata preserves the existing integrated translation route.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SpeechTranslationMode {
+    #[default]
+    #[serde(rename = "simultaneous")]
+    Simultaneous,
+    #[serde(rename = "asrMt")]
+    AsrMt,
+}
+
 /// Missing metadata preserves the historical turn-based Voice route.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum XAISpeechMode {
@@ -295,6 +305,13 @@ impl ProviderKind {
         }
     }
 
+    pub const fn supports_speech_translation_mode(self) -> bool {
+        matches!(
+            self,
+            Self::OpenAIRealtime | Self::GoogleGeminiLive | Self::AzureOpenAIRealtime
+        )
+    }
+
     pub const fn is_custom_speech(self) -> bool {
         matches!(self, Self::CustomDashScopeASR | Self::CustomOpenAIASR)
     }
@@ -376,6 +393,24 @@ pub fn xai_asr_capabilities(
     capabilities
         .source_languages
         .retain(|language| speech.source_languages.contains(language));
+    capabilities
+}
+
+/// Recognition model language hints intersect the independently selected text service.
+pub fn realtime_asr_capabilities(
+    provider: ProviderKind,
+    route: TextTranslation,
+    target: TargetLanguage,
+) -> ProviderCapabilities {
+    let mut capabilities = custom_speech_capabilities(ProviderKind::CustomOpenAIASR, route, target);
+    capabilities.source_languages.retain(|language| {
+        crate::core::protocols::realtime_asr::supports_language(provider, *language)
+    });
+    capabilities.input_sample_rate_hz = if provider == ProviderKind::GoogleGeminiLive {
+        16_000
+    } else {
+        24_000
+    };
     capabilities
 }
 
@@ -656,6 +691,8 @@ where
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ServiceProfileError {
+    #[error("This service does not support the selected speech translation mode.")]
+    UnsupportedSpeechTranslationMode,
     #[error("xAI speech options require an xAI configuration.")]
     UnsupportedXAISpeech,
     #[error("Enter a valid xAI text model name (up to 256 bytes).")]
@@ -752,6 +789,8 @@ pub struct ServiceProfile {
     pub alibaba_workspace_id: String,
     #[serde(default)]
     pub xai_speech_mode: XAISpeechMode,
+    #[serde(default)]
+    pub speech_translation_mode: SpeechTranslationMode,
     #[serde(default = "default_xai_text_model")]
     pub xai_text_model: String,
     /// A completed same-profile upgrade must never resurrect a deleted text key.
@@ -816,6 +855,7 @@ impl ServiceProfile {
             } else {
                 XAISpeechMode::Voice
             },
+            speech_translation_mode: SpeechTranslationMode::Simultaneous,
             xai_text_model: default_xai_text_model(),
             xai_independent_translation_migrated: provider == ProviderKind::XAIRealtime,
             language_preset: None,
@@ -838,6 +878,7 @@ impl ServiceProfile {
             alibaba_realtime_mode: Default::default(),
             alibaba_workspace_id: String::new(),
             xai_speech_mode: XAISpeechMode::Voice,
+            speech_translation_mode: SpeechTranslationMode::Simultaneous,
             xai_text_model: default_xai_text_model(),
             xai_independent_translation_migrated: false,
             language_preset: None,
@@ -858,6 +899,7 @@ impl ServiceProfile {
         profile.qwen_mt_model = self.qwen_mt_model;
         profile.set_alibaba_realtime(self.alibaba_realtime_mode, &self.alibaba_workspace_id)?;
         profile.set_xai_speech(self.xai_speech_mode, &self.xai_text_model)?;
+        profile.set_speech_translation_mode(self.speech_translation_mode)?;
         profile.xai_independent_translation_migrated = self.xai_independent_translation_migrated;
         if matches!(
             self.text_translation,
@@ -912,6 +954,28 @@ impl ServiceProfile {
         self.xai_speech_mode = mode;
         self.xai_text_model = model;
         Ok(())
+    }
+
+    pub fn set_speech_translation_mode(
+        &mut self,
+        mode: SpeechTranslationMode,
+    ) -> Result<(), ServiceProfileError> {
+        if mode != SpeechTranslationMode::Simultaneous
+            && !self.provider.supports_speech_translation_mode()
+        {
+            return Err(ServiceProfileError::UnsupportedSpeechTranslationMode);
+        }
+        self.speech_translation_mode = mode;
+        Ok(())
+    }
+
+    pub fn uses_realtime_asr(&self) -> bool {
+        self.provider.supports_speech_translation_mode()
+            && self.speech_translation_mode == SpeechTranslationMode::AsrMt
+    }
+
+    pub fn uses_independent_asr(&self) -> bool {
+        self.uses_xai_asr() || self.uses_realtime_asr()
     }
 
     pub fn uses_xai_asr(&self) -> bool {
@@ -995,6 +1059,9 @@ impl ServiceProfile {
     }
 
     pub fn text_translation(&self) -> TextTranslation {
+        if self.provider.supports_speech_translation_mode() && !self.uses_realtime_asr() {
+            return TextTranslation::FollowService;
+        }
         if self.provider == ProviderKind::XAIRealtime && !self.uses_xai_asr() {
             return TextTranslation::FollowService;
         }
@@ -1005,6 +1072,8 @@ impl ServiceProfile {
         }
         self.text_translation.unwrap_or(if self.uses_xai_asr() {
             TextTranslation::XAI
+        } else if self.uses_realtime_asr() {
+            TextTranslation::OpenAICompatible
         } else if self.provider == ProviderKind::DeepLX {
             TextTranslation::DeepLX
         } else {
@@ -1013,6 +1082,9 @@ impl ServiceProfile {
     }
 
     pub fn capabilities(&self, target: TargetLanguage) -> ProviderCapabilities {
+        if self.uses_realtime_asr() {
+            return realtime_asr_capabilities(self.provider, self.text_translation(), target);
+        }
         if self.uses_xai_asr() {
             return xai_asr_capabilities(self.text_translation(), target);
         }
@@ -1114,13 +1186,15 @@ impl ServiceProfile {
     }
 
     pub fn is_standalone_asr(&self) -> bool {
-        self.provider.is_standalone_asr() || self.uses_xai_asr()
+        self.provider.is_standalone_asr() || self.uses_independent_asr()
     }
 
     /// Stored destinations survive integrated-mode switches. This does not
     /// turn Grok Voice into a recognizer with an independent text phase.
     pub fn supports_text_translation_configuration(&self) -> bool {
-        self.provider.supports_text_translation() || self.provider == ProviderKind::XAIRealtime
+        self.provider.supports_text_translation()
+            || self.provider == ProviderKind::XAIRealtime
+            || self.provider.supports_speech_translation_mode()
     }
 }
 
@@ -1132,6 +1206,64 @@ impl Default for ServiceProfile {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn realtime_modes_default_to_simultaneous_and_preserve_independent_selection() {
+        use super::*;
+        for provider in [
+            ProviderKind::OpenAIRealtime,
+            ProviderKind::GoogleGeminiLive,
+            ProviderKind::AzureOpenAIRealtime,
+        ] {
+            let mut profile = ServiceProfile::new("route", "Route", provider).unwrap();
+            assert_eq!(
+                profile.speech_translation_mode,
+                SpeechTranslationMode::Simultaneous
+            );
+            let mut legacy = serde_json::to_value(&profile).unwrap();
+            legacy
+                .as_object_mut()
+                .unwrap()
+                .remove("speechTranslationMode");
+            assert_eq!(
+                serde_json::from_value::<ServiceProfile>(legacy)
+                    .unwrap()
+                    .speech_translation_mode,
+                SpeechTranslationMode::Simultaneous
+            );
+            profile
+                .set_speech_translation_mode(SpeechTranslationMode::AsrMt)
+                .unwrap();
+            assert_eq!(
+                profile.text_translation(),
+                TextTranslation::OpenAICompatible
+            );
+            assert!(profile.is_standalone_asr());
+            assert!(profile
+                .capabilities(TargetLanguage::Original)
+                .target_languages
+                .contains(&TargetLanguage::Original));
+            profile.text_translation = Some(TextTranslation::DeepL);
+            profile
+                .set_speech_translation_mode(SpeechTranslationMode::Simultaneous)
+                .unwrap();
+            assert_eq!(profile.text_translation(), TextTranslation::FollowService);
+            assert_eq!(
+                profile.validated().unwrap().text_translation,
+                Some(TextTranslation::DeepL)
+            );
+            profile
+                .set_speech_translation_mode(SpeechTranslationMode::AsrMt)
+                .unwrap();
+            assert_eq!(profile.text_translation(), TextTranslation::DeepL);
+        }
+        assert!(
+            ServiceProfile::new("other", "Other", ProviderKind::VolcanoEngine)
+                .unwrap()
+                .set_speech_translation_mode(SpeechTranslationMode::AsrMt)
+                .is_err()
+        );
+    }
+
     #[test]
     fn xai_profiles_preserve_legacy_voice_and_opt_into_streaming_for_new_profiles() {
         let legacy: ServiceProfile =
@@ -1645,7 +1777,7 @@ mod tests {
             );
         }
         let mut unsupported =
-            ServiceProfile::new("other", "Other", ProviderKind::OpenAIRealtime).unwrap();
+            ServiceProfile::new("other", "Other", ProviderKind::VolcanoEngine).unwrap();
         unsupported.text_translation = Some(TextTranslation::ChatMock);
         assert!(unsupported.validated().is_err());
     }
@@ -1679,7 +1811,7 @@ mod tests {
             assert_eq!(caps.translation_modes, vec![TranslationMode::Turbo]);
         }
         let mut unsupported =
-            ServiceProfile::new("openai", "OpenAI", ProviderKind::OpenAIRealtime).unwrap();
+            ServiceProfile::new("volcano", "Volcano", ProviderKind::VolcanoEngine).unwrap();
         unsupported.text_translation = Some(TextTranslation::OpenAICompatible);
         assert_eq!(
             unsupported.validated(),
@@ -1888,7 +2020,7 @@ mod tests {
             ProviderKind::DeepLX
         );
         let mut unsupported =
-            ServiceProfile::new("other", "Other", ProviderKind::OpenAIRealtime).unwrap();
+            ServiceProfile::new("other", "Other", ProviderKind::VolcanoEngine).unwrap();
         unsupported.text_translation = Some(TextTranslation::DeepLX);
         assert_eq!(
             unsupported.validated().unwrap_err(),
@@ -2376,7 +2508,7 @@ mod tests {
         profile
             .set_text_translation_name(TextTranslation::OpenAICompatible, &"名".repeat(64))
             .unwrap();
-        profile.provider = ProviderKind::OpenAIRealtime;
+        profile.provider = ProviderKind::VolcanoEngine;
         assert_eq!(
             profile.validated(),
             Err(ServiceProfileError::UnsupportedTextTranslation)

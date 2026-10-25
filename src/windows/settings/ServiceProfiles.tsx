@@ -5,7 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { Icon } from "../../components/Icon";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { I18N, providerDisplayName } from "../../lib/i18n";
-import { SERVICE_PROVIDERS, credentialStateForTarget, isCustomSpeechProvider, isIndependentAsrProfile, subtitlePreferencesChanged, textTranslationForProfile, usesAlibabaRealtime, usesXaiAsr } from "../../lib/providerCapabilities";
+import { SERVICE_PROVIDERS, credentialStateForTarget, isCustomSpeechProvider, isIndependentAsrProfile, subtitlePreferencesChanged, supportsSpeechTranslationMode, textTranslationForProfile, usesAlibabaRealtime, usesXaiAsr } from "../../lib/providerCapabilities";
 import { DEFAULT_NETWORK_PROXY, networkProxyConfigKey } from "../../lib/networkProxy";
 import {
   buildProviderCredentials,
@@ -63,6 +63,7 @@ import { profileCopyName } from "../../lib/profileCopyName";
 import { AlibabaRealtimeSettings } from "./AlibabaRealtimeSettings";
 import { QwenMTModelSettings } from "./QwenMTModelSettings";
 import { XAISpeechSettings } from "./XAISpeechSettings";
+import { SpeechTranslationModeSettings } from "./SpeechTranslationModeSettings";
 import { TextTranslationEditor } from "./SpeechAndTextCredentialEditor";
 import { ServiceEditorModule } from "./ServiceEditorModule";
 import { useServicePageNavigation } from "./useServicePageNavigation";
@@ -145,8 +146,8 @@ export function ServiceProfiles({
   const creationInFlight = useRef(false);
   const mutationInFlight = useRef(false);
   const proxyKeys = useMemo(() => Object.fromEntries(settings.profiles.map(profile => {
-    const speech = JSON.stringify([networkProxyConfigKey(profile.speechNetworkProxy ?? settings.networkProxy ?? DEFAULT_NETWORK_PROXY), profile.alibabaRealtimeMode ?? "disabled", profile.alibabaWorkspaceId ?? "", profile.xaiSpeechMode ?? "voice"]);
-    const text = JSON.stringify([networkProxyConfigKey(profile.textNetworkProxy ?? settings.networkProxy ?? DEFAULT_NETWORK_PROXY), profile.xaiSpeechMode ?? "voice"]);
+    const speech = JSON.stringify([networkProxyConfigKey(profile.speechNetworkProxy ?? settings.networkProxy ?? DEFAULT_NETWORK_PROXY), profile.alibabaRealtimeMode ?? "disabled", profile.alibabaWorkspaceId ?? "", profile.xaiSpeechMode ?? "voice", profile.speechTranslationMode ?? "simultaneous"]);
+    const text = JSON.stringify([networkProxyConfigKey(profile.textNetworkProxy ?? settings.networkProxy ?? DEFAULT_NETWORK_PROXY), profile.xaiSpeechMode ?? "voice", profile.speechTranslationMode ?? "simultaneous"]);
     return [profile.id, { speech, text, combined: JSON.stringify([speech, text]) }];
   })), [settings.profiles, settings.networkProxy]);
   const proxyKey = JSON.stringify(proxyKeys);
@@ -485,7 +486,7 @@ export function ServiceProfiles({
 
   const handleSaveCredential = async (profileId: string, credentials: ProviderCredentialsInput) => {
     setPendingConfirmation(null);
-    const stage = credentials.kind === "customSpeech" || credentials.kind === "apiKey" && selectedProfile && usesXaiAsr(selectedProfile) ? "speech" : credentials.kind === "alibabaTranslation" && (isIndependentAsrProfile(selectedProfile!) || !credentials.apiKey.trim()) ? "text" : undefined;
+    const stage = credentials.kind === "customSpeech" || (credentials.kind === "apiKey" || credentials.kind === "azureOpenAI") && selectedProfile && isIndependentAsrProfile(selectedProfile) ? "speech" : credentials.kind === "alibabaTranslation" && (isIndependentAsrProfile(selectedProfile!) || !credentials.apiKey.trim()) ? "text" : undefined;
     invalidateProfileCheck(profileId, stage);
     return perform(
       "save-key",
@@ -582,7 +583,7 @@ export function ServiceProfiles({
   const renderConnectionCheck = (profile: ServiceProfile, stage?: ConnectionCheckStage, draft?: ProviderCredentialsInput | null, sourceLanguage?: SourceLanguage) => {
     const key = stage ?? "combined";
     const outcome = diagnostics[key];
-    const context = JSON.stringify([profile.provider, textTranslationForProfile(profile), profile.alibabaRealtimeMode ?? "disabled", profile.alibabaWorkspaceId ?? "", profile.xaiSpeechMode ?? "voice", sourceLanguage ?? settings.sourceLanguage,
+    const context = JSON.stringify([profile.provider, textTranslationForProfile(profile), profile.alibabaRealtimeMode ?? "disabled", profile.alibabaWorkspaceId ?? "", profile.xaiSpeechMode ?? "voice", profile.speechTranslationMode ?? "simultaneous", sourceLanguage ?? settings.sourceLanguage,
       stage === "speech" ? null : settings.targetLanguage]);
     return <DraftConnectionCheck key={`${profile.id}:${key}`} draft={draft} context={context}
       outcome={outcome?.profileId === profile.id ? outcome : undefined}
@@ -712,7 +713,17 @@ export function ServiceProfiles({
           <div className="service-detail__connection service-editor-module service-editor-module--connection">
             <SelectedCredentialEditor
               support={apple.support} settings={settings} requiresStop={requiresStop} loading={apple.loading} failed={apple.failed} sourceLanguage={settings.sourceLanguage} targetLanguage={settings.targetLanguage}
-              xaiModeSettings={selectedProfile.provider === "xAIRealtime" ? <XAISpeechSettings profile={selectedProfile} disabled={mutationsDisabled}
+              speechModeSettings={selectedProfile.provider === "xAIRealtime" ? <XAISpeechSettings profile={selectedProfile} disabled={mutationsDisabled}
+                onSave={async options => {
+                  if (mutationInFlight.current || mutationsDisabled) throw new Error("profile-change-requires-stop");
+                  mutationInFlight.current = true;
+                  setPendingAction("save-model");
+                  try {
+                    const snapshot = await trackProfileOperation(() => updateProfile(selectedProfile.id, undefined, options));
+                    invalidateProfileCheck(selectedProfile.id);
+                    return snapshot;
+                  } finally { mutationInFlight.current = false; setPendingAction(null); }
+                }} /> : supportsSpeechTranslationMode(selectedProfile.provider) ? <SpeechTranslationModeSettings profile={selectedProfile} disabled={mutationsDisabled}
                 onSave={async options => {
                   if (mutationInFlight.current || mutationsDisabled) throw new Error("profile-change-requires-stop");
                   mutationInFlight.current = true;
@@ -909,7 +920,7 @@ function CredentialEditor({
   onCancelDelete,
   connectionCheck,
   textConnectionCheck,
-  xaiModeSettings,
+  speechModeSettings,
   onSaveTranslationName,
   sourceLanguage = "auto",
   targetLanguage = "original",
@@ -918,7 +929,7 @@ function CredentialEditor({
   sourceLanguage?: SourceLanguage;
   targetLanguage?: TargetLanguage;
   requiresStop?: boolean;
-  xaiModeSettings?: ReactNode;
+  speechModeSettings?: ReactNode;
   onSaveTranslationName?: (route: TextTranslationNameDraft["route"], name: string) => Promise<unknown>;
   connectionCheck?: ReactNode | ((draft?: ProviderCredentialsInput | null) => ReactNode);
   textConnectionCheck?: (draft?: ProviderCredentialsInput | null) => ReactNode;
@@ -962,18 +973,18 @@ function CredentialEditor({
   const saveFeedback = feedback && <div ref={feedbackRef} tabIndex={-1}><InlineFeedback tone={feedback.tone}>{feedback.message}</InlineFeedback></div>;
   const noteId = `${inputId}-storage-note`;
   const speechState = profile.speechCredentialState ?? profile.credentialState;
-  const credentials = speechState === "present" && (editorState.loading || editorState.error) ? null : buildProviderCredentials(profile.provider, displayedDraft);
+  const credentials = speechState === "present" && (editorState.loading || editorState.error) ? null : buildProviderCredentials(profile.provider, displayedDraft, profile.speechTranslationMode);
 
-  const hasCredentialChanges = credentialFieldsForProvider(profile.provider).some(field => {
+  const hasCredentialChanges = credentialFieldsForProvider(profile.provider, profile.speechTranslationMode).some(field => {
     if (!changedFields[field]) return false;
     if (credentialFieldCopy(field, profile.provider).secret) return !!draft[field].trim();
     return draft[field].trim() !== (savedValues?.[field as keyof typeof savedValues] ?? "");
   });
   // A complete explicit replacement can be checked without saved metadata.
   // Partial drafts may reuse saved fields only after that metadata loaded.
-  const probeCredentials = buildProviderCredentials(profile.provider, draft)
+  const probeCredentials = buildProviderCredentials(profile.provider, draft, profile.speechTranslationMode)
     ?? (editorState.loading || editorState.error ? null
-      : buildProviderProbeCredentials(profile.provider, displayedDraft, savedValues?.savedFields));
+      : buildProviderProbeCredentials(profile.provider, displayedDraft, savedValues?.savedFields, profile.speechTranslationMode));
   const check = typeof connectionCheck === "function"
     ? connectionCheck(!hasCredentialChanges ? undefined : probeCredentials)
     : connectionCheck;
@@ -1011,10 +1022,10 @@ function CredentialEditor({
     void onConfirmDelete();
   };
 
-  const xaiAsr = usesXaiAsr(profile);
+  const independentAsr = isIndependentAsrProfile(profile);
   const serviceIdentity = <>
-    <header className="service-stage__heading"><h3>{xaiAsr ? I18N.settings.speechRecognition : I18N.settings.voiceTranslation}</h3>{!xaiAsr && <SettingsHelp text={I18N.settings.textTranslationUnsupported} label={I18N.settings.helpLabel} />}</header>
-    {xaiModeSettings}
+    <header className="service-stage__heading"><h3>{independentAsr ? I18N.settings.speechRecognition : I18N.settings.voiceTranslation}</h3>{!independentAsr && !supportsSpeechTranslationMode(profile.provider) && <SettingsHelp text={I18N.settings.textTranslationUnsupported} label={I18N.settings.helpLabel} />}</header>
+    {speechModeSettings}
     {profile.provider === "tencentCloud" && <TencentSetupHelp />}
   </>;
   const storageHelp = <CredentialStorageHelp id={noteId} profile={profile} />;
@@ -1059,7 +1070,7 @@ function CredentialEditor({
       <form className="credential-form" onSubmit={handleSubmit}>
         {editorState.error && <InlineFeedback tone="error">{editorState.error}<button type="button" className="settings-link" disabled={disabled} onClick={() => setEditorEpoch(current => current + 1)}>{I18N.settings.retryLoadingSettings}</button></InlineFeedback>}
         <div className="credential-form__fields">
-          {credentialFieldsForProvider(profile.provider).map((field) => {
+          {credentialFieldsForProvider(profile.provider, profile.speechTranslationMode).map((field) => {
             const copy = credentialFieldCopy(field, profile.provider);
             const fieldId = `${inputId}-${field}`;
             return (
@@ -1136,7 +1147,7 @@ function CredentialEditor({
         </span>}
       </form>
       </section>
-      {xaiAsr && <TextTranslationEditor profile={profile} inputId={`${inputId}-text`} disabled={disabled} busy={busy} visible={visible}
+      {independentAsr && <TextTranslationEditor profile={profile} inputId={`${inputId}-text`} disabled={disabled} busy={busy} visible={visible}
         feedback={null} onSave={onSave} onRequestDelete={onRequestDelete} onConfirmDelete={onConfirmDelete}
         confirmingDelete={confirmingDelete} onCancelDelete={onCancelDelete} storageNoteId={noteId}
         onSaveTranslationName={onSaveTranslationName} textConnectionCheck={textConnectionCheck}
@@ -1157,7 +1168,7 @@ function profileDescription(profile: ServiceProfile): string {
   if (profile.provider === "appleSpeech") return I18N.settings.appleSpeechDescription;
   if (isCustomSpeechProvider(profile.provider)) return [I18N.settings.customSpeechDescription, I18N.settings.customSpeechLanguages].join("\n");
   const translation = textTranslationForProfile(profile);
-  if (usesXaiAsr(profile)) return [
+  if (isIndependentAsrProfile(profile)) return [
     `${I18N.settings.speechRecognition}: ${speechRecognitionDisplayName(profile)}`,
     `${I18N.settings.textTranslationLabel}: ${translation === "followService" ? I18N.settings.customSpeechNoTranslation : textTranslationDisplayName(profile)}`,
     I18N.settings.customSpeechTranslationHelp,

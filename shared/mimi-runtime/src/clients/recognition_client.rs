@@ -3,6 +3,7 @@
 use super::apple_speech_client::AppleSpeechClient;
 use super::audio3_client::{Audio3ASRClient, Audio3ASRClientError};
 use super::custom_speech_client::{CustomSpeechClient, CustomSpeechClientError};
+use super::gemini_transcribe_client::{GeminiTranscribeClient, GeminiTranscribeClientError};
 use super::provider_events::ProviderEventSender;
 use super::provider_network::{ProviderNetwork, ProviderNetworkError};
 use super::xai_stt_client::{XaiSttClient, XaiSttClientError};
@@ -22,6 +23,8 @@ pub enum RecognitionClientError {
     Custom(#[from] CustomSpeechClientError),
     #[error("{0}")]
     Xai(#[from] XaiSttClientError),
+    #[error("{0}")]
+    Gemini(#[from] GeminiTranscribeClientError),
 }
 
 impl RecognitionClientError {
@@ -29,8 +32,11 @@ impl RecognitionClientError {
         matches!(
             self,
             Self::Custom(CustomSpeechClientError::AuthenticationFailed)
-        ) || matches!(self, Self::Xai(XaiSttClientError::AuthenticationFailed))
-            || matches!(self, Self::Alibaba(Audio3ASRClientError::Task(label)) if label.contains(".authentication."))
+        ) || matches!(
+            self,
+            Self::Xai(XaiSttClientError::AuthenticationFailed)
+                | Self::Gemini(GeminiTranscribeClientError::AuthenticationFailed)
+        ) || matches!(self, Self::Alibaba(Audio3ASRClientError::Task(label)) if label.contains(".authentication."))
     }
 
     pub fn is_timeout(&self) -> bool {
@@ -39,7 +45,10 @@ impl RecognitionClientError {
         }
         matches!(
             self,
-            Self::Xai(XaiSttClientError::SetupTimeout | XaiSttClientError::HealthTimeout)
+            Self::Gemini(
+                GeminiTranscribeClientError::SetupTimeout
+                    | GeminiTranscribeClientError::HealthTimeout
+            ) | Self::Xai(XaiSttClientError::SetupTimeout | XaiSttClientError::HealthTimeout)
                 | Self::Custom(
                     CustomSpeechClientError::SetupTimeout | CustomSpeechClientError::HealthTimeout
                 )
@@ -58,7 +67,8 @@ impl RecognitionClientError {
         }
         matches!(
             self,
-            Self::Xai(XaiSttClientError::UnsupportedLanguage)
+            Self::Gemini(GeminiTranscribeClientError::UnsupportedLanguage)
+                | Self::Xai(XaiSttClientError::UnsupportedLanguage)
                 | Self::Custom(
                     CustomSpeechClientError::InvalidEndpoint
                         | CustomSpeechClientError::InvalidModel
@@ -73,7 +83,8 @@ impl RecognitionClientError {
     pub fn is_missing_credentials(&self) -> bool {
         matches!(
             self,
-            Self::Xai(XaiSttClientError::MissingAPIKey)
+            Self::Gemini(GeminiTranscribeClientError::MissingAPIKey)
+                | Self::Xai(XaiSttClientError::MissingAPIKey)
                 | Self::Custom(CustomSpeechClientError::MissingAPIKey)
                 | Self::Alibaba(Audio3ASRClientError::MissingAPIKey)
         )
@@ -82,7 +93,10 @@ impl RecognitionClientError {
     pub fn is_unreachable(&self) -> bool {
         matches!(
             self,
-            Self::Xai(XaiSttClientError::Unreachable | XaiSttClientError::NotConnected)
+            Self::Gemini(
+                GeminiTranscribeClientError::Unreachable
+                    | GeminiTranscribeClientError::NotConnected
+            ) | Self::Xai(XaiSttClientError::Unreachable | XaiSttClientError::NotConnected)
                 | Self::Custom(
                     CustomSpeechClientError::Unreachable | CustomSpeechClientError::NotConnected
                 )
@@ -96,6 +110,7 @@ pub enum RecognitionClient {
     Audio3(Audio3ASRClient),
     OpenAI(CustomSpeechClient),
     Xai(XaiSttClient),
+    Gemini(GeminiTranscribeClient),
 }
 
 impl RecognitionClient {
@@ -105,12 +120,52 @@ impl RecognitionClient {
             Self::Audio3(client) => Some(client.network_endpoint()),
             Self::OpenAI(client) => Some(client.network_endpoint()),
             Self::Xai(client) => Some(client.network_endpoint()),
+            Self::Gemini(client) => Some(client.network_endpoint()),
         }
     }
 
     pub fn standalone(
         configuration: &crate::core::configuration::LiveTranslationConfiguration,
     ) -> Result<Self, RecognitionClientError> {
+        if configuration.uses_realtime_asr() {
+            let key = configuration
+                .credentials
+                .direct_api_key()
+                .ok_or(CustomSpeechClientError::MissingAPIKey)?;
+            return match configuration.provider {
+                ProviderKind::OpenAIRealtime => Ok(Self::OpenAI(CustomSpeechClient::openai(
+                    key,
+                    configuration.source_language,
+                )?)),
+                ProviderKind::GoogleGeminiLive => Ok(Self::Gemini(GeminiTranscribeClient::new(
+                    key,
+                    configuration.source_language,
+                )?)),
+                ProviderKind::AzureOpenAIRealtime => {
+                    let (endpoint, _, deployment, key) =
+                        configuration
+                            .credentials
+                            .azure_openai()
+                            .ok_or(CustomSpeechClientError::InvalidEndpoint)?;
+                    Ok(Self::OpenAI(CustomSpeechClient::azure(
+                        endpoint,
+                        deployment,
+                        key,
+                        configuration.source_language,
+                    )?))
+                }
+                _ => Err(CustomSpeechClientError::InvalidEndpoint.into()),
+            };
+        }
+        if configuration.uses_xai_asr() {
+            return Self::xai(
+                configuration
+                    .credentials
+                    .direct_api_key()
+                    .ok_or(CustomSpeechClientError::MissingAPIKey)?,
+                configuration.source_language,
+            );
+        }
         match (&configuration.provider, &configuration.credentials) {
             (
                 ProviderKind::AppleSpeech,
@@ -168,6 +223,7 @@ impl RecognitionClient {
             Self::Audio3(client) => client.set_network(network),
             Self::OpenAI(client) => client.set_network(network),
             Self::Xai(client) => client.set_network(network),
+            Self::Gemini(client) => client.set_network(network),
         }
     }
 
@@ -177,6 +233,7 @@ impl RecognitionClient {
             Self::Audio3(client) => client.set_audio_pending_gate(gate),
             Self::OpenAI(client) => client.set_audio_pending_gate(gate),
             Self::Xai(client) => client.set_audio_pending_gate(gate),
+            Self::Gemini(client) => client.set_audio_pending_gate(gate),
         }
     }
 
@@ -186,6 +243,7 @@ impl RecognitionClient {
             Self::Audio3(client) => client.set_event_sender(events).await,
             Self::OpenAI(client) => client.set_event_sender(events).await,
             Self::Xai(client) => client.set_event_sender(events).await,
+            Self::Gemini(client) => client.set_event_sender(events).await,
         }
     }
 
@@ -195,6 +253,7 @@ impl RecognitionClient {
             Self::Audio3(client) => client.connect(task_id).await.map_err(Into::into),
             Self::OpenAI(client) => client.connect(task_id).await.map_err(Into::into),
             Self::Xai(client) => client.connect(task_id).await.map_err(Into::into),
+            Self::Gemini(client) => client.connect(task_id).await.map_err(Into::into),
         }
     }
 
@@ -204,6 +263,7 @@ impl RecognitionClient {
             Self::Audio3(client) => client.connect_for_probe(task_id).await.map_err(Into::into),
             Self::OpenAI(client) => client.connect_for_probe(task_id).await.map_err(Into::into),
             Self::Xai(client) => client.connect_for_probe(task_id).await.map_err(Into::into),
+            Self::Gemini(client) => client.connect_for_probe(task_id).await.map_err(Into::into),
         }
     }
 
@@ -213,6 +273,7 @@ impl RecognitionClient {
             Self::Audio3(client) => client.send_audio(pcm).await.map_err(Into::into),
             Self::OpenAI(client) => client.send_audio(pcm).await.map_err(Into::into),
             Self::Xai(client) => client.send_audio(pcm).await.map_err(Into::into),
+            Self::Gemini(client) => client.send_audio(pcm).await.map_err(Into::into),
         }
     }
 
@@ -222,6 +283,7 @@ impl RecognitionClient {
             Self::Audio3(client) => client.ping(timeout).await.map_err(Into::into),
             Self::OpenAI(client) => client.ping(timeout).await.map_err(Into::into),
             Self::Xai(client) => client.ping(timeout).await.map_err(Into::into),
+            Self::Gemini(client) => client.ping(timeout).await.map_err(Into::into),
         }
     }
 
@@ -231,6 +293,7 @@ impl RecognitionClient {
             Self::Audio3(client) => client.finish(timeout).await,
             Self::OpenAI(client) => client.finish(timeout).await,
             Self::Xai(client) => client.finish(timeout).await,
+            Self::Gemini(client) => client.finish(timeout).await,
         }
     }
 
@@ -240,6 +303,7 @@ impl RecognitionClient {
             Self::Audio3(client) => client.disconnect().await,
             Self::OpenAI(client) => client.disconnect().await,
             Self::Xai(client) => client.disconnect().await,
+            Self::Gemini(client) => client.disconnect().await,
         }
     }
 
@@ -249,6 +313,7 @@ impl RecognitionClient {
             Self::Audio3(client) => client.clear_content().await,
             Self::OpenAI(client) => client.clear_content().await,
             Self::Xai(client) => client.clear_content().await,
+            Self::Gemini(client) => client.clear_content().await,
         }
     }
 
@@ -258,6 +323,7 @@ impl RecognitionClient {
             Self::Audio3(client) => client.content_revision(),
             Self::OpenAI(client) => client.content_revision(),
             Self::Xai(client) => client.content_revision(),
+            Self::Gemini(client) => client.content_revision(),
         }
     }
 }

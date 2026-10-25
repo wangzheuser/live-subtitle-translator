@@ -114,7 +114,7 @@ class UiSmokeInstrumentation : Instrumentation() {
             OverlayListeningChecks(this).run(captureArguments)
             return
         }
-        if (captureArguments?.getString("service_profiles") == "true") {
+        if (captureArguments?.getString("service_profiles") == "true" || captureArguments?.getString("realtime_modes") == "true") {
             ServiceProfileChecks(this).run(captureArguments)
             return
         }

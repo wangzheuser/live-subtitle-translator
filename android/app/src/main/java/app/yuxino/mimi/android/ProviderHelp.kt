@@ -44,8 +44,8 @@ internal fun providerTitle(context: android.content.Context, provider: ServicePr
     if (provider == configuration.provider && configuration.usesIndependentTextTranslation) {
         when (val translation = runCatching { SettingsStore.textTranslationProvider(context) }.getOrDefault(TextTranslationProvider.BUILTIN)) {
             TextTranslationProvider.BUILTIN -> if (provider == ServiceProvider.XAI) return context.getString(R.string.translation_xai_original)
-            TextTranslationProvider.NONE -> return context.getString(if (provider == ServiceProvider.XAI) R.string.translation_xai_original else R.string.translation_service_original)
-            else -> return context.getString(R.string.translation_service_name, context.getString(
+            TextTranslationProvider.NONE -> return context.getString(R.string.translation_service_original, speechProviderName(context, provider))
+            else -> return context.getString(R.string.translation_service_name, speechProviderName(context, provider), context.getString(
                 if (translation == TextTranslationProvider.OPENAI_COMPATIBLE) R.string.translation_service_custom else translationProviderLabel(translation)))
         }
     }

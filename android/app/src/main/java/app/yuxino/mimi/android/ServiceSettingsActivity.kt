@@ -28,7 +28,7 @@ class ServiceSettingsActivity : AppCompatActivity() {
     private var workspaceInput: Pair<TextInputLayout, TextInputEditText>? = null
     private var moreButton: ImageButton? = null
     private var translationSettings: TextTranslationSettings? = null
-    private var xaiSettings: XaiSpeechSettings? = null
+    private var speechSettings: SpeechModeSettings? = null
     private lateinit var draftHolder: ServiceEditorDraftViewModel
     private lateinit var status: android.widget.TextView
     private var sessionBlocked = false
@@ -141,16 +141,16 @@ class ServiceSettingsActivity : AppCompatActivity() {
             editorDraft?.speechValues?.get(field.id)?.let { pair.second.setText(it) }
             inputs[field.id]=pair
         }
-        if (provider == ServiceProvider.XAI) {
-            xaiSettings = XaiSpeechSettings(this, saved, editorDraft, ::xaiProbeConfiguration, ::updateSpeechMode)
-            content.addView(xaiSettings!!.view, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
+        if (provider == ServiceProvider.XAI || provider.supportsSpeechTranslationMode) {
+            speechSettings = SpeechModeSettings(this, saved, editorDraft, ::speechProbeConfiguration, ::updateSpeechMode)
+            content.addView(speechSettings!!.view, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
             inputs.values.forEach { (_, edit) -> edit.addTextChangedListener(object : android.text.TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { xaiSettings?.invalidate() }
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { speechSettings?.invalidate() }
                 override fun afterTextChanged(s: android.text.Editable?) = Unit
             }) }
         }
-        if (provider in listOf(ServiceProvider.DASHSCOPE, ServiceProvider.XAI) && !storageUnavailable) {
+        if ((provider in listOf(ServiceProvider.DASHSCOPE, ServiceProvider.XAI) || provider.supportsSpeechTranslationMode) && !storageUnavailable) {
             translationSettings = runCatching { TextTranslationSettings(this, profileId, editorDraft?.translation, provider) }.getOrElse {
                 storageUnavailable = true; status.setText(R.string.guide_storage_unavailable); status.visibility = View.VISIBLE; null
             }
@@ -191,7 +191,7 @@ class ServiceSettingsActivity : AppCompatActivity() {
     }
     override fun onDestroy() {
         if (isFinishing && ::draftHolder.isInitialized) draftHolder.clearDraft()
-        translationSettings?.dispose(); xaiSettings?.dispose(); super.onDestroy()
+        translationSettings?.dispose(); speechSettings?.dispose(); super.onDestroy()
     }
     override fun onStart() { super.onStart(); MimiService.addStateListener(sessionListener); refreshSessionUi() }
     override fun onStop() {
@@ -204,11 +204,12 @@ class ServiceSettingsActivity : AppCompatActivity() {
                 // An unavailable credential store must not erase the previous
                 // route drafts; all storage/session guards still disable saves.
                 translationSettings?.editorDraft() ?: draftHolder.restore(profileId, provider)?.translation,
-                xaiSettings?.selectedPosition,
+                speechSettings?.selectedPosition?.takeIf { provider == ServiceProvider.XAI },
+                speechSettings?.selectedPosition?.takeIf { provider.supportsSpeechTranslationMode },
             ))
         }
         translationSettings?.dispose()
-        xaiSettings?.dispose()
+        speechSettings?.dispose()
         provider.fields.filter { it.secret }.forEach { field ->
             inputs[field.id]?.second?.transformationMethod = android.text.method.PasswordTransformationMethod.getInstance()
         }
@@ -222,7 +223,7 @@ class ServiceSettingsActivity : AppCompatActivity() {
         workspaceInput?.second?.isEnabled = !running && !storageUnavailable
         inputs.values.forEach { (_, edit) -> edit.isEnabled = !running && !storageUnavailable }
         translationSettings?.setEditingEnabled(!running && !storageUnavailable)
-        xaiSettings?.setEditingEnabled(!running && !storageUnavailable)
+        speechSettings?.setEditingEnabled(!running && !storageUnavailable)
         findViewById<View>(R.id.save).isEnabled = !running && !storageUnavailable
         if (running) { status.setText(R.string.service_stop_first); status.visibility = View.VISIBLE }
         else if (sessionBlocked && !storageUnavailable && status.text == getString(R.string.service_stop_first)) status.visibility = View.GONE
@@ -235,36 +236,46 @@ class ServiceSettingsActivity : AppCompatActivity() {
     private fun updateSpeechMode() {
         val live = alibabaMode?.selectedItemPosition == 1
         workspaceInput?.let { ServiceSettingsUi.fieldVisible(it.first, live) }
-        val integrated = live || provider == ServiceProvider.XAI && xaiSettings?.speechMode == "voice"
+        val integrated = live || provider == ServiceProvider.XAI && speechSettings?.speechMode == "voice" ||
+            provider.supportsSpeechTranslationMode && speechSettings?.speechMode != "asrMt"
+        if (provider == ServiceProvider.AZURE) inputs["deployment"]?.let {
+            ServiceSettingsUi.fieldVisible(it.first, integrated)
+            if (!integrated) it.first.error = null
+        }
         translationSettings?.view?.visibility = if (integrated) View.GONE else View.VISIBLE
         if (integrated) translationSettings?.dispose()
     }
-    private fun xaiProbeConfiguration(): org.json.JSONObject? {
-        if (storageUnavailable || MimiService.isRunning || MimiService.isStopping || xaiSettings == null) return null
+    private fun speechProbeConfiguration(): org.json.JSONObject? {
+        if (storageUnavailable || MimiService.isRunning || MimiService.isStopping || speechSettings == null) return null
         var valid = true
         val values = provider.fields.associate { field ->
             val (layout, edit) = inputs.getValue(field.id)
-            val value = edit.text.toString().trim().ifBlank { saved.value(field.id) }
-            layout.error = if (value.isBlank()) getString(R.string.service_required) else null
-            if (value.isBlank()) valid = false
+            val value = edit.text.toString().trim().ifBlank { if (field.secret) saved.value(field.id) else "" }
+            val required = !(provider == ServiceProvider.AZURE && field.id == "deployment" && speechSettings?.speechMode == "asrMt")
+            layout.error = if (required && value.isBlank()) getString(R.string.service_required) else null
+            if (required && value.isBlank()) valid = false
             field.id to value
         }
         if (!valid) return null
         val config = ServiceConfiguration(provider, values, saved.endpoint, saved.model,
-            xaiSpeechMode = xaiSettings!!.speechMode, xaiTextModel = saved.xaiTextModel)
+            xaiSpeechMode = if (provider == ServiceProvider.XAI) speechSettings!!.speechMode else saved.xaiSpeechMode,
+            xaiTextModel = saved.xaiTextModel,
+            speechTranslationMode = if (provider.supportsSpeechTranslationMode) speechSettings!!.speechMode else saved.speechTranslationMode)
         return runCatching {
             val (source, _) = provider.normalize(SettingsStore.sourceLang(this), "original", TextTranslationProvider.NONE,
-                xaiSpeechMode = config.xaiSpeechMode)
-            buildXaiProbeConfiguration(config, source)
+                xaiSpeechMode = config.xaiSpeechMode, speechTranslationMode = config.speechTranslationMode)
+            buildSpeechProbeConfiguration(config, source)
         }.getOrElse { status.setText(R.string.service_invalid); status.visibility = View.VISIBLE; null }
     }
     private fun save() {
         status.visibility=View.VISIBLE
         if(storageUnavailable) return
         val live = alibabaMode?.selectedItemPosition == 1
-        val voice = provider == ServiceProvider.XAI && xaiSettings?.speechMode == "voice"
-        val textTranslation = if (voice) null else translationSettings?.draft(validate = !live)
-        if(!voice && translationSettings != null && textTranslation == null) { status.visibility=View.GONE; return }
+        val integrated = live || provider == ServiceProvider.XAI && speechSettings?.speechMode == "voice" ||
+            provider.supportsSpeechTranslationMode && speechSettings?.speechMode != "asrMt"
+        val retainDraft = provider != ServiceProvider.XAI || !integrated
+        val textTranslation = if (retainDraft) translationSettings?.draft(validate = !integrated) else null
+        if(retainDraft && translationSettings != null && textTranslation == null) { status.visibility=View.GONE; return }
         if((MimiService.isRunning || MimiService.isStopping)) { status.setText(R.string.service_stop_first); Toast.makeText(this,R.string.service_stop_first,Toast.LENGTH_SHORT).show(); return }
         var valid=true
         val profileName = nameInput.text.toString().trim()
@@ -275,8 +286,9 @@ class ServiceSettingsActivity : AppCompatActivity() {
         val values=provider.fields.associate { field ->
             val (layout,edit)=inputs.getValue(field.id)
             val value=edit.text.toString().trim().ifBlank { if(field.secret) saved.value(field.id) else "" }
-            layout.error=if(value.isBlank()) getString(R.string.service_required) else null
-            if(value.isBlank()) valid=false
+            val required = !(provider == ServiceProvider.AZURE && field.id == "deployment" && speechSettings?.speechMode == "asrMt")
+            layout.error=if(required && value.isBlank()) getString(R.string.service_required) else null
+            if(required && value.isBlank()) valid=false
             field.id to value
         }
         if(!valid) { status.visibility = View.GONE; return }
@@ -284,10 +296,11 @@ class ServiceSettingsActivity : AppCompatActivity() {
         // for compatibility without offering editable fields that the runtime ignores.
         val config=ServiceConfiguration(provider, values, saved.endpoint, saved.model,
             alibabaRealtimeMode = if (live) "liveTranslate" else "asrMt", alibabaWorkspaceId = workspace,
-            xaiSpeechMode = xaiSettings?.speechMode ?: saved.xaiSpeechMode,
-            xaiTextModel = saved.xaiTextModel)
+            xaiSpeechMode = if (provider == ServiceProvider.XAI) speechSettings?.speechMode ?: saved.xaiSpeechMode else saved.xaiSpeechMode,
+            xaiTextModel = saved.xaiTextModel,
+            speechTranslationMode = if (provider.supportsSpeechTranslationMode) speechSettings?.speechMode ?: saved.speechTranslationMode else saved.speechTranslationMode)
         val (source, target) = runCatching {
-            provider.normalize(SettingsStore.sourceLang(this), SettingsStore.targetLang(this), textTranslation?.provider ?: TextTranslationProvider.BUILTIN, config.alibabaRealtimeMode, config.xaiSpeechMode)
+            provider.normalize(SettingsStore.sourceLang(this), SettingsStore.targetLang(this), textTranslation?.provider ?: TextTranslationProvider.BUILTIN, config.alibabaRealtimeMode, config.xaiSpeechMode, config.speechTranslationMode)
         }.getOrElse { status.text = getString(R.string.guide_storage_unavailable); return }
         // Construct the same factory as PC locally, without connecting or logging secrets.
         try {
@@ -296,7 +309,7 @@ class ServiceSettingsActivity : AppCompatActivity() {
                 source, target, translationSettings?.qwenMtModel ?: "lite"))
         } catch (_:Exception) { status.text=getString(R.string.service_invalid); return }
         val savedId = runCatching { SettingsStore.saveProfile(this, profileId, profileName, config, textTranslation,
-            if (voice) null else translationSettings?.enabled, translationSettings?.qwenMtModel, activate = false) }.getOrNull()
+            if (retainDraft) translationSettings?.enabled else null, translationSettings?.qwenMtModel, activate = false) }.getOrNull()
         if (savedId == null) {
             status.text=getString(R.string.guide_storage_unavailable); return
         }

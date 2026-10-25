@@ -28,6 +28,8 @@ const ALIBABA_TRANSLATION_SOURCES: readonly SourceLanguage[] = [
 ];
 export const OPENAI_TRANSLATION_TARGETS = languageCatalogs.openAIRealtime.targetLanguages as readonly TargetLanguage[];
 export const GEMINI_TRANSLATION_TARGETS = languageCatalogs.googleGeminiLive.targetLanguages as readonly TargetLanguage[];
+export const OPENAI_ASR_RECOGNITION_SOURCES = languageCatalogs.openAIASR.sourceLanguages as readonly SourceLanguage[];
+export const GEMINI_ASR_RECOGNITION_SOURCES = languageCatalogs.googleGeminiASR.sourceLanguages as readonly SourceLanguage[];
 export const XAI_STT_RECOGNITION_SOURCES = languageCatalogs.xAIStt.sourceLanguages as readonly SourceLanguage[];
 export const XAI_RECOGNITION_SOURCES = languageCatalogs.xAIRealtime.sourceLanguages as readonly SourceLanguage[];
 const ALIBABA_TARGETS: readonly TargetLanguage[] = ["original", ...QWEN_MT_LITE_TRANSLATION_LANGUAGE_CODES];
@@ -133,9 +135,17 @@ export function usesXaiAsr(profile: ServiceProfile): boolean {
   return profile.provider === "xAIRealtime" && profile.xaiSpeechMode === "asrMt";
 }
 
+export function supportsSpeechTranslationMode(provider: ServiceProvider): boolean {
+  return provider === "openAIRealtime" || provider === "googleGeminiLive" || provider === "azureOpenAIRealtime";
+}
+
+export function usesBuiltinAsr(profile: ServiceProfile): boolean {
+  return supportsSpeechTranslationMode(profile.provider) && profile.speechTranslationMode === "asrMt";
+}
+
 export function textTranslationForProfile(profile: ServiceProfile): TextTranslation {
-  if (usesAlibabaRealtime(profile) || (profile.provider === "xAIRealtime" && !usesXaiAsr(profile))) return "followService";
-  return profile.textTranslation ?? (usesXaiAsr(profile) ? "xAI" : profile.provider === "deepLX" ? "deepLX" : "followService");
+  if (usesAlibabaRealtime(profile) || (profile.provider === "xAIRealtime" && !usesXaiAsr(profile)) || (supportsSpeechTranslationMode(profile.provider) && !usesBuiltinAsr(profile))) return "followService";
+  return profile.textTranslation ?? (usesXaiAsr(profile) ? "xAI" : usesBuiltinAsr(profile) ? "openAICompatible" : profile.provider === "deepLX" ? "deepLX" : "followService");
 }
 
 export function isChatCompletionsTranslation(translation: TextTranslation): translation is "openAICompatible" | "chatMock" {
@@ -147,11 +157,18 @@ export function isLanguageModelTranslation(translation: TextTranslation): transl
 }
 
 export function isIndependentAsrProfile(profile: ServiceProfile): boolean {
-  return isStandaloneAsrProvider(profile.provider) || usesXaiAsr(profile);
+  return isStandaloneAsrProvider(profile.provider) || usesXaiAsr(profile) || usesBuiltinAsr(profile);
 }
 
 export function isCustomSpeechProvider(provider: ServiceProvider): boolean {
   return provider === "customDashScopeASR" || provider === "customOpenAIASR";
+}
+
+function independentRecognitionCapabilities(profile: ServiceProfile): ProviderCapabilities {
+  const sourceLanguages = usesXaiAsr(profile) ? XAI_STT_RECOGNITION_SOURCES
+    : usesBuiltinAsr(profile) ? profile.provider === "googleGeminiLive" ? GEMINI_ASR_RECOGNITION_SOURCES : OPENAI_ASR_RECOGNITION_SOURCES
+      : capabilitiesForProvider(profile.provider).sourceLanguages;
+  return { sourceLanguages, targetLanguages: ["original"], translationModes: ["turbo"] };
 }
 
 /** User declarations only narrow encodable options; they never certify model support. */
@@ -185,15 +202,13 @@ export function capabilitiesForProfile(
     // Only the native runtime can certify Apple's catalog. An unavailable or
     // not-yet-loaded catalog must not borrow a cloud provider's language list.
     return {
-      sourceLanguages: targetLanguage === "original" ? declaredCustomSources(profile, profile.provider === "appleSpeech" ? [] : usesXaiAsr(profile) ? XAI_STT_RECOGNITION_SOURCES : isCustomSpeechProvider(profile.provider) ? CUSTOM_CONFIGURABLE_SOURCES : ALIBABA_RECOGNITION_SOURCES) : [],
+      sourceLanguages: targetLanguage === "original" ? declaredCustomSources(profile, isIndependentAsrProfile(profile) ? independentRecognitionCapabilities(profile).sourceLanguages : ALIBABA_RECOGNITION_SOURCES) : [],
       targetLanguages: ["original"],
       translationModes: ["turbo"],
     };
   }
   if (isIndependentAsrProfile(profile)) {
-    const capabilities: ProviderCapabilities = usesXaiAsr(profile)
-      ? { sourceLanguages: XAI_STT_RECOGNITION_SOURCES, targetLanguages: ["original"], translationModes: ["turbo"] }
-      : capabilitiesForProvider(profile.provider);
+    const capabilities = independentRecognitionCapabilities(profile);
     const route = textTranslationForProfile(profile);
     const generic = isLanguageModelTranslation(route);
     return { ...capabilities,
@@ -242,6 +257,7 @@ function capabilitiesForSettings(
     native.textTranslation === textTranslationForProfile(profile) &&
     native.targetLanguage === target &&
     (profile.provider !== "xAIRealtime" || (native.xaiSpeechMode ?? "voice") === (profile.xaiSpeechMode ?? "voice")) &&
+    (!supportsSpeechTranslationMode(profile.provider) || (native.speechTranslationMode ?? "simultaneous") === (profile.speechTranslationMode ?? "simultaneous")) &&
     (profile.provider !== "alibabaCloud" || textTranslationForProfile(profile) !== "followService" || (native.qwenMtModel ?? "lite") === (profile.qwenMtModel ?? "lite")) &&
     Array.isArray(native.sourceLanguages) && (profile.provider === "appleSpeech" || appleTranslation || native.sourceLanguages.length > 0) &&
     Array.isArray(native.targetLanguages) && native.targetLanguages.length > 0 &&

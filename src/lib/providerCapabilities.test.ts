@@ -555,3 +555,27 @@ it("combines xAI recognition with each independent route and makes followService
   expect(credentialStateForTarget(profile, "zh")).toBe("missing");
   expect(textTranslationForProfile({ ...profile, xaiSpeechMode: "voice", textTranslation: "deepL" })).toBe("followService");
 });
+
+it.each(["openAIRealtime", "googleGeminiLive", "azureOpenAIRealtime"] as const)("keeps %s integrated by default and derives independent ASR capabilities from its selected translator", provider => {
+  const profile = { id: provider, name: provider, provider, credentialState: "missing", speechCredentialState: "present", textCredentialState: "missing", textTranslation: "deepL" } as const;
+  expect(textTranslationForProfile(profile)).toBe("followService");
+  expect(capabilitiesForProfile(profile)).toEqual(capabilitiesForProvider(provider));
+  const asr = { ...profile, speechTranslationMode: "asrMt" } as const;
+  const sources = (provider === "googleGeminiLive" ? languageCatalogs.googleGeminiASR : languageCatalogs.openAIASR).sourceLanguages;
+  expect(capabilitiesForProfile(asr).sourceLanguages).toEqual(sources.filter(code => code === "auto" || (languageCatalogs.deepL.sourceLanguages as readonly string[]).includes(code)));
+  expect(capabilitiesForProfile(asr).targetLanguages).toEqual(["original", ...languageCatalogs.deepL.targetLanguages]);
+  expect(capabilitiesForProfile(asr, "original").sourceLanguages).toEqual(sources);
+  expect(credentialStateForTarget(asr, "original")).toBe("present");
+  expect(credentialStateForTarget(asr, "zh")).toBe("missing");
+  expect(textTranslationForProfile({ ...asr, textTranslation: undefined })).toBe("openAICompatible");
+  expect(capabilitiesForProfile({ ...asr, textTranslation: undefined }).targetLanguages).toEqual(["original", ...TARGET_LANGUAGE_CODES]);
+  expect(capabilitiesForProfile({ ...asr, textTranslation: "followService" }).targetLanguages).toEqual(["original"]);
+});
+
+it("rejects stale native catalogs from a previous speech translation mode", () => {
+  const profile = { id: "openai", name: "OpenAI", provider: "openAIRealtime", speechTranslationMode: "asrMt", textTranslation: "followService", credentialState: "present" } as const;
+  const snapshot = { ...BASE_SETTINGS, profiles: [profile], activeProfileId: profile.id, targetLanguage: "original" as const,
+    languageCapabilities: { profileId: profile.id, provider: profile.provider, textTranslation: "followService" as const, targetLanguage: "original" as const, sourceLanguages: ["auto"] as const, targetLanguages: ["zh"] as const } };
+  expect(sourceLanguagesForSettings(snapshot)).toEqual(languageCatalogs.openAIASR.sourceLanguages);
+  expect(targetLanguagesForSettings(snapshot)).toEqual(["original"]);
+});

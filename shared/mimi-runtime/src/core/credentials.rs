@@ -1,6 +1,6 @@
 //! Provider credentials and credential-free local recognition configuration.
 
-use crate::core::provider::{ProviderKind, ServiceProfile, TextTranslation};
+use crate::core::provider::{ProviderKind, ServiceProfile, SpeechTranslationMode, TextTranslation};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use thiserror::Error;
@@ -373,6 +373,23 @@ impl ProviderCredentials {
         provider: ProviderKind,
         saved: Option<&Self>,
     ) -> Result<Self, ProviderCredentialsError> {
+        self.resolve_draft_with_mode(provider, SpeechTranslationMode::Simultaneous, saved)
+    }
+
+    pub fn resolve_draft_for_profile(
+        &self,
+        profile: &ServiceProfile,
+        saved: Option<&Self>,
+    ) -> Result<Self, ProviderCredentialsError> {
+        self.resolve_draft_with_mode(profile.provider, profile.speech_translation_mode, saved)
+    }
+
+    fn resolve_draft_with_mode(
+        &self,
+        provider: ProviderKind,
+        mode: SpeechTranslationMode,
+        saved: Option<&Self>,
+    ) -> Result<Self, ProviderCredentialsError> {
         let retain = |draft: &str, previous: &str| {
             if draft.trim().is_empty() {
                 previous.to_string()
@@ -491,7 +508,7 @@ impl ProviderCredentials {
             }
             _ => self.clone(),
         };
-        merged.validated_for(provider)
+        merged.validated_for_speech_mode(provider, mode)
     }
 
     /// Returns only the requested known-provider field. An independent text
@@ -621,6 +638,48 @@ impl ProviderCredentials {
             Self::AzureOpenAI { .. } => "azure_openai",
             Self::TencentCloud { .. } => "tencent_cloud",
             Self::BaiduTranslate { .. } => "baidu_translate",
+        }
+    }
+
+    pub fn validated_for_speech_mode(
+        &self,
+        provider: ProviderKind,
+        mode: SpeechTranslationMode,
+    ) -> Result<Self, ProviderCredentialsError> {
+        if provider == ProviderKind::AzureOpenAIRealtime && mode == SpeechTranslationMode::AsrMt {
+            if let Self::AzureOpenAI {
+                endpoint,
+                deployment,
+                transcription_deployment,
+                api_key,
+            } = self
+            {
+                return Ok(Self::AzureOpenAI {
+                    endpoint: validated_azure_endpoint(endpoint)?,
+                    deployment: if deployment.trim().is_empty() {
+                        String::new()
+                    } else {
+                        validated_deployment(deployment)?
+                    },
+                    transcription_deployment: validated_deployment(transcription_deployment)?,
+                    api_key: required_field(api_key, provider)?,
+                });
+            }
+        }
+        self.validated_for(provider)
+    }
+
+    pub fn encode_for_profile(
+        &self,
+        profile: &ServiceProfile,
+    ) -> Result<String, ProviderCredentialsError> {
+        let credentials =
+            self.validated_for_speech_mode(profile.provider, profile.speech_translation_mode)?;
+        match credentials {
+            Self::AppleSpeech => Err(ProviderCredentialsError::ProviderMismatch),
+            Self::ApiKey { api_key } => Ok(api_key),
+            other => serde_json::to_string(&other)
+                .map_err(|_| ProviderCredentialsError::InvalidStoredValue),
         }
     }
 
@@ -788,6 +847,11 @@ impl ProviderCredentials {
         profile: &ServiceProfile,
         value: &str,
     ) -> Result<Self, ProviderCredentialsError> {
+        if profile.provider == ProviderKind::AzureOpenAIRealtime && profile.uses_realtime_asr() {
+            return serde_json::from_str::<Self>(value)
+                .map_err(|_| ProviderCredentialsError::InvalidStoredValue)?
+                .validated_for_speech_mode(profile.provider, profile.speech_translation_mode);
+        }
         if !matches!(
             profile.provider,
             ProviderKind::AlibabaCloud | ProviderKind::DeepLX
@@ -947,6 +1011,44 @@ fn validated_azure_endpoint(value: &str) -> Result<String, ProviderCredentialsEr
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn azure_asr_storage_and_drafts_do_not_require_an_unused_translation_deployment() {
+        use super::*;
+        let mut profile =
+            ServiceProfile::new("azure", "Azure", ProviderKind::AzureOpenAIRealtime).unwrap();
+        profile
+            .set_speech_translation_mode(SpeechTranslationMode::AsrMt)
+            .unwrap();
+        let credentials = ProviderCredentials::AzureOpenAI {
+            endpoint: "https://synthetic.openai.azure.com".into(),
+            deployment: String::new(),
+            transcription_deployment: "speech-alias".into(),
+            api_key: "synthetic-key".into(),
+        };
+        let encoded = credentials.encode_for_profile(&profile).unwrap();
+        assert_eq!(
+            ProviderCredentials::decode_for_profile(&profile, &encoded).unwrap(),
+            credentials
+        );
+        let blank = ProviderCredentials::AzureOpenAI {
+            endpoint: String::new(),
+            deployment: String::new(),
+            transcription_deployment: String::new(),
+            api_key: String::new(),
+        };
+        assert_eq!(
+            blank
+                .resolve_draft_for_profile(&profile, Some(&credentials))
+                .unwrap(),
+            credentials
+        );
+        profile
+            .set_speech_translation_mode(SpeechTranslationMode::Simultaneous)
+            .unwrap();
+        assert!(credentials.encode_for_profile(&profile).is_err());
+        assert!(ProviderCredentials::decode_for_profile(&profile, &encoded).is_err());
+    }
+
     #[test]
     fn apple_credentials_cannot_be_saved_decoded_or_revealed_as_a_secret() {
         let profile = ServiceProfile::new("apple", "Apple", ProviderKind::AppleSpeech).unwrap();

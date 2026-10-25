@@ -516,3 +516,49 @@ it("creates independent xAI text previews while preserving old Voice and separat
     expect(useStore.getState().settings).toEqual(before);
   } finally { useStore.setState(original, true); }
 });
+
+it.each(["openAIRealtime", "googleGeminiLive", "azureOpenAIRealtime"] as const)("creates %s in simultaneous mode and retains independent text configuration when switching", async provider => {
+  const original = useStore.getState();
+  const current = { id: provider, name: provider, provider, credentialState: "present", textCredentialState: "present", textTranslation: "deepL" } as const;
+  try {
+    useStore.setState({ session: { ...original.session, isActive: false, isPaused: false, status: { kind: "idle" } }, settings: { ...original.settings, profiles: [current], activeProfileId: current.id, sourceLanguage: "auto", targetLanguage: "zh", languageCapabilities: undefined } });
+    const created = await useStore.getState().createProfile(provider, "New simultaneous");
+    expect(created.profiles.at(-1)).toMatchObject({ speechTranslationMode: "simultaneous", credentialState: "missing" });
+    expect(created.profiles[0]).toEqual(current);
+    await useStore.getState().updateProfile(current.id, undefined, { speechTranslationMode: "asrMt" });
+    const asr = useStore.getState().settings.profiles[0];
+    expect(asr).toMatchObject({ speechTranslationMode: "asrMt", textTranslation: "deepL", speechCredentialState: "present", textCredentialState: "present" });
+    await useStore.getState().updateProfile(current.id, undefined, { speechTranslationMode: "simultaneous" });
+    expect(useStore.getState().settings.profiles[0]).toMatchObject({ speechTranslationMode: "simultaneous", textTranslation: "deepL", textCredentialState: "present" });
+    const before = useStore.getState().settings;
+    await expect(useStore.getState().saveProfileCredentials(current.id, { kind: "alibabaTranslation", apiKey: "", textTranslation: "deepL", endpoint: "", token: "synthetic", model: "" })).rejects.toThrow("provider-mismatch");
+    expect(useStore.getState().settings).toBe(before);
+  } finally { useStore.setState(original, true); }
+});
+
+it("keeps a saved speech key usable for Original when a new independent translator is unconfigured", async () => {
+  const original = useStore.getState();
+  const profile = { id: "openai", name: "OpenAI", provider: "openAIRealtime", credentialState: "present" } as const;
+  try {
+    useStore.setState({ session: { ...original.session, isActive: false, isPaused: false, status: { kind: "idle" } }, settings: { ...original.settings, profiles: [profile], activeProfileId: profile.id, sourceLanguage: "auto", targetLanguage: "zh", languageCapabilities: undefined } });
+    await useStore.getState().updateProfile(profile.id, undefined, { speechTranslationMode: "asrMt" });
+    expect(useStore.getState().settings.profiles[0]).toMatchObject({ speechCredentialState: "present", textCredentialState: "missing", credentialState: "missing" });
+    await useStore.getState().updateProfile(profile.id, undefined, { speechTranslationMode: "simultaneous" });
+    expect(useStore.getState().settings.profiles[0].credentialState).toBe("present");
+  } finally { useStore.setState(original, true); }
+});
+
+it("updates speech readiness after saving or deleting credentials in simultaneous mode", async () => {
+  const original = useStore.getState();
+  const profile = { id: "gemini", name: "Gemini", provider: "googleGeminiLive", speechTranslationMode: "simultaneous", credentialState: "missing", speechCredentialState: "missing", textCredentialState: "present", textTranslation: "deepL" } as const;
+  try {
+    useStore.setState({ session: { ...original.session, isActive: false, isPaused: false, status: { kind: "idle" } }, settings: { ...original.settings, profiles: [profile], activeProfileId: profile.id, sourceLanguage: "auto", targetLanguage: "zh", languageCapabilities: undefined } });
+    await useStore.getState().saveProfileCredentials(profile.id, { kind: "apiKey", apiKey: "synthetic-speech-key" });
+    await useStore.getState().updateProfile(profile.id, undefined, { speechTranslationMode: "asrMt" });
+    expect(useStore.getState().settings.profiles[0]).toMatchObject({ speechCredentialState: "present", credentialState: "present" });
+    await useStore.getState().updateProfile(profile.id, undefined, { speechTranslationMode: "simultaneous" });
+    await useStore.getState().deleteProfileAPIKey(profile.id);
+    await useStore.getState().updateProfile(profile.id, undefined, { speechTranslationMode: "asrMt" });
+    expect(useStore.getState().settings.profiles[0]).toMatchObject({ speechCredentialState: "missing", textCredentialState: "missing", credentialState: "missing" });
+  } finally { useStore.setState(original, true); }
+});

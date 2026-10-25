@@ -23,3 +23,6 @@ pub mod endpoint;
 mod translation_contract_tests;
 
 pub mod xai_stt;
+
+pub mod gemini_transcribe;
+pub mod realtime_asr;

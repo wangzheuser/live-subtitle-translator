@@ -4908,3 +4908,47 @@
   picker interaction, full in-place updates and physical Windows/Linux/Android
   acceptance remain pending. Release-package and public-download evidence will
   be recorded separately after staging and verification.
+
+### 2026-10-25 — v1.6.10 release acceptance
+
+- [PR #318](https://github.com/yuxino/Mimi/pull/318) merged as
+  `2104a1bdb6864fa8c3637623af811b9264db92a6`; its tree matches tested `1b41c137`.
+  The final [desktop CI](https://github.com/yuxino/Mimi/actions/runs/40167831338)
+  and [Android CI](https://github.com/yuxino/Mimi/actions/runs/40167831363)
+  passed before merging. The task branch was retired after checking latest main,
+  open PRs and active worktrees. The already merged PR #317 is included.
+- Stable-signed Apple silicon and Intel packages embed that exact source and
+  version 1.6.10. Both archives passed safe extraction, pinned identity and
+  matching-DMG checks. [Tag CI](https://github.com/yuxino/Mimi/actions/runs/40169056647)
+  and [Android checks](https://github.com/yuxino/Mimi/actions/runs/40169056666)
+  passed. Windows verifies MSI/NSIS packages and signatures, plus x64 release,
+  extracted portable and ARM64 native UI smoke; it did not execute the installer
+  wizard. Linux packages passed installation and native smoke. Android CI verified
+  builds and signatures and produced acceptance APKs; it did not launch emulator
+  UI. Android native evidence remains the preceding local API 35 runs.
+- Completed private downloads passed exactly 17 asset names, sizes and API
+  digests, 16 checksum entries, five cryptographic updater signatures and an actual
+  tampered-archive rejection. All four macOS downloads match the locally prepared
+  files. The APK has version 1.6.10 / 10610, the pinned release signer, four JNI
+  ABIs and 16 KB ELF/ZIP alignment. Shared-runtime isolation and native notices
+  passed. Tag, assets and bilingual source/release/updater notes remained stable
+  throughout acceptance.
+- [v1.6.10](https://github.com/yuxino/Mimi/releases/tag/v1.6.10) became public
+  Latest at `2026-10-25T06:53:48Z` after the maintainer's conditional publication
+  authorization and all checks above passed. Anonymous downloads of all 17
+  assets matched the accepted sizes/digests. The tag-specific, canonical Latest
+  and exact configured lowercase-repository updater endpoints returned identical
+  1.6.10 bytes. Ego Lite verified Latest, exact source, both languages, all 17
+  uploaded links and the native Contributors avatar; its task space was closed.
+- [Issue #316](https://github.com/yuxino/Mimi/issues/316) is closed as completed.
+  The installed production app, settings, credentials and signing identities
+  were preserved. Physical-device acoustics, live-provider accuracy/latency,
+  actual SAF picker interaction and full in-place updates remain unverified.
+  Verification reports and synthetic/native screenshots are retained outside Git.
+- Rechecked obsolete project build variants, old installers and a one-off Gradle
+  test graph against current dependency fingerprints, file identities and open
+  handles before cleanup. Two passes released 1,825,247,232 allocated bytes
+  (1.70 GiB); the separate 170,551,533-byte duplicate download set was removed
+  after public acceptance. Current signed packages, useful build dependencies,
+  other worktrees, global runtimes and user data remain. The task-owned headless
+  emulator shut down normally with its AVD data preserved.

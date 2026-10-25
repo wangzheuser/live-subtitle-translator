@@ -34,39 +34,74 @@ class NativeTranslationThinkingTest {
                     endpoint = case.getString("endpoint"), model = case.getString("model"),
                     apiKey = "synthetic-text-key", allowLocalHttp = true,
                 ), "en", "zh", "lite")
-                val handle = NativeRuntimeConfiguration.exchange(JSONObject().put("operation", "create_text_probe")
-                    .put("configuration", configuration).put("network", fixture.network)).getLong("handle")
-                try {
-                    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
-                    var result: JSONObject? = null
-                    while (System.nanoTime() < deadline) {
-                        fixture.checkFailure()
-                        val state = NativeRuntimeConfiguration.command("text_probe_poll", handle)
-                        if (state.optBoolean("finished")) { result = state.getJSONObject("result"); break }
-                        Thread.sleep(10)
-                    }
-                    assertNotNull("$id probe did not finish", result)
-                    assertEquals(id, "available", result!!.getString("service"))
-                    val request = requireNotNull(fixture.request.getAndSet(null)) { "$id request not captured" }
-                    assertEquals(id, case.getString("model"), request.getString("model"))
-                    assertFalse(id, request.getBoolean("stream"))
-                    assertEquals(id, 2, request.getJSONArray("messages").length())
-                    request.remove("model"); request.remove("stream"); request.remove("messages")
-                    val expected = case.getJSONObject("expected")
-                    assertEquals(id, expected.keySet(), request.keySet())
-                    for (key in expected.keySet()) assertEquals(id, expected.get(key).toString(), request.get(key).toString())
-                    assertFalse(id, result.toString().contains("synthetic-text-key"))
-                    fixture.checkFailure()
-                } finally { NativeRuntimeConfiguration.command("text_probe_cancel", handle) }
+                val result = probe(configuration, fixture, id)
+                assertEquals(id, "available", result.getString("service"))
+                val request = requireNotNull(fixture.request.getAndSet(null)) { "$id request not captured" }
+                assertEquals(id, case.getString("model"), request.getString("model"))
+                assertFalse(id, request.getBoolean("stream"))
+                assertEquals(id, 2, request.getJSONArray("messages").length())
+                request.remove("model"); request.remove("stream"); request.remove("messages")
+                val expected = case.getJSONObject("expected")
+                assertEquals(id, expected.keySet(), request.keySet())
+                for (key in expected.keySet()) assertEquals(id, expected.get(key).toString(), request.get(key).toString())
+                assertFalse(id, result.toString().contains("synthetic-text-key"))
+                fixture.checkFailure()
             }
         }
     }
+
+    @Test fun sharedTextRejectionsReachActualJniDiagnostics() {
+        val cases = JSONObject(requireNotNull(javaClass.getResourceAsStream("/translation-contracts.json"))
+            .bufferedReader().use { it.readText() }).getJSONArray("textProbeRejections")
+        Loopback(listOf("api-free.deepl.com", "deeplx.example.invalid")).use { fixture ->
+            for (index in 0 until cases.length()) {
+                val case = cases.getJSONObject(index)
+                val id = case.getString("id")
+                val deepL = case.getString("provider") == "deepL"
+                val configuration = buildTextProbeConfiguration(TranslationConfiguration(
+                    provider = if (deepL) TextTranslationProvider.DEEPL else TextTranslationProvider.DEEPLX,
+                    endpoint = if (deepL) "" else "https://deeplx.example.invalid/translate",
+                    apiKey = "synthetic-text-key:fx",
+                ), "en", "zh", "lite")
+                fixture.response.set(HttpResponse(case.getInt("httpStatus"), case.getString("body")))
+                val result = probe(configuration, fixture, id)
+                assertEquals(id, "unavailable", result.getString("service"))
+                assertEquals(id, case.getString("expected"), result.getString("reason"))
+                assertTrue(id, result.getLong("elapsedMs") >= 0)
+                val request = requireNotNull(fixture.request.getAndSet(null)) { "$id request not captured" }
+                assertEquals(id, if (deepL) JSONArray().put("Hello.").toString() else "Hello.", request.get("text").toString())
+                assertFalse(id, request.has("messages"))
+                assertFalse(id, result.toString().contains("synthetic-text-key"))
+                assertFalse(id, result.toString().contains("synthetic-private"))
+                fixture.checkFailure()
+            }
+        }
+    }
+
+    private fun probe(configuration: JSONObject, fixture: Loopback, id: String): JSONObject {
+        val handle = NativeRuntimeConfiguration.exchange(JSONObject().put("operation", "create_text_probe")
+            .put("configuration", configuration).put("network", fixture.network)).getLong("handle")
+        try {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+            while (System.nanoTime() < deadline) {
+                fixture.checkFailure()
+                val state = NativeRuntimeConfiguration.command("text_probe_poll", handle)
+                if (state.optBoolean("finished")) return state.getJSONObject("result")
+                Thread.sleep(10)
+            }
+            throw AssertionError("$id probe did not finish")
+        } finally { NativeRuntimeConfiguration.command("text_probe_cancel", handle) }
+    }
+
+    private class HttpResponse(val status: Int = 200,
+        val body: String = "{\"choices\":[{\"message\":{\"content\":\"Synthetic translation.\"},\"finish_reason\":\"stop\"}]}")
 
     private class Loopback(hosts: List<String>) : AutoCloseable {
         private val directory = Files.createTempDirectory("mimi-thinking-jni-").toFile()
         private val server = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))
         private val failure = AtomicReference<Throwable?>()
         val request = AtomicReference<JSONObject?>()
+        val response = AtomicReference(HttpResponse())
         private var socket: Socket? = null
         @Volatile private var closed = false
         val network: JSONObject
@@ -110,8 +145,12 @@ class NativeTranslationThinkingTest {
                             check(length in 1..65_536)
                             val body = ByteArray(length).also { DataInputStream(secure.inputStream).readFully(it) }
                             request.set(JSONObject(body.toString(Charsets.UTF_8)))
-                            val response = "{\"choices\":[{\"message\":{\"content\":\"Synthetic translation.\"},\"finish_reason\":\"stop\"}]}"
-                            secure.getOutputStream().write(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${response.length}\r\nConnection: close\r\n\r\n$response").toByteArray(Charsets.US_ASCII))
+                            val outgoing = response.get()
+                            val bytes = outgoing.body.toByteArray(Charsets.UTF_8)
+                            secure.getOutputStream().apply {
+                                write(("HTTP/1.1 ${outgoing.status} Fixture\r\nContent-Type: application/json\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n").toByteArray(Charsets.US_ASCII))
+                                write(bytes)
+                            }
                         }
                         socket = null
                     }

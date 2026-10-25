@@ -131,7 +131,7 @@ internal class HelpInteractionChecks(private val test: Instrumentation) {
     }
     private fun tooltipMessage(view: View) = view.findViewWithTag<TextView>("help-tooltip-message").text.toString()
     fun run(arguments: Bundle?) {
-        if (MimiService.isRunning || SettingsStore.isConfigured(context)) {
+        if (MimiService.isRunning || SettingsStore.profiles(context).isNotEmpty()) {
             test.finish(Activity.RESULT_CANCELED, Bundle().apply { putString("stream", "Use a blank idle emulator.\n") })
             return
         }
@@ -193,15 +193,24 @@ internal class HelpInteractionChecks(private val test: Instrumentation) {
             settings = currentSettings
             if (!baseline && currentSettings.resources.configuration.fontScale >= 1.5f) ui {
                 for (provider in app.yuxino.mimi.android.provider.ServiceProvider.entries) {
-                    val row = currentSettings.findViewById<View>(R.id.service_panel).findViewWithTag<ViewGroup>("service-${provider.id}")
-                    val select = row.getChildAt(0) as ViewGroup
-                    val copy = select.getChildAt(1) as ViewGroup
-                    check(row.getChildAt(1).top >= select.bottom) { "Configure action squeezes service name: ${provider.id}" }
-                    check(copy.width >= ServiceSettingsUi.dp(currentSettings, 150)) { "Service name column too narrow: ${provider.id}" }
+                    val row = checkNotNull(currentSettings.findViewById<View>(R.id.service_panel)
+                        .findViewWithTag<ViewGroup>("add-${provider.id}")) { "Blank service picker entry missing: ${provider.id}" }
+                    val label = (0 until row.childCount).map { row.getChildAt(it) }.filterIsInstance<TextView>().single()
+                    check(row.isClickable && row.isFocusable && row.height >= ServiceSettingsUi.dp(currentSettings, 48)) {
+                        "Service picker lost its touch target: ${provider.id}"
+                    }
+                    check(label.width >= ServiceSettingsUi.dp(currentSettings, 150)) { "Service name column too narrow: ${provider.id}" }
+                    check(label.left >= row.getChildAt(0).right && label.right <= row.getChildAt(row.childCount - 1).left) {
+                        "Service name overlaps its mark or chevron: ${provider.id}"
+                    }
+                    check(label.layout.height <= label.height - label.compoundPaddingTop - label.compoundPaddingBottom &&
+                        (0 until label.lineCount).all { label.layout.getEllipsisCount(it) == 0 }) {
+                        "Service name clips at large font size: ${provider.id}"
+                    }
                 }
             }
             capture("$prefix-services")
-            if (!baseline) help(currentSettings, "services-help", currentSettings.getString(R.string.services_hint) + "\n\n" +
+            if (!baseline) help(currentSettings, "services-help", currentSettings.getString(R.string.profiles_list_help) + "\n\n" +
                 currentSettings.getString(R.string.services_key_note), "$prefix-services", hover = true)
             ui { openCaptionStyles(currentSettings) }
             capture("$prefix-appearance")
@@ -222,7 +231,10 @@ internal class HelpInteractionChecks(private val test: Instrumentation) {
                 if (!resumed) SystemClock.sleep(50)
             } while (!resumed && SystemClock.elapsedRealtime() < resumedDeadline)
             check(resumed) { "Home did not resume before guide sample" }
-            val currentGuide = FirstRunGuide(currentHome) { error("Help must not start capture") }
+            // Its ActivityResult launcher belongs to onCreate, before STARTED; reuse the activity-owned guide.
+            val currentGuide = MainActivity::class.java.getDeclaredField("guide").run {
+                isAccessible = true; get(currentHome) as FirstRunGuide
+            }
             guide = currentGuide
             ui { currentGuide.open(1) }; capture("$prefix-guide-storage")
             if (!baseline) ui { check(!contains(currentHome.getString(R.string.guide_saved_hint))) }

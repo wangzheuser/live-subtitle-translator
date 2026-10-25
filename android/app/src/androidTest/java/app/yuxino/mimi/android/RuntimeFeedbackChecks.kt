@@ -25,6 +25,11 @@ import java.io.File
 /** Synthetic shared snapshots in the real native overlay; no capture or provider. */
 internal class RuntimeFeedbackChecks(private val test: Instrumentation) {
     private val context get() = test.targetContext
+    private fun onUi(action: () -> Unit) {
+        var failure: Throwable? = null
+        test.runOnMainSync { try { action() } catch (error: Throwable) { failure = error } }
+        failure?.let { throw it }
+    }
     fun run(arguments: Bundle?) {
         var stage = "preconditions"
         var failure: String? = null
@@ -32,11 +37,15 @@ internal class RuntimeFeedbackChecks(private val test: Instrumentation) {
         val localeManager = if (Build.VERSION.SDK_INT >= 33) context.getSystemService(LocaleManager::class.java) else null
         val previousSystemLocales = if (Build.VERSION.SDK_INT >= 33) localeManager?.applicationLocales else null
         val locale = arguments?.getString("locale") ?: "en"
+        val previousImmersive = SettingsStore.immersiveSubtitles(context)
+        val previousMode = SettingsStore.displayMode(context)
         try {
             check(!MimiService.isRunning && !SettingsStore.isConfigured(context))
-            test.runOnMainSync {
+            onUi {
                 if (Build.VERSION.SDK_INT >= 33) localeManager?.applicationLocales = LocaleList.forLanguageTags(locale)
                 else AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(locale))
+                SettingsStore.setImmersiveSubtitles(context, false)
+                SettingsStore.setDisplayMode(context, CaptionDisplayMode.BILINGUAL)
             }
             context.startService(Intent(context, MimiService::class.java).setAction(MimiService.ACTION_UI_PREVIEW).putExtra("preview_over_own_ui", true))
             await { root() != null }
@@ -53,20 +62,21 @@ internal class RuntimeFeedbackChecks(private val test: Instrumentation) {
                 "delayed" to JSONObject().put("connectionStatus", "listening").put("isTranslationTimedOut", true),
             )
             fun apply(fields: JSONObject) {
-                test.runOnMainSync { SubtitleBus.onRuntimeSnapshot(fields.put("atomicPreview", true)
+                onUi { SubtitleBus.onRuntimeSnapshot(fields.put("atomicPreview", true)
                     .put("snapshot", response.getJSONObject("snapshot")), false) }
                 test.waitForIdleSync()
             }
-            for (expanded in listOf(false, true)) {
-                if (expanded) {
-                    test.runOnMainSync { check(root()!!.findViewWithTag<View>("compact-subtitle").performClick()) }
-                    test.waitForIdleSync()
-                }
+            for (immersive in listOf(false, true)) {
+                val mode = if (immersive) "immersive" else "normal"
+                stage = "$locale-$mode-visible"
+                onUi { SettingsStore.setImmersiveSubtitles(context, immersive) }
+                await { root()?.findViewWithTag<View>(if (immersive) "compact-subtitle" else "expanded-subtitles")?.isShown == true }
                 for ((name, fields) in states) {
-                    stage = "$locale-$expanded-$name"
+                    stage = "$locale-$mode-$name"
                     apply(JSONObject(fields.toString()))
                     val resource = checkNotNull(runtimeFeedbackResource(SubtitleBus.runtimeFeedback))
-                    test.runOnMainSync {
+                    await { texts(root()!!).any { it.isShown && it.text.toString() == InterfaceLanguage.context(context).getString(resource) } }
+                    onUi {
                         val expected = InterfaceLanguage.context(context).getString(resource)
                         val text = texts(root()!!).first { it.isShown && it.text.toString() == expected }
                         val visible = Rect()
@@ -74,36 +84,43 @@ internal class RuntimeFeedbackChecks(private val test: Instrumentation) {
                         check(text.layout.height <= text.height - text.paddingTop - text.paddingBottom)
                         check(SubtitleBus.displayTranslation == "合成状态示例。")
                     }
-                    capture("$locale-${if (expanded) "expanded" else "compact"}-$name")
+                    capture("$locale-$mode-$name")
                 }
                 apply(JSONObject().put("connectionStatus", "listening"))
-                test.runOnMainSync {
+                await { texts(root()!!).none { it.isShown && it.text.toString() == InterfaceLanguage.context(context).getString(R.string.runtime_translation_delayed) } }
+                onUi {
                     check(runtimeFeedbackResource(SubtitleBus.runtimeFeedback) == null)
                     check(texts(root()!!).none { it.isShown && it.text.toString() == InterfaceLanguage.context(context).getString(R.string.runtime_translation_delayed) })
                 }
             }
             check(!MimiService.isRunning)
-        } catch (_: Exception) { failure = stage }
+        } catch (error: Throwable) {
+            val location = error.stackTrace.firstOrNull { it.fileName == "RuntimeFeedbackChecks.kt" }
+            failure = "$stage:${error.javaClass.simpleName}:${location?.lineNumber ?: 0}"
+        }
         finally {
             context.startService(MimiService.stopIntent(context))
-            test.runOnMainSync {
+            test.waitForIdleSync()
+            onUi {
+                SettingsStore.setImmersiveSubtitles(context, previousImmersive)
+                SettingsStore.setDisplayMode(context, previousMode)
                 if (Build.VERSION.SDK_INT >= 33 && previousSystemLocales != null) localeManager?.applicationLocales = previousSystemLocales
                 else AppCompatDelegate.setApplicationLocales(previousLocales)
             }
         }
         test.finish(if (failure == null) Activity.RESULT_OK else Activity.RESULT_CANCELED, Bundle().apply {
-            putString("stream", "Runtime feedback passed=${failure == null}; locale=$locale; failureStage=${failure ?: "none"}; native compact/expanded; synthetic snapshots only.\n")
+            putString("stream", "Runtime feedback passed=${failure == null}; locale=$locale; failureStage=${failure ?: "none"}; native normal/immersive; synthetic snapshots only.\n")
         })
     }
     private fun recovery(reason: String, scheduled: Boolean) = JSONObject().put("connectionStatus", "listening")
-        .put("translationRecovery", JSONObject().put("reason", reason).put("retryScheduled", scheduled))
+        .put("translationRecovery", JSONObject().put("reason", reason).put("retryAfterMs", if (scheduled) 4000 else 0).put("retryScheduled", scheduled))
     private fun root(): View? = WindowInspector.getGlobalWindowViews().firstOrNull { it.tag == "mimi-overlay" }
     private fun texts(view: View): List<TextView> = (if (view is TextView) listOf(view) else emptyList()) +
         if (view is ViewGroup) (0 until view.childCount).flatMap { texts(view.getChildAt(it)) } else emptyList()
     private fun await(predicate: () -> Boolean) {
         val end = SystemClock.elapsedRealtime() + 5000
         while (SystemClock.elapsedRealtime() < end) {
-            var ready = false; test.runOnMainSync { ready = predicate() }
+            var ready = false; onUi { ready = predicate() }
             if (ready) return
             SystemClock.sleep(50)
         }

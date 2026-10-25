@@ -11,6 +11,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.doOnNextLayout
 import androidx.lifecycle.ViewModelProvider
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -21,6 +22,8 @@ import java.util.Date
 class SavedSessionsActivity : AppCompatActivity() {
     private lateinit var model: SavedSessionsViewModel
     private lateinit var body: LinearLayout
+    private lateinit var scroll: ControlScrollView
+    private var displayedPage: Pair<String, Int>? = null
     private var pendingId: String? = null
     private var pendingMarkdown = false
     private val document = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -45,7 +48,8 @@ class SavedSessionsActivity : AppCompatActivity() {
             "saved-sessions-help"), LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(header)
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24), dp(8), dp(24), dp(24)) }
-        root.addView(ControlScrollView(this).apply { addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        scroll = ControlScrollView(this).apply { addView(body) }
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root); applySystemBarInsets()
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() { goBack() }
@@ -87,6 +91,9 @@ class SavedSessionsActivity : AppCompatActivity() {
         }, LinearLayout.LayoutParams(dp(48), dp(48)))
     }
     private fun render() {
+        val nextPage = model.selected?.id?.let { id -> model.page?.page?.let { id to it } }
+        val openingPage = nextPage != null && displayedPage != nextPage
+        displayedPage = nextPage
         body.removeAllViews()
         model.notice?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show(); model.notice = null }
         if (model.busy) body.addView(label(getString(R.string.session_history_working)).apply { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE })
@@ -124,6 +131,9 @@ class SavedSessionsActivity : AppCompatActivity() {
                 navigation.addView(button(R.string.session_history_next, "session-next") { model.loadPage(page.page + 1) }.apply { isEnabled = !model.busy && page.hasNext })
                 body.addView(navigation)
             }
+        }
+        if (openingPage) scroll.doOnNextLayout {
+            if (!isFinishing && !isDestroyed && displayedPage == nextPage) scroll.scrollTo(0, 0)
         }
     }
     private fun divider() { body.addView(View(this).apply { setBackgroundColor(ContextCompat.getColor(context, R.color.mimi_border)) },

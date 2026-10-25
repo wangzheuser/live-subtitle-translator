@@ -43,6 +43,7 @@ internal class TextTranslationEditorDraft(
     val selected: TextTranslationProvider,
     val qwenMtModel: String,
     val routes: Map<TextTranslationProvider, TextTranslationRouteDraft>,
+    val customPreset: Boolean = false,
 )
 
 internal class TextTranslationRouteDraft(

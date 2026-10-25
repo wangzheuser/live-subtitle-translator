@@ -885,6 +885,8 @@ fn audio3_reason(error: &Audio3ASRClientError) -> ConnectionCheckReason {
 fn deeplx_reason(error: &DeepLXError) -> ConnectionCheckReason {
     match error {
         DeepLXError::Rejected(401 | 403) => ConnectionCheckReason::AuthenticationRejected,
+        DeepLXError::Rejected(429) => ConnectionCheckReason::ConcurrencyLimited,
+        DeepLXError::Rejected(456) => ConnectionCheckReason::QuotaExhausted,
         DeepLXError::Timeout => ConnectionCheckReason::Timeout,
         DeepLXError::Connection => ConnectionCheckReason::Unreachable,
         DeepLXError::Endpoint => ConnectionCheckReason::InvalidConfiguration,
@@ -895,6 +897,8 @@ fn deeplx_reason(error: &DeepLXError) -> ConnectionCheckReason {
 fn deepl_reason(error: &DeepLError) -> ConnectionCheckReason {
     match error {
         DeepLError::Rejected(401 | 403) => ConnectionCheckReason::AuthenticationRejected,
+        DeepLError::Rejected(429) => ConnectionCheckReason::ConcurrencyLimited,
+        DeepLError::Rejected(456) => ConnectionCheckReason::QuotaExhausted,
         DeepLError::Timeout => ConnectionCheckReason::Timeout,
         DeepLError::Connection => ConnectionCheckReason::Unreachable,
         DeepLError::InvalidKey => ConnectionCheckReason::InvalidConfiguration,
@@ -1704,12 +1708,35 @@ mod tests {
         }
         assert_eq!(
             deepl_reason(&DeepLError::Rejected(456)),
-            ConnectionCheckReason::ServiceRejected
+            ConnectionCheckReason::QuotaExhausted
         );
         assert_eq!(
             deepl_reason(&DeepLError::Connection),
             ConnectionCheckReason::Unreachable
         );
+    }
+
+    #[test]
+    fn deepl_rejection_diagnostics_follow_shared_contracts() {
+        let contract: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../translation-contracts.json"
+        )))
+        .unwrap();
+        for case in contract["textProbeRejections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|case| case["provider"] == "deepL")
+        {
+            let status = u16::try_from(case["httpStatus"].as_u64().unwrap()).unwrap();
+            assert_eq!(
+                serde_json::to_value(deepl_reason(&DeepLError::Rejected(status))).unwrap(),
+                case["expected"],
+                "{}",
+                case["id"]
+            );
+        }
     }
 
     #[test]
@@ -1860,7 +1887,12 @@ mod tests {
 
     #[tokio::test]
     async fn independent_text_service_requires_valid_nonempty_translation_and_authorization() {
-        for (status, body, expected) in [
+        let contract: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../translation-contracts.json"
+        )))
+        .unwrap();
+        let mut cases = vec![
             (200, r#"{"code":200,"data":"こんにちは。"}"#, Ok(())),
             (
                 200,
@@ -1892,7 +1924,27 @@ mod tests {
                 r#"{"code":200,"data":"こんにちは。"}"#,
                 Err(ConnectionCheckReason::ServiceRejected),
             ),
-        ] {
+        ];
+        for case in contract["textProbeRejections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|case| case["provider"] == "deepLX")
+        {
+            let expected = match case["expected"].as_str().unwrap() {
+                "concurrencyLimited" => ConnectionCheckReason::ConcurrencyLimited,
+                "quotaExhausted" => ConnectionCheckReason::QuotaExhausted,
+                "serviceRejected" => ConnectionCheckReason::ServiceRejected,
+                other => panic!("unsupported probe fixture reason: {other}"),
+            };
+            cases.push((
+                u16::try_from(case["httpStatus"].as_u64().unwrap()).unwrap(),
+                case["body"].as_str().unwrap(),
+                Err(expected),
+            ));
+        }
+        for (status, body, expected) in cases {
+            let body = body.to_owned();
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
             let server = tokio::spawn(async move {

@@ -1,5 +1,63 @@
 {
   "schemaVersion": 1,
+  "textProbeRejections": [
+    {
+      "id": "deepl-http-rate-limit",
+      "provider": "deepL",
+      "httpStatus": 429,
+      "body": "synthetic-private-rate-limit-detail",
+      "expected": "concurrencyLimited"
+    },
+    {
+      "id": "deepl-http-quota",
+      "provider": "deepL",
+      "httpStatus": 456,
+      "body": "synthetic-private-quota-detail",
+      "expected": "quotaExhausted"
+    },
+    {
+      "id": "deepl-http-other-rejection",
+      "provider": "deepL",
+      "httpStatus": 500,
+      "body": "synthetic-private-server-detail",
+      "expected": "serviceRejected"
+    },
+    {
+      "id": "deeplx-http-rate-limit",
+      "provider": "deepLX",
+      "httpStatus": 429,
+      "body": "synthetic-private-rate-limit-detail",
+      "expected": "concurrencyLimited"
+    },
+    {
+      "id": "deeplx-http-quota",
+      "provider": "deepLX",
+      "httpStatus": 456,
+      "body": "synthetic-private-quota-detail",
+      "expected": "quotaExhausted"
+    },
+    {
+      "id": "deeplx-body-rate-limit",
+      "provider": "deepLX",
+      "httpStatus": 200,
+      "body": "{\"code\":429,\"data\":\"synthetic-private-rate-limit-detail\"}",
+      "expected": "concurrencyLimited"
+    },
+    {
+      "id": "deeplx-body-quota",
+      "provider": "deepLX",
+      "httpStatus": 200,
+      "body": "{\"code\":456,\"data\":\"synthetic-private-quota-detail\"}",
+      "expected": "quotaExhausted"
+    },
+    {
+      "id": "deeplx-http-other-rejection",
+      "provider": "deepLX",
+      "httpStatus": 500,
+      "body": "synthetic-private-server-detail",
+      "expected": "serviceRejected"
+    }
+  ],
   "qwenStreamingText": [
     {
       "id": "plus-cumulative-snapshots-do-not-repeat",

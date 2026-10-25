@@ -27,6 +27,7 @@ internal class ChatMockLoopbackFixture : Closeable {
         Exchange("synthetic-auth", status = 401),
         Exchange(deepLX = true),
         Exchange(deepLX = true, bodyCode = 456),
+        Exchange(deepLX = true, status = 429),
     )
     private val server = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).apply { soTimeout = 10_000 }
     val baseUrl = "http://127.0.0.1:${server.localPort}/v1"
@@ -134,7 +135,7 @@ internal class ChatMockLoopbackFixture : Closeable {
         else if (status == 200)
             """{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"Synthetic translation."}}]}"""
         else """{"error":{"message":"synthetic-server-detail-must-not-display"}}""").toByteArray(Charsets.UTF_8)
-        val reason = if (status == 200) "OK" else "Unauthorized"
+        val reason = when (status) { 200 -> "OK"; 429 -> "Too Many Requests"; else -> "Unauthorized" }
         val headers = "HTTP/1.1 $status $reason\r\nContent-Type: application/json; charset=utf-8\r\n" +
             "Content-Length: ${body.size}\r\nConnection: close\r\n\r\n"
         socket.getOutputStream().apply { write(headers.toByteArray(Charsets.US_ASCII)); write(body); flush() }

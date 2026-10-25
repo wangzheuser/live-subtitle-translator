@@ -10,6 +10,7 @@ import android.os.SystemClock
 import android.view.View
 import android.widget.CheckBox
 import android.widget.Spinner
+import android.widget.TextView
 import app.yuxino.mimi.android.capture.MimiService
 import app.yuxino.mimi.android.provider.ServiceProvider
 import app.yuxino.mimi.android.provider.TextTranslationProvider
@@ -23,7 +24,8 @@ internal class ServiceDraftRecreationChecks(private val test: Instrumentation) {
     @Volatile private var current: ServiceSettingsActivity? = null
     private var stage = "preconditions"
 
-    fun run() {
+    fun run(arguments: Bundle?) {
+        val focusedCase = arguments?.getString("translation_draft_case")
         val application = context.applicationContext as Application
         val activities = mutableListOf<ServiceSettingsActivity>()
         var secretInSavedState = false
@@ -53,6 +55,31 @@ internal class ServiceDraftRecreationChecks(private val test: Instrumentation) {
             // SettingsStore.profiles can trigger a legacy credential migration.
             // Hash metadata files directly; this check must not initialize it.
             val before = catalogSnapshot()
+            when (focusedCase) {
+                "custom_recreation" -> checkCustomRecreation()
+                "pending_save" -> checkPendingSave()
+                "pending_check" -> checkPendingCheck()
+                null -> checkExistingRecreation { secretInSavedState }
+                else -> error("unsupported_translation_draft_case")
+            }
+            stage = "credentials_not_serialized"
+            check(!secretInSavedState)
+            stage = "focused_case_does_not_save"
+            check(catalogSnapshot() == before)
+        } catch (error: Throwable) {
+            val frame = error.stackTrace.firstOrNull { it.className.startsWith("app.yuxino.mimi.android.") }
+            failure = "$stage:${error.javaClass.simpleName}@${frame?.fileName ?: "unknown"}:${frame?.lineNumber ?: -1}"
+        } finally {
+            onUi { activities.forEach { if (!it.isFinishing && !it.isDestroyed) it.finish() } }
+            application.unregisterActivityLifecycleCallbacks(callbacks)
+        }
+        test.finish(if (failure == null) Activity.RESULT_OK else Activity.RESULT_CANCELED, Bundle().apply {
+            putString("stream", "Service draft recreation case=${focusedCase ?: "all_original"} passed=${failure == null}; failure=${failure ?: "none"}; unsaved synthetic fields only, no profile writes, network or capture.\n")
+        })
+    }
+
+    private fun checkExistingRecreation(secretInSavedState: () -> Boolean) {
+            val before = catalogSnapshot()
             test.startActivitySync(Intent(context, ServiceSettingsActivity::class.java)
                 .putExtra("provider", ServiceProvider.DASHSCOPE.id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             test.waitForIdleSync()
@@ -79,7 +106,7 @@ internal class ServiceDraftRecreationChecks(private val test: Instrumentation) {
             stage = "await_recreation"
             val next = awaitRecreated(first)
             stage = "credentials_not_serialized"
-            check(!secretInSavedState)
+            check(!secretInSavedState())
             stage = "profile_draft_preserved"
             onUi {
                 check(field<TextInputEditText>(next, "profile-name").text.toString() == "Synthetic unsaved name")
@@ -120,15 +147,137 @@ internal class ServiceDraftRecreationChecks(private val test: Instrumentation) {
                 check(field<TextInputEditText>(fresh, "profile-name").text.toString() != "Synthetic unsaved name")
                 check(field<TextInputEditText>(fresh, "credential-apiKey").text.isNullOrBlank())
             }
-        } catch (error: Throwable) {
-            failure = "$stage:${error.javaClass.simpleName}"
-        } finally {
-            onUi { activities.forEach { if (!it.isFinishing && !it.isDestroyed) it.finish() } }
-            application.unregisterActivityLifecycleCallbacks(callbacks)
+    }
+
+    /** A known endpoint must not undo an explicit Custom choice on recreation. */
+    private fun checkCustomRecreation() {
+        val first = openCompatibleEditor()
+        val kimi = TextTranslationPresets.entries.first { it.id == "kimi" }
+        onUi { field<Spinner>(first, "translation-preset").setSelection(TextTranslationPresets.entries.indexOf(kimi) + 1) }
+        test.waitForIdleSync()
+        stage = "custom_known_endpoint_applied"
+        onUi {
+            check(field<TextInputEditText>(first, "translation-endpoint").text.toString() == kimi.endpoint)
+            field<TextInputEditText>(first, "translation-key").setText("synthetic-unsaved-text-key")
+            field<Spinner>(first, "translation-preset").setSelection(0)
         }
-        test.finish(if (failure == null) Activity.RESULT_OK else Activity.RESULT_CANCELED, Bundle().apply {
-            putString("stream", "Service draft recreation passed=${failure == null}; failure=${failure ?: "none"}; unsaved synthetic fields only, no profile writes, network or capture.\n")
-        })
+        test.waitForIdleSync()
+        onUi { assertCustom(first, kimi.endpoint, "custom_before_recreation"); first.recreate() }
+        val next = awaitRecreated(first)
+        onUi {
+            assertCustom(next, kimi.endpoint, "custom_after_recreation")
+            stage = "custom_after_recreation_key"
+            check(field<TextInputEditText>(next, "translation-key").text.toString() == "synthetic-unsaved-text-key")
+        }
+    }
+
+    private fun assertCustom(activity: ServiceSettingsActivity, endpoint: String, prefix: String) {
+        stage = "${prefix}_selection"
+        check(field<Spinner>(activity, "translation-preset").selectedItemPosition == 0)
+        stage = "${prefix}_endpoint"
+        check(field<TextInputEditText>(activity, "translation-endpoint").text.toString() == endpoint)
+        stage = "${prefix}_setup_actions"
+        check(field<View>(activity, "translation-setup-actions").visibility == View.GONE)
+        stage = "${prefix}_setup_key"
+        check(field<View>(activity, "translation-setup-key").visibility == View.GONE)
+        stage = "${prefix}_setup_guide"
+        check(field<View>(activity, "translation-setup-guide").visibility == View.GONE)
+    }
+
+    /** Save must validate the newly selected route before Spinner dispatches its callback. */
+    private fun checkPendingSave() {
+        val editor = openCompatibleEditor()
+        onUi {
+            // A missing name is the safety stop after translation validation; no
+            // credential can reach SettingsStore even if a future check changes.
+            field<TextInputEditText>(editor, "profile-name").setText("")
+            field<TextInputEditText>(editor, "translation-endpoint").setText("https://synthetic.example.invalid/v1")
+            field<TextInputEditText>(editor, "translation-model").setText("")
+            field<TextInputEditText>(editor, "translation-key").setText("synthetic-unsaved-text-key")
+        }
+        stage = "pending_route_save"
+        onUi {
+            // Keep selection and click in the same UI task: yielding here would
+            // let onItemSelected hide the race being exercised.
+            selectTranslationProvider(editor, TextTranslationProvider.NONE)
+            stage = "pending_route_save_action"
+            check(editor.findViewById<View>(R.id.save).performClick())
+            stage = "pending_route_save_translation_${validationLabel(field(editor, "translation-status"))}"
+            check(field<TextView>(editor, "translation-status").visibility == View.GONE)
+            stage = "pending_route_save_profile_name_validation"
+            check(field<TextInputEditText>(editor, "profile-name").error?.toString() == editor.getString(R.string.service_required))
+            check(!editor.isFinishing)
+        }
+        test.waitForIdleSync()
+        assertCompatibleDraftRetained(editor)
+    }
+
+    /** A pending DeepL choice must report its missing key, not the old model. */
+    private fun checkPendingCheck() {
+        val editor = openCompatibleEditor()
+        onUi {
+            field<TextInputEditText>(editor, "translation-endpoint").setText("https://synthetic.example.invalid/v1")
+            field<TextInputEditText>(editor, "translation-model").setText("")
+            field<TextInputEditText>(editor, "translation-key").setText("synthetic-unsaved-text-key")
+        }
+        stage = "pending_route_check"
+        onUi {
+            selectTranslationProvider(editor, TextTranslationProvider.DEEPL)
+            stage = "pending_route_check_action"
+            check(field<View>(editor, "translation-check").performClick())
+            val result = field<TextView>(editor, "translation-status")
+            stage = "pending_route_check_status_visible"
+            check(result.visibility == View.VISIBLE)
+            stage = "pending_route_check_label_${validationLabel(result)}"
+            check(result.text.toString() == editor.getString(R.string.translation_key_required))
+            stage = "pending_route_check_finished_locally"
+            check(field<View>(editor, "translation-check").isEnabled)
+        }
+        test.waitForIdleSync()
+        assertCompatibleDraftRetained(editor)
+    }
+
+    private fun assertCompatibleDraftRetained(editor: ServiceSettingsActivity) {
+        stage = "pending_route_retains_previous_draft"
+        onUi { selectTranslationProvider(editor, TextTranslationProvider.OPENAI_COMPATIBLE) }
+        test.waitForIdleSync()
+        onUi {
+            check(field<TextInputEditText>(editor, "translation-endpoint").text.toString() == "https://synthetic.example.invalid/v1")
+            check(field<TextInputEditText>(editor, "translation-model").text.isNullOrEmpty())
+            check(field<TextInputEditText>(editor, "translation-key").text.toString() == "synthetic-unsaved-text-key")
+        }
+    }
+
+    private fun openCompatibleEditor(): ServiceSettingsActivity {
+        stage = "launch_unsaved_compatible_editor"
+        test.startActivitySync(Intent(context, ServiceSettingsActivity::class.java)
+            .putExtra("provider", ServiceProvider.DASHSCOPE.id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        test.waitForIdleSync()
+        val editor = requireNotNull(current)
+        // Fresh Alibaba editors default to integrated live translation, which
+        // keeps this form GONE and suppresses its Spinner layout callbacks.
+        // These cases exercise independent translation after a real mode change.
+        onUi { field<Spinner>(editor, "alibaba-mode").setSelection(0) }
+        test.waitForIdleSync()
+        onUi { selectTranslationProvider(editor, TextTranslationProvider.OPENAI_COMPATIBLE) }
+        test.waitForIdleSync()
+        stage = "compatible_editor_ready"
+        onUi {
+            check(field<View>(editor, "translation-mode").isShown)
+            check(field<View>(editor, "translation-preset").isShown)
+            check(field<View>(editor, "translation-check").isEnabled)
+        }
+        return editor
+    }
+
+    /** Fixed labels only: diagnostics never include a field or service response. */
+    private fun validationLabel(result: TextView): String = when (result.text.toString()) {
+        context.getString(R.string.translation_key_required) -> "key_required"
+        context.getString(R.string.translation_endpoint_required) -> "endpoint_required"
+        context.getString(R.string.translation_required) -> "model_required"
+        context.getString(R.string.translation_invalid) -> "invalid"
+        "" -> "empty"
+        else -> "other"
     }
 
     private fun awaitRecreated(old: ServiceSettingsActivity): ServiceSettingsActivity {

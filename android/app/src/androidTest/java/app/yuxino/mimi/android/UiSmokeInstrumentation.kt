@@ -919,14 +919,60 @@ class UiSmokeInstrumentation : Instrumentation() {
     private fun checkLongExpandedCaption(panel: View) {
         val source = "This is a deliberately long synthetic subtitle for layout review. It checks how the native reading panel wraps several lines while keeping the complete translation readable without starting audio capture. ".repeat(2).trimEnd()
         val translation = "这是一段用于界面检查的合成长字幕，用来观察原生阅读面板如何换行。它包含较长的完整句子，以及足够多的文字，以便检查小屏幕上的排版和可读性。本次只展示合成内容，没有开启音频采集，也没有连接任何翻译服务。".repeat(2)
+        val frame = panel as CaptionPanelView
+        val scroll = frame.transcriptScroll
+        fun awaitReading(predicate: () -> Boolean) {
+            repeat(80) {
+                waitForIdleSync()
+                var ready = false; onUi { ready = predicate() }
+                if (ready) return
+                SystemClock.sleep(50)
+            }
+            error("Native caption reading mode did not settle")
+        }
+        fun readingGesture(dy: Int) {
+            var x = 0f; var y = 0f
+            onUi {
+                val window = scroll.rootView
+                val wm = MimiService::class.java.getDeclaredField("windowManager").apply { isAccessible = true }
+                    .get(window.context) as WindowManager
+                val safe = if (android.os.Build.VERSION.SDK_INT >= 30) {
+                    val metrics = wm.currentWindowMetrics
+                    val insets = metrics.windowInsets.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.displayCutout())
+                    android.graphics.Rect(metrics.bounds.left + insets.left, metrics.bounds.top + insets.top,
+                        metrics.bounds.right - insets.right, metrics.bounds.bottom - insets.bottom)
+                } else android.graphics.Rect().also(window::getWindowVisibleDisplayFrame)
+                val params = window.layoutParams as WindowManager.LayoutParams
+                val local = IntArray(2).also(scroll::getLocationInWindow)
+                val rootLocal = IntArray(2).also(window::getLocationInWindow)
+                x = safe.left + (safe.width() - window.width) / 2f + params.x + local[0] - rootLocal[0] + scroll.width / 2f
+                y = safe.bottom - window.height - params.y + local[1] - rootLocal[1] + scroll.height / 2f
+            }
+            val down = SystemClock.uptimeMillis()
+            for ((action, fraction) in listOf(MotionEvent.ACTION_DOWN to 0f, MotionEvent.ACTION_MOVE to .5f,
+                MotionEvent.ACTION_MOVE to 1f, MotionEvent.ACTION_UP to 1f)) {
+                val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action,
+                    x, y + dy * scroll.resources.displayMetrics.density * fraction, 0)
+                event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                try { check(uiAutomation.injectInputEvent(event, true)) } finally { event.recycle() }
+                SystemClock.sleep(30)
+            }
+            waitForIdleSync()
+        }
         onUi {
             SubtitleBus.clear()
             SubtitleBus.setHistoryLimit(0)
             SubtitleBus.onFinalPair(source, translation, "en")
         }
         capture("overlay-long-expanded-$theme")
+        // Live follows a measured tail; only a deliberate reading gesture opens
+        // the complete long text and makes its earlier lines scrollable.
+        onUi { check(frame.followingLive) }
+        readingGesture(32)
+        awaitReading { !frame.followingLive && frame.source.maxLines == Int.MAX_VALUE && frame.translation.maxLines == Int.MAX_VALUE }
+        onUi { scroll.fullScroll(View.FOCUS_UP) }
+        awaitReading { scroll.scrollY == 0 }
         checkCurrentCaptionStart(panel)
-        val scroll = checkNotNull(panel.findViewWithTag<ScrollView>("subtitle-transcript-scroll"))
         val sourceView = checkNotNull(panel.findViewWithTag<TextView>("expanded-source"))
         val translationView = checkNotNull(panel.findViewWithTag<TextView>("expanded-translation"))
         onUi {
@@ -935,6 +981,7 @@ class UiSmokeInstrumentation : Instrumentation() {
             check(scroll.canScrollVertically(1)) { "Long captions have no scrollable continuation" }
             scroll.fullScroll(View.FOCUS_DOWN)
         }
+        awaitReading { scroll.scrollY > 0 && !scroll.canScrollVertically(1) }
         capture("overlay-long-expanded-end-$theme")
         onUi {
             check(scroll.scrollY > 0 && !scroll.canScrollVertically(1)) { "Caption end cannot be reached" }
@@ -948,8 +995,10 @@ class UiSmokeInstrumentation : Instrumentation() {
                 "Caption ending is outside the reading viewport"
             }
         }
-        // A new completed pair starts at its beginning even after the reader
-        // reached the end of the previous long pair.
+        // A deliberate upward gesture at the live edge resumes bounded tail
+        // following; new completed pairs must not inherit manual reading mode.
+        readingGesture(-24)
+        awaitReading { frame.followingLive && frame.source.maxLines != Int.MAX_VALUE && frame.translation.maxLines != Int.MAX_VALUE }
         onUi { SubtitleBus.onFinalPair("Another complete sentence. $source", translation, "en") }
         waitForIdleSync()
         SystemClock.sleep(250)
@@ -963,6 +1012,8 @@ class UiSmokeInstrumentation : Instrumentation() {
         waitForIdleSync()
         SystemClock.sleep(250)
         checkCurrentCaptionStart(panel)
+        readingGesture(32)
+        awaitReading { !frame.followingLive && frame.source.maxLines == Int.MAX_VALUE && frame.translation.maxLines == Int.MAX_VALUE }
         onUi {
             check(SubtitleBus.historySnapshot().isNotEmpty())
             check(sourceView.top > 0) { "Fixture has no history above the current sentence" }
@@ -973,10 +1024,11 @@ class UiSmokeInstrumentation : Instrumentation() {
         waitForIdleSync()
         SystemClock.sleep(250)
         onUi { check(scroll.scrollY == 0) { "New sentence interrupted history review" } }
-        // The reader can return to the current sentence without changing modes.
-        onUi { scroll.scrollTo(0, sourceView.top) }
-        waitForIdleSync()
-        SystemClock.sleep(250)
+        // Reach the current pair and resume following through the same native gesture.
+        onUi { scroll.fullScroll(View.FOCUS_DOWN) }
+        awaitReading { !scroll.canScrollVertically(1) }
+        readingGesture(-24)
+        awaitReading { frame.followingLive && frame.source.maxLines != Int.MAX_VALUE && frame.translation.maxLines != Int.MAX_VALUE }
         checkCurrentCaptionStart(panel)
         onUi {
             SubtitleBus.clear()

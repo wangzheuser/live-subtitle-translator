@@ -148,3 +148,38 @@ Rust core. The locked native dependency inventory and upstream license texts
 are in [Android native notices](android/native-licenses/shared-core.txt),
 which are included in Android APK assets. See also
 [Android third-party notices](android/THIRD_PARTY_NOTICES.md).
+
+## Provider icons
+
+Baidu AI Cloud, DeepSeek, Kimi, SiliconFlow, Index Team and Ollama icons are bundled from
+[Lobe Icons](https://github.com/lobehub/lobe-icons) at commit
+`cc639da879a3f404f5ded8ec41cdfdc63abd8317` under the MIT license below.
+The original SVG geometry and monochrome artwork are preserved.
+
+OpenRouter's Ink/Cloud glyphs come from its [official brand assets](https://openrouter.ai/brand).
+LM Studio's color and white-outline app icons come from its
+[official brand assets and use terms](https://lmstudio.ai/brand).
+These vendor assets retain their original colors and proportions; the MIT
+license below does not apply to them. All marks identify the corresponding
+service, remain owned by their respective providers and do not imply endorsement.
+Exact asset sources are recorded in [provider icon notices](src/assets/providers/NOTICE.md).
+
+MIT License
+
+Copyright (c) 2023 LobeHub
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

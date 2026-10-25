@@ -29,6 +29,16 @@ to DLX and removed DeepL branding; this asset does not identify that newer brand
 ChatMock and OpenAI-compatible text translation use the neutral Lucide `Languages` glyph.
 Compatibility identifies an API format, not OpenAI ownership or affiliation.
 
+The compatible route's Quick setup picker identifies concrete text services with
+their own marks in both the selected value and every dropdown row. Custom keeps
+the neutral language glyph. `TextTranslationPresetIcon` reuses existing company
+marks where appropriate and bundles additional artwork documented in
+[provider notices](../../src/assets/providers/NOTICE.md). Qianfan uses the Baidu
+AI Cloud mark, not the separate Baidu Translation app icon. Monochrome marks
+follow the selected light/dark theme; supplied OpenRouter and LM Studio variants
+keep their original colors and proportions. These are UI assets only: preset
+selection, credential ownership, model IDs and network behavior are unchanged.
+
 Recognition and text translation call sites resolve their service separately.
 Legacy DeepLX profiles still use Alibaba Cloud's icon for speech recognition;
 their text translation uses the legacy DeepLX documentation mark.

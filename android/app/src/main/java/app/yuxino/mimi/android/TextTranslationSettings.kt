@@ -43,8 +43,8 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
     private var rendering = false
     private val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
     private val fields = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
-    private val mode = Spinner(activity).apply { tag = "translation-mode"; background = null; setPadding(0, 0, 0, 0) }
-    private val preset = Spinner(activity).apply { tag = "translation-preset"; background = null; setPadding(0, 0, 0, 0); isSaveEnabled = false }
+    private val mode = Spinner(activity).apply { tag = "translation-mode"; background = null; setPadding(0, 0, 0, 0); minimumHeight = dp(56) }
+    private val preset = Spinner(activity).apply { tag = "translation-preset"; background = null; setPadding(0, 0, 0, 0); minimumHeight = dp(56); isSaveEnabled = false }
     private val presetRow = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; tag = "translation-preset-row" }
     private val presetHelp: ImageButton
     private val setupNoKey = ServiceSettingsUi.label(activity, activity.getString(R.string.translation_setup_no_key), 16f).apply {
@@ -107,16 +107,14 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
         mode.adapter = TranslationProviderAdapter(activity, providers)
         mode.contentDescription = activity.getString(R.string.translation_title)
         mode.setSelection(providers.indexOf(selected))
-        root.addView(mode, LinearLayout.LayoutParams(-1, dp(56)).apply { bottomMargin = dp(16) })
+        root.addView(mode, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(16) })
         val presetHeading = HelpUi.heading(activity, activity.getString(R.string.translation_preset),
             activity.getString(R.string.translation_preset_help), 16f, "translation-preset-help")
         presetHelp = presetHeading.findViewWithTag("translation-preset-help")
         presetRow.addView(presetHeading)
-        preset.adapter = ArrayAdapter(activity, R.layout.mimi_spinner_item,
-            listOf(activity.getString(R.string.translation_preset_custom)) + TextTranslationPresets.entries.map { it.label })
-            .apply { setDropDownViewResource(R.layout.mimi_spinner_dropdown) }
+        preset.adapter = TextTranslationPresetAdapter(activity)
         preset.contentDescription = activity.getString(R.string.translation_preset)
-        presetRow.addView(preset, LinearLayout.LayoutParams(-1, dp(56)))
+        presetRow.addView(preset, LinearLayout.LayoutParams(-1, -2))
         presetRow.addView(setupNoKey, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         setupActions.addView(setupKey, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.END })
         setupActions.addView(setupGuide, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.END })

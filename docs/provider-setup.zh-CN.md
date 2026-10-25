@@ -305,6 +305,8 @@ Apple Speech 只在**Apple 芯片、macOS 26 或更新版本、系统识别引�
 
 向你选择的服务提供方开通文字模型，获取**服务地址、模型 ID，以及按需提供的 API Key**。在 Mimi 的「文字翻译」选择「**OpenAI 兼容接口**」，分别填写并保存。
 
+「**快速填写**」可填入 [OpenAI](https://developers.openai.com/api/docs/models/gpt-6-luna)、[DeepSeek](https://api-docs.deepseek.com/)、[通义千问](https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope)、[Google Gemini](https://ai.google.dev/gemini-api/docs/openai)、[Ollama](https://docs.ollama.com/api/openai-compatibility) 或 [LM Studio](https://lmstudio.ai/docs/developer/openai-compat) 的地址，以及适用的示例模型，字段仍可修改。Gemini 和本机服务需填写实际可用的模型 ID；千问默认使用北京地址，需与 Key 的地域匹配。本机模型服务须先启动并加载模型；Android 还需明确允许本机 HTTP。选择预设不会保存或连接；选择另一地址的服务预设时，会清空输入中的密钥，并阻止沿用旧地址已保存的密钥。按需填写新服务的 Key，再保存并检查翻译。
+
 该接口需要支持非流式 Chat Completions，并返回 `choices[0].message.content`。服务地址可填 `/v1` 等 API 基础路径，也可填完整 `/chat/completions` 路径；Mimi 只补 `/chat/completions`，**不会自动补 `/v1`**。例如：`https://example.com/v1` 会请求 `https://example.com/v1/chat/completions`。远程服务使用 HTTPS，本机回环地址可使用 HTTP；地址不接受用户名、密码、查询参数或片段。
 
 截至 2026-10-13，B 站 [Index-Translate 的官方示例](https://github.com/bilibili/Index-Translate/blob/main/inference/llm/call_api.py)提供以下免费、免认证的公开文字翻译接口：

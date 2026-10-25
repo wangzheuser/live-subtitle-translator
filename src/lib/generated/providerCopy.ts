@@ -29,7 +29,10 @@ export const PROVIDER_COPY = {
     "speechTranslationSimultaneousLabel": "同声传译",
     "speechTranslationAsrMtLabel": "ASR + MT",
     "speechTranslationModeHelp": "同声传译直接输出原文和译文；ASR + MT 先识别成文字，再由所选文字翻译服务翻译。两种模式的配置分别保留。停止字幕后可切换。",
-    "speechTranslationModeSaveFailed": "翻译模式保存失败，请重试。"
+    "speechTranslationModeSaveFailed": "翻译模式保存失败，请重试。",
+    "compatiblePresetLabel": "快速填写",
+    "compatiblePresetCustom": "自定义",
+    "compatiblePresetHelp": "快速填入服务地址和模型，仍可修改。请选择账号已开通或本机已下载的模型。千问默认使用北京地域；服务需要 Key 时，须使用与地址对应的 Key。"
   },
   "zh-TW": {
     "providerAlibabaDescription": "支援同聲傳譯。\n也可先辨識再翻譯，並自行選擇翻譯服務。",
@@ -60,7 +63,10 @@ export const PROVIDER_COPY = {
     "speechTranslationSimultaneousLabel": "同聲傳譯",
     "speechTranslationAsrMtLabel": "ASR + MT",
     "speechTranslationModeHelp": "同聲傳譯直接輸出原文和譯文；ASR + MT 先辨識成文字，再由所選文字翻譯服務翻譯。兩種模式的設定分別保留。停止字幕後可切換。",
-    "speechTranslationModeSaveFailed": "翻譯模式儲存失敗，請重試。"
+    "speechTranslationModeSaveFailed": "翻譯模式儲存失敗，請重試。",
+    "compatiblePresetLabel": "快速填入",
+    "compatiblePresetCustom": "自訂",
+    "compatiblePresetHelp": "快速填入服務位址和模型，仍可修改。請選擇帳號已開通或本機已下載的模型。千問預設使用北京地域；服務需要 Key 時，須使用與位址對應的 Key。"
   },
   "en": {
     "providerAlibabaDescription": "Supports simultaneous translation,\nor speech recognition followed by translation with a service of your choice.",
@@ -91,7 +97,10 @@ export const PROVIDER_COPY = {
     "speechTranslationSimultaneousLabel": "Simultaneous translation",
     "speechTranslationAsrMtLabel": "ASR + MT",
     "speechTranslationModeHelp": "Simultaneous translation returns original text and translations directly. ASR + MT recognizes speech, then translates it with your chosen text service. Both configurations are retained. Stop subtitles to switch.",
-    "speechTranslationModeSaveFailed": "Could not save the translation mode. Try again."
+    "speechTranslationModeSaveFailed": "Could not save the translation mode. Try again.",
+    "compatiblePresetLabel": "Quick setup",
+    "compatiblePresetCustom": "Custom",
+    "compatiblePresetHelp": "Prefills an editable address and model. Choose a model enabled for your account or downloaded locally. Qwen defaults to Beijing. If a key is required, use one for that service address."
   },
   "ja": {
     "providerAlibabaDescription": "同時通訳に対応。\n音声認識後に、お好みの翻訳サービスで翻訳することもできます。",
@@ -122,7 +131,10 @@ export const PROVIDER_COPY = {
     "speechTranslationSimultaneousLabel": "同時通訳",
     "speechTranslationAsrMtLabel": "ASR + MT",
     "speechTranslationModeHelp": "同時通訳は原文と訳文を直接出力します。ASR + MT は音声を認識し、選んだテキスト翻訳サービスで翻訳します。両方の設定を保持します。字幕を停止して切り替えてください。",
-    "speechTranslationModeSaveFailed": "翻訳モードを保存できませんでした。再試行してください。"
+    "speechTranslationModeSaveFailed": "翻訳モードを保存できませんでした。再試行してください。",
+    "compatiblePresetLabel": "簡単入力",
+    "compatiblePresetCustom": "カスタム",
+    "compatiblePresetHelp": "サービスのアドレスとモデルを入力し、後から変更できます。アカウントで利用可能なモデルか、ダウンロード済みのローカルモデルを選んでください。Qwen の初期設定は北京リージョンです。キーが必要な場合は、そのアドレスに対応するキーを使用してください。"
   },
   "de": {
     "providerAlibabaDescription": "Unterstützt Simultanübersetzung\noder Spracherkennung mit anschließender Übersetzung durch einen frei wählbaren Dienst.",
@@ -153,7 +165,10 @@ export const PROVIDER_COPY = {
     "speechTranslationSimultaneousLabel": "Simultanübersetzung",
     "speechTranslationAsrMtLabel": "ASR + MT",
     "speechTranslationModeHelp": "Simultanübersetzung liefert Originaltext und Übersetzung direkt. ASR + MT erkennt Sprache und übersetzt sie mit dem gewählten Textdienst. Beide Konfigurationen bleiben erhalten. Zum Wechseln Untertitel stoppen.",
-    "speechTranslationModeSaveFailed": "Übersetzungsmodus konnte nicht gespeichert werden. Bitte erneut versuchen."
+    "speechTranslationModeSaveFailed": "Übersetzungsmodus konnte nicht gespeichert werden. Bitte erneut versuchen.",
+    "compatiblePresetLabel": "Schnelleinrichtung",
+    "compatiblePresetCustom": "Benutzerdefiniert",
+    "compatiblePresetHelp": "Füllt bearbeitbare Adresse und Modell aus. Wählen Sie ein für Ihr Konto freigeschaltetes oder lokal heruntergeladenes Modell. Qwen nutzt standardmäßig Peking. Falls ein Schlüssel nötig ist, muss er zur Dienstadresse gehören."
   },
   "ko": {
     "providerAlibabaDescription": "동시통역을 지원하며,\n음성을 먼저 인식한 뒤 원하는 번역 서비스로 번역할 수도 있습니다.",
@@ -184,7 +199,10 @@ export const PROVIDER_COPY = {
     "speechTranslationSimultaneousLabel": "동시통역",
     "speechTranslationAsrMtLabel": "ASR + MT",
     "speechTranslationModeHelp": "동시통역은 원문과 번역문을 바로 출력합니다. ASR + MT는 음성을 인식한 뒤 선택한 텍스트 번역 서비스로 번역합니다. 두 모드의 설정은 유지됩니다. 자막을 중지한 후 변경하세요.",
-    "speechTranslationModeSaveFailed": "번역 모드를 저장하지 못했습니다. 다시 시도하세요."
+    "speechTranslationModeSaveFailed": "번역 모드를 저장하지 못했습니다. 다시 시도하세요.",
+    "compatiblePresetLabel": "빠른 설정",
+    "compatiblePresetCustom": "사용자 지정",
+    "compatiblePresetHelp": "수정 가능한 주소와 모델을 채웁니다. 계정에서 활성화한 모델이나 로컬에 다운로드한 모델을 선택하세요. Qwen은 베이징 리전이 기본입니다. 키가 필요한 경우 해당 서비스 주소에 맞는 키를 사용하세요."
   },
   "fr": {
     "providerAlibabaDescription": "Traduction simultanée,\nou reconnaissance vocale suivie d’une traduction avec le service de votre choix.",
@@ -215,7 +233,10 @@ export const PROVIDER_COPY = {
     "speechTranslationSimultaneousLabel": "Traduction simultanée",
     "speechTranslationAsrMtLabel": "ASR + MT",
     "speechTranslationModeHelp": "La traduction simultanée fournit directement le texte original et sa traduction. ASR + MT reconnaît la parole, puis la traduit avec le service de texte choisi. Les deux configurations sont conservées. Arrêtez les sous-titres pour changer.",
-    "speechTranslationModeSaveFailed": "Impossible d’enregistrer le mode de traduction. Réessayez."
+    "speechTranslationModeSaveFailed": "Impossible d’enregistrer le mode de traduction. Réessayez.",
+    "compatiblePresetLabel": "Configuration rapide",
+    "compatiblePresetCustom": "Personnalisé",
+    "compatiblePresetHelp": "Préremplit une adresse et un modèle modifiables. Choisissez un modèle activé pour votre compte ou téléchargé localement. Qwen utilise Pékin par défaut. Si une clé est nécessaire, utilisez celle correspondant à cette adresse."
   },
   "th": {
     "providerAlibabaDescription": "รองรับการแปลพร้อมเสียง\nหรือรู้จำเสียงก่อนแล้วแปลด้วยบริการที่คุณเลือก",
@@ -246,6 +267,48 @@ export const PROVIDER_COPY = {
     "speechTranslationSimultaneousLabel": "การแปลพร้อมเสียง",
     "speechTranslationAsrMtLabel": "ASR + MT",
     "speechTranslationModeHelp": "การแปลพร้อมเสียงแสดงต้นฉบับและคำแปลโดยตรง ส่วน ASR + MT รู้จำเสียงก่อนแล้วแปลด้วยบริการข้อความที่เลือก ระบบเก็บการตั้งค่าทั้งสองโหมดไว้ หยุดคำบรรยายก่อนเปลี่ยนโหมด",
-    "speechTranslationModeSaveFailed": "บันทึกโหมดการแปลไม่สำเร็จ ลองอีกครั้ง"
+    "speechTranslationModeSaveFailed": "บันทึกโหมดการแปลไม่สำเร็จ ลองอีกครั้ง",
+    "compatiblePresetLabel": "ตั้งค่าด่วน",
+    "compatiblePresetCustom": "กำหนดเอง",
+    "compatiblePresetHelp": "กรอกที่อยู่และโมเดลให้โดยยังแก้ไขได้ เลือกโมเดลที่เปิดใช้ในบัญชีหรือดาวน์โหลดไว้ในเครื่อง Qwen ใช้ภูมิภาคปักกิ่งเป็นค่าเริ่มต้น หากต้องใช้คีย์ ให้ใช้คีย์ที่ตรงกับที่อยู่บริการนั้น"
   }
 } as const;
+
+export const OPENAI_COMPATIBLE_PRESETS = [
+  {
+    "id": "openai",
+    "label": "OpenAI",
+    "endpoint": "https://api.openai.com/v1",
+    "model": "gpt-6-luna"
+  },
+  {
+    "id": "deepseek",
+    "label": "DeepSeek",
+    "endpoint": "https://api.deepseek.com",
+    "model": "deepseek-flash"
+  },
+  {
+    "id": "qwen",
+    "label": "Qwen (Alibaba Cloud)",
+    "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "model": "qwen-flash"
+  },
+  {
+    "id": "gemini",
+    "label": "Google Gemini",
+    "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "model": ""
+  },
+  {
+    "id": "ollama",
+    "label": "Ollama",
+    "endpoint": "http://127.0.0.1:11434/v1",
+    "model": ""
+  },
+  {
+    "id": "lmStudio",
+    "label": "LM Studio",
+    "endpoint": "http://127.0.0.1:1234/v1",
+    "model": ""
+  }
+] as const;

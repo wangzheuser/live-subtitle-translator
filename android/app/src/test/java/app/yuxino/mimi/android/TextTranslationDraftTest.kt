@@ -48,4 +48,43 @@ class TextTranslationDraftTest {
         assertFalse(missing.reusesSavedKey())
         assertEquals("", missing.configuration().apiKey)
     }
+
+    @Test fun presetsClearTypedAndSavedKeysWhenTheDestinationChangesWithoutEnablingHttp() {
+        val first = TextTranslationPresets.entries.first { it.id == "openai" }
+        val other = TextTranslationPresets.entries.first { it.id == "deepseek" }
+        val local = TextTranslationPresets.entries.first { it.id == "ollama" }
+        val draft = TextTranslationDraft(TranslationConfiguration(provider = TextTranslationProvider.OPENAI_COMPATIBLE,
+            endpoint = first.endpoint, model = "synthetic-model", apiKey = "synthetic-saved-key"))
+        draft.key = "synthetic-typed-key"
+        draft.applyPreset(other)
+        assertEquals(other.endpoint, draft.endpoint)
+        assertEquals(other.model, draft.model)
+        assertEquals(other.id, draft.presetId())
+        assertEquals("", draft.key)
+        assertEquals("", draft.configuration().apiKey)
+        assertTrue(draft.forgetKey)
+        draft.applyPreset(first)
+        assertEquals("", draft.configuration().apiKey)
+        draft.key = "synthetic-other-key"
+        draft.applyPreset(local)
+        assertEquals("", draft.configuration().apiKey)
+        assertFalse(draft.localHttp)
+        assertFalse(draft.configuration().allowLocalHttp)
+    }
+
+    @Test fun equivalentPresetDestinationsKeepTheirTypedAndSavedKeysAndInferFromFullAddresses() {
+        val preset = TextTranslationPresets.entries.first { it.id == "openai" }
+        val draft = TextTranslationDraft(TranslationConfiguration(provider = TextTranslationProvider.OPENAI_COMPATIBLE,
+            endpoint = preset.endpoint.trimEnd('/') + "/chat/completions", apiKey = "synthetic-saved-key", allowLocalHttp = true))
+        assertEquals(preset.id, draft.presetId())
+        draft.applyPreset(preset)
+        assertEquals("synthetic-saved-key", draft.configuration().apiKey)
+        assertFalse(draft.forgetKey)
+        draft.key = "synthetic-typed-key"
+        draft.applyPreset(preset)
+        assertEquals("synthetic-typed-key", draft.configuration().apiKey)
+        assertTrue(draft.localHttp)
+        draft.endpoint = "https://custom.example.invalid/v1"
+        assertNull(draft.presetId())
+    }
 }

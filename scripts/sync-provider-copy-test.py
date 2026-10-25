@@ -33,7 +33,9 @@ class SharedProviderCopyTest(unittest.TestCase):
         for directory in source["locales"].values():
             (root / "android/app/src/main/res" / directory).mkdir(parents=True)
         return patch.multiple(MODULE, ROOT=root, SOURCE=root / "shared/provider-copy.json",
-                              TS_OUTPUT=root / "src/lib/generated/providerCopy.ts", RESOURCE_ROOT=root / "android/app/src/main/res")
+                              TS_OUTPUT=root / "src/lib/generated/providerCopy.ts",
+                              KOTLIN_OUTPUT=root / "android/app/src/main/java/app/yuxino/mimi/android/GeneratedTextTranslationPresets.kt",
+                              RESOURCE_ROOT=root / "android/app/src/main/res")
 
     def test_generation_and_check_work_with_legacy_windows_locale(self):
         original_open = Path.open
@@ -84,6 +86,54 @@ class SharedProviderCopyTest(unittest.TestCase):
                     MODULE.TS_OUTPUT.write_text("// stale\n", encoding="utf-8")
                     self.assertEqual(1, MODULE.main())
                     self.assertEqual("// stale\n", MODULE.TS_OUTPUT.read_text(encoding="utf-8"))
+
+    def test_compatible_presets_share_order_and_values(self):
+        presets = json.loads(MODULE.SOURCE.read_text(encoding="utf-8"))["compatiblePresets"]
+        outputs = MODULE.generated_files()
+        ts = outputs[MODULE.TS_OUTPUT].split("export const OPENAI_COMPATIBLE_PRESETS = ", 1)[1]
+        self.assertEqual(presets, json.loads(ts.removesuffix(" as const;\n")))
+        kotlin = outputs[MODULE.KOTLIN_OUTPUT]
+        positions = []
+        for preset in presets:
+            row = "TextTranslationPreset(" + ", ".join(MODULE.kotlin_string(preset[key]) for key in ("id", "label", "endpoint", "model")) + ")"
+            positions.append(kotlin.index(row))
+        self.assertEqual(sorted(positions), positions)
+        self.assertEqual('"synthetic\\$value"', MODULE.kotlin_string("synthetic$value"))
+
+    def test_invalid_compatible_presets_are_rejected(self):
+        preset = {"id": "synthetic", "label": "Synthetic", "endpoint": "https://example.com/v1", "model": ""}
+        cases = [
+            [preset, preset],
+            [{**preset, "id": "not-an-id"}],
+            [{**preset, "label": ""}],
+            [{**preset, "model": "bad\nmodel"}],
+            [{**preset, "model": "bad\u0085model"}],
+            [{**preset, "model": " model "}],
+            [{**preset, "model": "x" * 257}],
+            [{**preset, "endpoint": "http://example.com/v1"}],
+            [{**preset, "endpoint": "https://key@example.com/v1"}],
+            [{**preset, "endpoint": "https://example.com/v1?key=synthetic"}],
+            [{**preset, "endpoint": "https://example.com/v1#fragment"}],
+            [{**preset, "endpoint": "https://example.com:invalid/v1"}],
+            [{**preset, "unexpected": "field"}],
+        ]
+        for presets in cases:
+            with self.subTest(presets=presets), self.assertRaisesRegex(ValueError, "compatible preset"):
+                MODULE.compatible_presets({"compatiblePresets": presets})
+        self.assertEqual([preset], MODULE.compatible_presets({"compatiblePresets": [preset]}))
+        for endpoint in ("http://127.0.0.1:11434/v1", "http://[::1]:1234/v1"):
+            local = {**preset, "endpoint": endpoint}
+            self.assertEqual([local], MODULE.compatible_presets({"compatiblePresets": [local]}))
+
+    def test_check_detects_kotlin_drift_without_overwriting_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.fixture(Path(directory)), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                with patch("sys.argv", [str(SCRIPT)]):
+                    self.assertEqual(0, MODULE.main())
+                MODULE.KOTLIN_OUTPUT.write_text("// stale\n", encoding="utf-8")
+                with patch("sys.argv", [str(SCRIPT), "--check"]):
+                    self.assertEqual(1, MODULE.main())
+                self.assertEqual("// stale\n", MODULE.KOTLIN_OUTPUT.read_text(encoding="utf-8"))
 
     def test_language_count_tracks_shared_contract(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -61,6 +61,12 @@
   height: 20px;
   object-fit: contain;
 }
+.mimi-select__icon .provider-icon__generic,
+.mimi-select__icon .provider-icon[data-provider="xAI"] img,
+.mimi-select__icon .provider-icon[data-provider="xAIRealtime"] img {
+  width: 18px;
+  height: 18px;
+}
 .mimi-select__trigger > svg { flex-shrink: 0; font-size: 11px; opacity: 0.6; }
 .mimi-select__trigger:hover:not(:disabled) { border-color: currentColor; }
 .mimi-select__trigger:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }

@@ -27,4 +27,7 @@
     <string name="speech_translation_asr_mt">ASR + MT</string>
     <string name="speech_translation_help">Simultaneous translation returns original text and translations directly. ASR + MT recognizes speech, then translates it with your chosen text service. Both configurations are retained. Stop subtitles to switch.</string>
     <string name="speech_translation_failed">Could not save the translation mode. Try again.</string>
+    <string name="translation_preset">Quick setup</string>
+    <string name="translation_preset_custom">Custom</string>
+    <string name="translation_preset_help">Prefills an editable address and model. Choose a model enabled for your account or downloaded locally. Qwen defaults to Beijing. If a key is required, use one for that service address.</string>
 </resources>

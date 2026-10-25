@@ -19,6 +19,8 @@ import { SavedCredentialInput } from "./SavedCredentialInput";
 import { useCredentialEditorState } from "./useCredentialEditorState";
 import { useAppleTranslationSupport } from "./useAppleTranslationSupport";
 import { AppleTranslationSettings } from "./AppleTranslationSettings";
+import { OPENAI_COMPATIBLE_PRESETS, PROVIDER_COPY } from "../../lib/generated/providerCopy";
+import { compatiblePresetForEndpoint } from "../../lib/textTranslationPresets";
 
 const XAI_TRANSLATION_HELP = {
   zh: "使用 xAI 的 Grok 文字模型翻译识别结果。此处的 API Key 仅用于文字翻译，与语音识别配置分别保存。",
@@ -73,6 +75,8 @@ export function SpeechAndTextCredentialEditor({ profile, inputId, disabled, busy
   const [modelInvalid, setModelInvalid] = useState(false);
   const [revealEpoch, setRevealEpoch] = useState(0);
   const [clearTranslationToken, setClearTranslationToken] = useState(false);
+  const [presetDiscardedToken, setPresetDiscardedToken] = useState(false);
+  const [customPreset, setCustomPreset] = useState(false);
   const recognitionState = useCredentialEditorState(profile.id, undefined, visible && !textOnly, revealEpoch);
   const translationState = useCredentialEditorState(profile.id, translation === "followService" ? undefined : translation, visible && !integratedRealtime && translation !== "followService" && !nativeTranslation, revealEpoch);
   const endpointValue = editedFields.endpoint ? draft.endpoint : translationState.state?.endpoint ?? draft.endpoint;
@@ -100,11 +104,14 @@ export function SpeechAndTextCredentialEditor({ profile, inputId, disabled, busy
     setEndpointInvalid(false);
     setModelInvalid(false);
     setClearTranslationToken(false);
+    setCustomPreset(false);
+    setPresetDiscardedToken(false);
   }
+  const clearToken = clearTranslationToken || presetDiscardedToken && !draft.token.trim();
   const credentials: ProviderCredentialsInput | null = integratedRealtime
     ? draft.apiKey.trim() ? { kind: "apiKey", apiKey: draft.apiKey.trim() } : null
-    : buildTextTranslationCredentials(profile, { ...draft, endpoint: endpointDraft, model: modelDraft }, translation, clearTranslationToken, keepsSavedText);
-  const dirty = !saved || !!draft.apiKey || translation !== savedTranslation || endpointChanged || !!draft.token || modelChanged || clearTranslationToken;
+    : buildTextTranslationCredentials(profile, { ...draft, endpoint: endpointDraft, model: modelDraft }, translation, clearToken, keepsSavedText);
+  const dirty = !saved || !!draft.apiKey || translation !== savedTranslation || endpointChanged || !!draft.token || modelChanged || clearToken;
   const compatible = isChatCompletionsTranslation(translation);
   const keepsSavedDestination = keepsSavedText;
   const awaitingSavedDestination = translation !== "followService" && !nativeTranslation && (translationState.loading || !!translationState.error);
@@ -113,7 +120,7 @@ export function SpeechAndTextCredentialEditor({ profile, inputId, disabled, busy
   const speechCheckDraft: ProviderCredentialsInput | null | undefined = !draft.apiKey.trim()
     ? savedSpeech || (unavailableSpeech && !draft.apiKey) ? undefined : null
     : { kind: "alibabaTranslation", apiKey: draft.apiKey.trim(), textTranslation: "followService", endpoint: "", token: "", model: "" };
-  const textChanged = translation !== savedTranslation || endpointChanged || modelChanged || !!draft.token.trim() || clearTranslationToken || (translation === "followService" && !!draft.apiKey.trim());
+  const textChanged = translation !== savedTranslation || endpointChanged || modelChanged || !!draft.token.trim() || clearToken || (translation === "followService" && !!draft.apiKey.trim());
   let textCheckDraft: ProviderCredentialsInput | null | undefined;
   if (textChanged) {
     const endpointRequired = translation === "deepLX" || compatible;
@@ -121,7 +128,7 @@ export function SpeechAndTextCredentialEditor({ profile, inputId, disabled, busy
     const invalidModel = (compatible || xaiTranslation) && (editedFields.model || !keepsSavedText) && !openAICompatibleModelIsValid(modelValue);
     const missingToken = (translation === "deepL" || xaiTranslation) && !draft.token.trim() && !keepsSavedText;
     const completeExplicitText = xaiTranslation ? !!draft.token.trim() && openAICompatibleModelIsValid(modelValue) : translation === "deepL" ? !!draft.token.trim()
-      : endpointRequired && deepLXEndpointIsValid(draft.endpoint) && (!compatible || openAICompatibleModelIsValid(draft.model)) && (!!draft.token.trim() || (compatible && clearTranslationToken));
+      : endpointRequired && deepLXEndpointIsValid(draft.endpoint) && (!compatible || openAICompatibleModelIsValid(draft.model)) && (!!draft.token.trim() || (compatible && clearToken));
     const unavailableSavedText = !nativeTranslation && translation !== "followService" && (translationState.loading || !!translationState.error) && !completeExplicitText;
     const unavailableBuiltIn = translation === "followService" && (textOnly || (!draft.apiKey.trim() && !savedSpeech));
     // A text-only probe must not need or submit a recognition key. Include
@@ -134,14 +141,29 @@ export function SpeechAndTextCredentialEditor({ profile, inputId, disabled, busy
       textTranslation: translation,
       endpoint: endpointRequired ? endpointValue.trim() : "",
       model: compatible || xaiTranslation ? modelValue.trim() : "",
-      token: nativeTranslation || translation === "followService" || clearTranslationToken ? "" : draft.token.trim(),
-      ...(compatible && clearTranslationToken ? { clearToken: true } : {}),
+      token: nativeTranslation || translation === "followService" || clearToken ? "" : draft.token.trim(),
+      ...(compatible && clearToken ? { clearToken: true } : {}),
     };
   }
   const destinationKeyLabel = xaiTranslation ? I18N.settings.apiKey : translation === "deepL" ? I18N.settings.deepLApiKey : compatible ? I18N.settings.openAICompatibleApiKey : I18N.settings.deepLXToken;
   const endpointId = `${inputId}-endpoint`;
   const modelId = `${inputId}-model`;
   const noteId = storageNoteId ?? `${inputId}-storage-note`;
+  const presetCopy = PROVIDER_COPY[effectiveUiLanguage()];
+  const preset = compatiblePresetForEndpoint(endpointValue);
+  const choosePreset = (id: string) => {
+    const next = OPENAI_COMPATIBLE_PRESETS.find(item => item.id === id);
+    // Custom leaves the editable destination intact. Selecting a preset is
+    // only a local draft change; it never saves, reveals a key or connects.
+    if (!next) { setCustomPreset(true); return; }
+    setCustomPreset(false);
+    const changedDestination = compatiblePresetForEndpoint(endpointValue)?.id !== next.id;
+    setDraft(current => ({ ...current, endpoint: changedDestination ? next.endpoint : endpointValue, model: next.model, token: changedDestination ? "" : current.token }));
+    setEditedFields({ endpoint: true, model: true });
+    if (changedDestination) { setClearTranslationToken(false); setPresetDiscardedToken(true); }
+    setEndpointInvalid(false);
+    setModelInvalid(false);
+  };
 
   useEffect(() => {
     if (endpointInvalid) {
@@ -171,6 +193,8 @@ export function SpeechAndTextCredentialEditor({ profile, inputId, disabled, busy
     setEndpointInvalid(false);
     setModelInvalid(false);
     setClearTranslationToken(false);
+    setCustomPreset(false);
+    setPresetDiscardedToken(false);
   };
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -198,8 +222,8 @@ export function SpeechAndTextCredentialEditor({ profile, inputId, disabled, busy
     { value: "xAI", label: "xAI Grok", icon: <ProviderIcon provider="xAI" size={32} /> },
     { value: "deepL", label: "DeepL", icon: <ProviderIcon provider="deepL" size={32} /> },
     { value: "deepLX", label: I18N.settings.textTranslationCustom, icon: <ProviderIcon provider="deepLX" size={32} /> },
-    { value: "chatMock", label: "ChatMock", icon: <ProviderIcon provider="chatMock" size={32} /> },
     { value: "openAICompatible", label: I18N.settings.textTranslationOpenAICompatible, icon: <ProviderIcon provider="openAICompatible" size={32} /> },
+    { value: "chatMock", label: "ChatMock", icon: <ProviderIcon provider="chatMock" size={32} /> },
   ].map(option => option.value === "followService" ? option : { ...option, label: textTranslationDisplayName(profile, option.value as TextTranslation) });
   const nativeGuideId = `${inputId}-apple-translation-guide`;
   const translationCheck = !integratedRealtime && !(textOnly && translation === "followService") && !(nativeTranslation && (targetLanguage === "original" || sourceLanguage === targetLanguage))
@@ -248,6 +272,12 @@ export function SpeechAndTextCredentialEditor({ profile, inputId, disabled, busy
         onRetry={apple.refresh} onBusyChange={onNativeTranslationBusyChange} onPrepared={onNativeTranslationPrepared} />}
       {nativeTranslation && <div className="apple-speech-connection-check">{translationCheck}</div>}
       {translation !== "followService" && !nativeTranslation && <div className="credential-form__fields">
+        {translation === "openAICompatible" && <div className="settings-field translation-preset-field">
+          <span className="service-stage__name-help">{presetCopy.compatiblePresetLabel}<SettingsHelp text={presetCopy.compatiblePresetHelp} label={I18N.settings.helpLabel} /></span>
+          <SettingsSelect label={presetCopy.compatiblePresetLabel} disabled={disabled || awaitingSavedDestination} value={customPreset ? "custom" : preset?.id ?? "custom"}
+            options={[{ value: "custom", label: presetCopy.compatiblePresetCustom }, ...OPENAI_COMPATIBLE_PRESETS.map(item => ({ value: item.id, label: item.label }))]}
+            onChange={choosePreset} />
+        </div>}
         {(translation === "deepLX" || compatible) && <label className="settings-field" htmlFor={endpointId}>
           <span>{compatible ? I18N.settings.openAICompatibleEndpoint : I18N.settings.deepLXEndpoint}</span>
           <ConfigInput copyable expandable key={translation} ref={endpointRef} id={endpointId} type="text" autoComplete="off" spellCheck={false} disabled={disabled} required value={endpointValue} placeholder={I18N.settings.serviceAddressPlaceholder} aria-invalid={endpointInvalid || undefined} aria-describedby={endpointInvalid ? `${endpointId}-error ${noteId}` : noteId} onValueChange={(value) => { setEditedFields((current) => ({ ...current, endpoint: true })); setDraft((current) => ({ ...current, endpoint: value })); if (endpointInvalid) setEndpointInvalid(!deepLXEndpointIsValid(value)); }} />
@@ -260,9 +290,9 @@ export function SpeechAndTextCredentialEditor({ profile, inputId, disabled, busy
         </label>}
         <div className="settings-field">
           <span className="service-stage__field-label"><label htmlFor={`${inputId}-token`}>{destinationKeyLabel}</label>{compatible && <SettingsHelp id={`${inputId}-compatible-required`} text={keepsSavedDestination ? I18N.settings.openAICompatibleAddressKey : I18N.settings.openAICompatibleRequired} label={I18N.settings.helpLabel} />}</span>
-          <SavedCredentialInput key={`${profile.id}:${translation}:${revealEpoch}`} profileId={profile.id} field="token" textTranslation={translation} label={destinationKeyLabel} hasSavedValue={hasTranslationKey && !clearTranslationToken && !endpointChanged} allowSavedReveal={translation === savedTranslation} active={visible && !busy && !confirmingDelete} id={`${inputId}-token`} type="password" autoComplete="new-password" spellCheck={false} disabled={disabled || clearTranslationToken} value={draft.token} placeholder={compatible ? clearTranslationToken ? I18N.settings.noTranslationKeyPlaceholder : hasTranslationKey && !endpointChanged ? I18N.settings.savedTranslationKeyPlaceholder : I18N.settings.optionalTranslationKeyPlaceholder : translation === "deepL" || xaiTranslation ? hasTranslationKey ? I18N.settings.savedTranslationKeyPlaceholder : I18N.settings.apiKeyPlaceholder : undefined} aria-describedby={compatible ? `${inputId}-compatible-required ${noteId}` : noteId} onValueChange={(value) => setDraft((current) => ({ ...current, token: value }))} />
+          <SavedCredentialInput key={`${profile.id}:${translation}:${revealEpoch}`} profileId={profile.id} field="token" textTranslation={translation} label={destinationKeyLabel} hasSavedValue={hasTranslationKey && !clearTranslationToken && !endpointChanged && !presetDiscardedToken} allowSavedReveal={translation === savedTranslation && !presetDiscardedToken} active={visible && !busy && !confirmingDelete} id={`${inputId}-token`} type="password" autoComplete="new-password" spellCheck={false} disabled={disabled || clearTranslationToken} value={draft.token} placeholder={compatible ? clearTranslationToken ? I18N.settings.noTranslationKeyPlaceholder : hasTranslationKey && !endpointChanged && !presetDiscardedToken ? I18N.settings.savedTranslationKeyPlaceholder : I18N.settings.optionalTranslationKeyPlaceholder : translation === "deepL" || xaiTranslation ? hasTranslationKey ? I18N.settings.savedTranslationKeyPlaceholder : I18N.settings.apiKeyPlaceholder : undefined} aria-describedby={compatible ? `${inputId}-compatible-required ${noteId}` : noteId} onValueChange={(value) => setDraft((current) => ({ ...current, token: value }))} />
         </div>
-        {compatible && keepsSavedDestination && hasTranslationKey && <span className="credential-form__actions">
+        {compatible && keepsSavedDestination && hasTranslationKey && !presetDiscardedToken && <span className="credential-form__actions">
           <button type="button" className="settings-button settings-button--quiet settings-button--compact" disabled={disabled} aria-pressed={clearTranslationToken} onClick={() => { setClearTranslationToken((current) => !current); setDraft((current) => ({ ...current, token: "" })); }}>
             <Icon name="key" />{clearTranslationToken ? I18N.settings.cancelTranslationKeyRemoval : I18N.settings.removeTranslationApiKey}
           </button>

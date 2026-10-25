@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { PROVIDER_COPY } from "../../lib/generated/providerCopy";
+import { OPENAI_COMPATIBLE_PRESETS, PROVIDER_COPY } from "../../lib/generated/providerCopy";
 import { SettingsToastRegion } from "./SettingsToast";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -1364,6 +1364,76 @@ async function chooseStageProxy(index: number, label: string) {
   const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(node => node.textContent === label)!;
   await act(async () => option.click());
 }
+
+async function chooseTranslationPreset(id: string) {
+  const copy = PROVIDER_COPY.en;
+  const label = id === "custom" ? copy.compatiblePresetCustom : OPENAI_COMPATIBLE_PRESETS.find(item => item.id === id)!.label;
+  await act(async () => host.querySelector<HTMLButtonElement>(`.translation-preset-field [aria-label="${copy.compatiblePresetLabel}"]`)!.click());
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(node => node.textContent === label)!.click());
+}
+
+async function renderPresetEditor(endpoint = "https://api.openai.com/v1") {
+  vi.mocked(profileCredentialEditorState).mockImplementation(async ({ textTranslation }) => textTranslation
+    ? { savedFields: ["token"], endpoint, model: "saved-model" } : { savedFields: ["apiKey"] });
+  const configured: SettingsSnapshot = { ...settings, profiles: [{ ...profile, credentialState: "present", textCredentialState: "present", textTranslation: "openAICompatible" }] };
+  actions.saveProfileCredentials.mockResolvedValue(configured);
+  actions.selectProfile.mockResolvedValue(configured);
+  await render(configured);
+  await act(async () => host.querySelector<HTMLButtonElement>(".service-row__edit")?.click());
+}
+
+it("prefills a compatible service without saving or probing and only submits its newly entered key", async () => {
+  await renderPresetEditor();
+  await change('.service-stage--translation input[id$="-token"]', "synthetic-old-token");
+  await chooseTranslationPreset("deepseek");
+  expect(host.querySelector<HTMLInputElement>('.service-stage--translation input[id$="-endpoint"]')!.value).toBe("https://api.deepseek.com");
+  expect(host.querySelector<HTMLInputElement>('.service-stage--translation input[id$="-model"]')!.value).toBe("deepseek-flash");
+  expect(host.querySelector<HTMLInputElement>('.service-stage--translation input[id$="-token"]')!.value).toBe("");
+  expect(actions.saveProfileCredentials).not.toHaveBeenCalled();
+  expect(testProfileConnection).not.toHaveBeenCalled();
+  expect(profileRevealCredential).not.toHaveBeenCalled();
+  await change('.service-stage--translation input[id$="-token"]', "synthetic-new-token");
+  await act(async () => host.querySelector<HTMLButtonElement>('.service-stages button[type="submit"]')!.click());
+  expect(actions.saveProfileCredentials).toHaveBeenCalledExactlyOnceWith(profile.id, { kind: "alibabaTranslation", apiKey: "", textTranslation: "openAICompatible", endpoint: "https://api.deepseek.com", model: "deepseek-flash", token: "synthetic-new-token" });
+});
+
+it("does not resurrect a saved key after switching presets and returning to its old address", async () => {
+  await renderPresetEditor();
+  await chooseTranslationPreset("deepseek");
+  await chooseTranslationPreset("openai");
+  const key = host.querySelector<HTMLInputElement>('.service-stage--translation input[id$="-token"]')!;
+  expect(key.value).toBe("");
+  expect(key.disabled).toBe(false);
+  await act(async () => host.querySelector<HTMLButtonElement>('.service-stages button[type="submit"]')!.click());
+  expect(actions.saveProfileCredentials.mock.calls[0]?.[1]).toMatchObject({ endpoint: "", token: "", clearToken: true });
+  expect(profileRevealCredential).not.toHaveBeenCalled();
+});
+
+it("keeps a typed key for an equivalent destination and leaves fields editable in Custom", async () => {
+  await renderPresetEditor("https://api.openai.com/v1/chat/completions/");
+  await chooseTranslationPreset("custom");
+  await chooseTranslationPreset("openai");
+  expect(host.querySelector('.service-stage--translation .saved-credential-input__toggle')).not.toBeNull();
+  await chooseTranslationPreset("custom");
+  await change('.service-stage--translation input[id$="-token"]', "synthetic-same-token");
+  await chooseTranslationPreset("openai");
+  expect(host.querySelector<HTMLInputElement>('.service-stage--translation input[id$="-token"]')!.value).toBe("synthetic-same-token");
+  await chooseTranslationPreset("custom");
+  expect(host.querySelector('.translation-preset-field [role="combobox"]')!.textContent).toBe(PROVIDER_COPY.en.compatiblePresetCustom);
+  expect(host.querySelector<HTMLInputElement>('.service-stage--translation input[id$="-endpoint"]')!.value).toBe("https://api.openai.com/v1/chat/completions/");
+});
+
+it("requires a local model ID after choosing Ollama and can save it without a key", async () => {
+  await renderPresetEditor();
+  await chooseTranslationPreset("ollama");
+  const save = () => host.querySelector<HTMLButtonElement>('.service-stages button[type="submit"]')!;
+  await act(async () => save().click());
+  expect(actions.saveProfileCredentials).not.toHaveBeenCalled();
+  expect(host.querySelector<HTMLInputElement>('.service-stage--translation input[id$="-model"]')!.validity.valueMissing).toBe(true);
+  await change('.service-stage--translation input[id$="-model"]', "synthetic-local-model");
+  await act(async () => save().click());
+  expect(actions.saveProfileCredentials.mock.calls[0]?.[1]).toMatchObject({ endpoint: "http://127.0.0.1:11434/v1", model: "synthetic-local-model", token: "", clearToken: true });
+});
 
 it("saves only the chosen stage with its profile and restores saved choices when switching editors", async () => {
   const other = { ...profile, id: "other", name: "Other", speechNetworkProxy: { mode: "direct" as const, url: null } };

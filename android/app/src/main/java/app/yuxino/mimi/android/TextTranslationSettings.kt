@@ -19,8 +19,9 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
     editorDraft: TextTranslationEditorDraft? = null, private val speechProvider: ServiceProvider = ServiceProvider.DASHSCOPE) {
     private val providers = buildList {
         if (speechProvider == ServiceProvider.DASHSCOPE) add(TextTranslationProvider.BUILTIN)
-        addAll(listOf(TextTranslationProvider.DEEPL, TextTranslationProvider.DEEPLX,
-            TextTranslationProvider.CHAT_MOCK, TextTranslationProvider.OPENAI_COMPATIBLE, TextTranslationProvider.XAI, TextTranslationProvider.NONE))
+        addAll(listOf(TextTranslationProvider.NONE, TextTranslationProvider.XAI,
+            TextTranslationProvider.DEEPL, TextTranslationProvider.DEEPLX,
+            TextTranslationProvider.OPENAI_COMPATIBLE, TextTranslationProvider.CHAT_MOCK))
     }
     private val drafts = providers.associateWith { route ->
         TextTranslationDraft(if (profileId == null) TranslationConfiguration(provider = route) else SettingsStore.profileTranslationConfiguration(activity, profileId, route)).apply {
@@ -43,6 +44,10 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
     private val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
     private val fields = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
     private val mode = Spinner(activity).apply { tag = "translation-mode"; background = null; setPadding(0, 0, 0, 0) }
+    private val preset = Spinner(activity).apply { tag = "translation-preset"; background = null; setPadding(0, 0, 0, 0); isSaveEnabled = false }
+    private val presetRow = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; tag = "translation-preset-row" }
+    private var presetSelection = -1
+    private var customPreset = false
     private val qwenModels = listOf("lite", "flash", "plus")
     private val qwenModel = Spinner(activity).apply { tag = "qwen-mt-model"; background = null; setPadding(0, 0, 0, 0) }
     private val qwenModelRow = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; tag = "qwen-mt-model-row" }
@@ -81,6 +86,14 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
         mode.contentDescription = activity.getString(R.string.translation_title)
         mode.setSelection(providers.indexOf(selected))
         root.addView(mode, LinearLayout.LayoutParams(-1, dp(56)).apply { bottomMargin = dp(16) })
+        presetRow.addView(HelpUi.heading(activity, activity.getString(R.string.translation_preset),
+            activity.getString(R.string.translation_preset_help), 16f, "translation-preset-help"))
+        preset.adapter = ArrayAdapter(activity, R.layout.mimi_spinner_item,
+            listOf(activity.getString(R.string.translation_preset_custom)) + TextTranslationPresets.entries.map { it.label })
+            .apply { setDropDownViewResource(R.layout.mimi_spinner_dropdown) }
+        preset.contentDescription = activity.getString(R.string.translation_preset)
+        presetRow.addView(preset, LinearLayout.LayoutParams(-1, dp(56)))
+        root.addView(presetRow, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(16) })
         qwenModel.adapter = ArrayAdapter(activity, R.layout.mimi_spinner_item,
             listOf("Qwen-MT Lite", "Qwen-MT Flash", "Qwen-MT Plus")).apply { setDropDownViewResource(R.layout.mimi_spinner_dropdown) }
         qwenModel.contentDescription = activity.getString(R.string.translation_model)
@@ -99,7 +112,7 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                 if (rendering) return
-                rememberDraft(); invalidateCheck(); updateKeyLabel()
+                rememberDraft(); syncPresetSelection(); invalidateCheck(); updateKeyLabel()
             }
             override fun afterTextChanged(s: Editable?) = Unit
         }
@@ -112,8 +125,14 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
         mode.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 if (providers[position] != selected) {
-                    rememberDraft(); selected = providers[position]; renderDraft()
+                    applyPendingPreset(); rememberDraft(); selected = providers[position]; renderDraft()
                 }
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+        preset.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (position == preset.selectedItemPosition) applyPendingPreset()
             }
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
@@ -132,6 +151,7 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
     }
 
     fun editorDraft(): TextTranslationEditorDraft {
+        applyPendingPreset()
         rememberDraft()
         // Spinner selection can change just before recreation, while its
         // onItemSelected callback is still queued. The fields still belong to
@@ -149,6 +169,8 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
         endpoint.setText(state.endpoint); model.setText(state.model); key.setText(state.key)
         localHttp.isChecked = state.localHttp
         fields.visibility = if (hasNetworkProvider()) View.VISIBLE else View.GONE
+        presetRow.visibility = if (selected == TextTranslationProvider.OPENAI_COMPATIBLE) View.VISIBLE else View.GONE
+        syncPresetSelection()
         qwenModelRow.visibility = if (selected == TextTranslationProvider.BUILTIN) View.VISIBLE else View.GONE
         val customEndpoint = selected.hasCustomEndpoint
         ServiceSettingsUi.fieldVisible(inputLayouts.getValue(endpoint), customEndpoint)
@@ -160,7 +182,28 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
         updateKeyLabel()
     }
 
+    private fun syncPresetSelection() {
+        val id = if (selected == TextTranslationProvider.OPENAI_COMPATIBLE && !customPreset) drafts.getValue(selected).presetId() else null
+        presetSelection = TextTranslationPresets.entries.indexOfFirst { it.id == id } + 1
+        if (preset.selectedItemPosition != presetSelection) preset.setSelection(presetSelection)
+    }
+
+    private fun applyPendingPreset() {
+        if (rendering || selected != TextTranslationProvider.OPENAI_COMPATIBLE) return
+        val position = preset.selectedItemPosition
+        if (position == presetSelection) return
+        presetSelection = position
+        // Explicit Custom stays selected while this editor's fields are edited.
+        val choice = TextTranslationPresets.entries.getOrNull(position - 1)
+        customPreset = choice == null
+        if (choice == null) return
+        rememberDraft()
+        drafts.getValue(selected).applyPreset(choice)
+        renderDraft()
+    }
+
     fun draft(validate: Boolean = true): TranslationConfiguration? {
+        applyPendingPreset()
         rememberDraft()
         if (!hasNetworkProvider()) return TranslationConfiguration(provider = selected)
         val state = drafts.getValue(selected)
@@ -283,7 +326,7 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
     }
     fun setEditingEnabled(enabled: Boolean) {
         if (!enabled) invalidateCheck()
-        listOf(mode, qwenModel, endpoint, model, key, localHttp, removeKey, check).forEach { it.isEnabled = enabled }
+        listOf(mode, preset, qwenModel, endpoint, model, key, localHttp, removeKey, check).forEach { it.isEnabled = enabled }
     }
     private fun dp(value: Int) = ServiceSettingsUi.dp(activity, value)
     private fun field(title: Int, tag: String, secret: Boolean = false): TextInputEditText {

@@ -27,4 +27,7 @@
     <string name="speech_translation_asr_mt">ASR + MT</string>
     <string name="speech_translation_help">同時通訳は原文と訳文を直接出力します。ASR + MT は音声を認識し、選んだテキスト翻訳サービスで翻訳します。両方の設定を保持します。字幕を停止して切り替えてください。</string>
     <string name="speech_translation_failed">翻訳モードを保存できませんでした。再試行してください。</string>
+    <string name="translation_preset">簡単入力</string>
+    <string name="translation_preset_custom">カスタム</string>
+    <string name="translation_preset_help">サービスのアドレスとモデルを入力し、後から変更できます。アカウントで利用可能なモデルか、ダウンロード済みのローカルモデルを選んでください。Qwen の初期設定は北京リージョンです。キーが必要な場合は、そのアドレスに対応するキーを使用してください。</string>
 </resources>

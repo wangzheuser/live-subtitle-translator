@@ -29,5 +29,5 @@
     <string name="speech_translation_failed">Übersetzungsmodus konnte nicht gespeichert werden. Bitte erneut versuchen.</string>
     <string name="translation_preset">Schnelleinrichtung</string>
     <string name="translation_preset_custom">Benutzerdefiniert</string>
-    <string name="translation_preset_help">Füllt bearbeitbare Adresse und Modell aus. Wählen Sie ein für Ihr Konto freigeschaltetes oder lokal heruntergeladenes Modell. Qwen nutzt standardmäßig Peking. Falls ein Schlüssel nötig ist, muss er zur Dienstadresse gehören.</string>
+    <string name="translation_preset_help">Füllt eine bearbeitbare Dienstadresse aus; manche Modell-IDs müssen Sie eingeben. Wählen Sie ein freigeschaltetes oder lokal geladenes Modell. Adresse, Kontoregion, Produkt und API-Schlüssel müssen zusammenpassen. Textübersetzung und Spracherkennung haben getrennte Zugangsdaten.</string>
 </resources>

@@ -9,6 +9,13 @@ internal object TextTranslationPresets {
         TextTranslationPreset("deepseek", "DeepSeek", "https://api.deepseek.com", "deepseek-flash"),
         TextTranslationPreset("qwen", "Qwen (Alibaba Cloud)", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-flash"),
         TextTranslationPreset("gemini", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai", ""),
+        TextTranslationPreset("kimi", "Kimi", "https://api.moonshot.cn/v1", ""),
+        TextTranslationPreset("siliconflow", "SiliconFlow", "https://api.siliconflow.cn/v1", ""),
+        TextTranslationPreset("openrouter", "OpenRouter", "https://openrouter.ai/api/v1", ""),
+        TextTranslationPreset("indexTranslate", "Index-Translate", "https://index-translate.bilibili.com/v1", "Index-Translate-35B-A3B"),
+        TextTranslationPreset("tencentTokenHub", "Tencent TokenHub", "https://tokenhub.tencentmaas.com/v1", ""),
+        TextTranslationPreset("baiduQianfan", "Baidu Qianfan", "https://qianfan.baidubce.com/v2", ""),
+        TextTranslationPreset("volcanoArk", "Volcano Ark / Doubao", "https://ark.cn-beijing.volces.com/api/v3", ""),
         TextTranslationPreset("ollama", "Ollama", "http://127.0.0.1:11434/v1", ""),
         TextTranslationPreset("lmStudio", "LM Studio", "http://127.0.0.1:1234/v1", ""),
     )

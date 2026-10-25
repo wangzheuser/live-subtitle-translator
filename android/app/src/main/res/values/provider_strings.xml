@@ -29,5 +29,5 @@
     <string name="speech_translation_failed">Could not save the translation mode. Try again.</string>
     <string name="translation_preset">Quick setup</string>
     <string name="translation_preset_custom">Custom</string>
-    <string name="translation_preset_help">Prefills an editable address and model. Choose a model enabled for your account or downloaded locally. Qwen defaults to Beijing. If a key is required, use one for that service address.</string>
+    <string name="translation_preset_help">Prefills an editable service address; some model IDs must be entered. Choose an enabled or locally downloaded model. Match the address to your account region, product and API key. Text translation and speech recognition use separate credentials.</string>
 </resources>

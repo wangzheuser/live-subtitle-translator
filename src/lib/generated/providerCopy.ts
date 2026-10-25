@@ -32,7 +32,7 @@ export const PROVIDER_COPY = {
     "speechTranslationModeSaveFailed": "翻译模式保存失败，请重试。",
     "compatiblePresetLabel": "快速填写",
     "compatiblePresetCustom": "自定义",
-    "compatiblePresetHelp": "快速填入服务地址和模型，仍可修改。请选择账号已开通或本机已下载的模型。千问默认使用北京地域；服务需要 Key 时，须使用与地址对应的 Key。"
+    "compatiblePresetHelp": "快速填入服务地址，部分模型 ID 需自行填写，字段仍可修改。请选择已开通或本机已下载的模型；地址须与账号的地域、产品及 API Key 对应。文字翻译凭据与语音识别分别配置。"
   },
   "zh-TW": {
     "providerAlibabaDescription": "支援同聲傳譯。\n也可先辨識再翻譯，並自行選擇翻譯服務。",
@@ -66,7 +66,7 @@ export const PROVIDER_COPY = {
     "speechTranslationModeSaveFailed": "翻譯模式儲存失敗，請重試。",
     "compatiblePresetLabel": "快速填入",
     "compatiblePresetCustom": "自訂",
-    "compatiblePresetHelp": "快速填入服務位址和模型，仍可修改。請選擇帳號已開通或本機已下載的模型。千問預設使用北京地域；服務需要 Key 時，須使用與位址對應的 Key。"
+    "compatiblePresetHelp": "快速填入服務位址，部分模型 ID 需自行填寫，欄位仍可修改。請選擇已開通或本機已下載的模型；位址須與帳號的地域、產品及 API Key 對應。文字翻譯憑據與語音辨識分別設定。"
   },
   "en": {
     "providerAlibabaDescription": "Supports simultaneous translation,\nor speech recognition followed by translation with a service of your choice.",
@@ -100,7 +100,7 @@ export const PROVIDER_COPY = {
     "speechTranslationModeSaveFailed": "Could not save the translation mode. Try again.",
     "compatiblePresetLabel": "Quick setup",
     "compatiblePresetCustom": "Custom",
-    "compatiblePresetHelp": "Prefills an editable address and model. Choose a model enabled for your account or downloaded locally. Qwen defaults to Beijing. If a key is required, use one for that service address."
+    "compatiblePresetHelp": "Prefills an editable service address; some model IDs must be entered. Choose an enabled or locally downloaded model. Match the address to your account region, product and API key. Text translation and speech recognition use separate credentials."
   },
   "ja": {
     "providerAlibabaDescription": "同時通訳に対応。\n音声認識後に、お好みの翻訳サービスで翻訳することもできます。",
@@ -134,7 +134,7 @@ export const PROVIDER_COPY = {
     "speechTranslationModeSaveFailed": "翻訳モードを保存できませんでした。再試行してください。",
     "compatiblePresetLabel": "簡単入力",
     "compatiblePresetCustom": "カスタム",
-    "compatiblePresetHelp": "サービスのアドレスとモデルを入力し、後から変更できます。アカウントで利用可能なモデルか、ダウンロード済みのローカルモデルを選んでください。Qwen の初期設定は北京リージョンです。キーが必要な場合は、そのアドレスに対応するキーを使用してください。"
+    "compatiblePresetHelp": "サービスのアドレスを入力し、後から変更できます。一部のモデル ID は手入力が必要です。利用可能またはダウンロード済みのモデルを選び、アカウントの地域・製品・API Key に合うアドレスを使用してください。テキスト翻訳と音声認識の認証情報は別々に設定します。"
   },
   "de": {
     "providerAlibabaDescription": "Unterstützt Simultanübersetzung\noder Spracherkennung mit anschließender Übersetzung durch einen frei wählbaren Dienst.",
@@ -168,7 +168,7 @@ export const PROVIDER_COPY = {
     "speechTranslationModeSaveFailed": "Übersetzungsmodus konnte nicht gespeichert werden. Bitte erneut versuchen.",
     "compatiblePresetLabel": "Schnelleinrichtung",
     "compatiblePresetCustom": "Benutzerdefiniert",
-    "compatiblePresetHelp": "Füllt bearbeitbare Adresse und Modell aus. Wählen Sie ein für Ihr Konto freigeschaltetes oder lokal heruntergeladenes Modell. Qwen nutzt standardmäßig Peking. Falls ein Schlüssel nötig ist, muss er zur Dienstadresse gehören."
+    "compatiblePresetHelp": "Füllt eine bearbeitbare Dienstadresse aus; manche Modell-IDs müssen Sie eingeben. Wählen Sie ein freigeschaltetes oder lokal geladenes Modell. Adresse, Kontoregion, Produkt und API-Schlüssel müssen zusammenpassen. Textübersetzung und Spracherkennung haben getrennte Zugangsdaten."
   },
   "ko": {
     "providerAlibabaDescription": "동시통역을 지원하며,\n음성을 먼저 인식한 뒤 원하는 번역 서비스로 번역할 수도 있습니다.",
@@ -202,7 +202,7 @@ export const PROVIDER_COPY = {
     "speechTranslationModeSaveFailed": "번역 모드를 저장하지 못했습니다. 다시 시도하세요.",
     "compatiblePresetLabel": "빠른 설정",
     "compatiblePresetCustom": "사용자 지정",
-    "compatiblePresetHelp": "수정 가능한 주소와 모델을 채웁니다. 계정에서 활성화한 모델이나 로컬에 다운로드한 모델을 선택하세요. Qwen은 베이징 리전이 기본입니다. 키가 필요한 경우 해당 서비스 주소에 맞는 키를 사용하세요."
+    "compatiblePresetHelp": "수정 가능한 서비스 주소를 채웁니다. 일부 모델 ID는 직접 입력해야 합니다. 활성화했거나 로컬에 다운로드한 모델을 선택하고 계정 리전, 제품, API 키에 맞는 주소를 사용하세요. 텍스트 번역과 음성 인식의 인증 정보는 별도로 설정합니다."
   },
   "fr": {
     "providerAlibabaDescription": "Traduction simultanée,\nou reconnaissance vocale suivie d’une traduction avec le service de votre choix.",
@@ -236,7 +236,7 @@ export const PROVIDER_COPY = {
     "speechTranslationModeSaveFailed": "Impossible d’enregistrer le mode de traduction. Réessayez.",
     "compatiblePresetLabel": "Configuration rapide",
     "compatiblePresetCustom": "Personnalisé",
-    "compatiblePresetHelp": "Préremplit une adresse et un modèle modifiables. Choisissez un modèle activé pour votre compte ou téléchargé localement. Qwen utilise Pékin par défaut. Si une clé est nécessaire, utilisez celle correspondant à cette adresse."
+    "compatiblePresetHelp": "Préremplit une adresse modifiable ; certains identifiants de modèle restent à saisir. Choisissez un modèle activé ou téléchargé localement. L’adresse doit correspondre à la région du compte, au produit et à la clé API. Traduction et reconnaissance vocale ont des identifiants distincts."
   },
   "th": {
     "providerAlibabaDescription": "รองรับการแปลพร้อมเสียง\nหรือรู้จำเสียงก่อนแล้วแปลด้วยบริการที่คุณเลือก",
@@ -270,7 +270,7 @@ export const PROVIDER_COPY = {
     "speechTranslationModeSaveFailed": "บันทึกโหมดการแปลไม่สำเร็จ ลองอีกครั้ง",
     "compatiblePresetLabel": "ตั้งค่าด่วน",
     "compatiblePresetCustom": "กำหนดเอง",
-    "compatiblePresetHelp": "กรอกที่อยู่และโมเดลให้โดยยังแก้ไขได้ เลือกโมเดลที่เปิดใช้ในบัญชีหรือดาวน์โหลดไว้ในเครื่อง Qwen ใช้ภูมิภาคปักกิ่งเป็นค่าเริ่มต้น หากต้องใช้คีย์ ให้ใช้คีย์ที่ตรงกับที่อยู่บริการนั้น"
+    "compatiblePresetHelp": "กรอกที่อยู่บริการให้โดยยังแก้ไขได้ บางโมเดลต้องกรอก ID เอง เลือกโมเดลที่เปิดใช้หรือดาวน์โหลดไว้ในเครื่อง และใช้ที่อยู่ที่ตรงกับภูมิภาคบัญชี ผลิตภัณฑ์ และ API key ตั้งค่าข้อมูลรับรองการแปลข้อความแยกจากการรู้จำเสียง"
   }
 } as const;
 
@@ -297,6 +297,48 @@ export const OPENAI_COMPATIBLE_PRESETS = [
     "id": "gemini",
     "label": "Google Gemini",
     "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "model": ""
+  },
+  {
+    "id": "kimi",
+    "label": "Kimi",
+    "endpoint": "https://api.moonshot.cn/v1",
+    "model": ""
+  },
+  {
+    "id": "siliconflow",
+    "label": "SiliconFlow",
+    "endpoint": "https://api.siliconflow.cn/v1",
+    "model": ""
+  },
+  {
+    "id": "openrouter",
+    "label": "OpenRouter",
+    "endpoint": "https://openrouter.ai/api/v1",
+    "model": ""
+  },
+  {
+    "id": "indexTranslate",
+    "label": "Index-Translate",
+    "endpoint": "https://index-translate.bilibili.com/v1",
+    "model": "Index-Translate-35B-A3B"
+  },
+  {
+    "id": "tencentTokenHub",
+    "label": "Tencent TokenHub",
+    "endpoint": "https://tokenhub.tencentmaas.com/v1",
+    "model": ""
+  },
+  {
+    "id": "baiduQianfan",
+    "label": "Baidu Qianfan",
+    "endpoint": "https://qianfan.baidubce.com/v2",
+    "model": ""
+  },
+  {
+    "id": "volcanoArk",
+    "label": "Volcano Ark / Doubao",
+    "endpoint": "https://ark.cn-beijing.volces.com/api/v3",
     "model": ""
   },
   {

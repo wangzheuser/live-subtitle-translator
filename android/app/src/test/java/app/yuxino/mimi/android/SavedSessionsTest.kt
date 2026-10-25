@@ -19,25 +19,33 @@ class SavedSessionsTest {
         assertTrue(page(60, 0).hasNext)
         assertFalse(page(60, 1).hasNext)
     }
-    @Test fun formatterFailureRemovesTheNewDestination() {
-        var removed = false
-        assertThrows(IOException::class.java) {
-            exportSavedSession({ throw IOException("synthetic") }, { fail("must not write") }, { removed = true })
-        }
-        assertTrue(removed)
+    @Test fun formatterFailurePreservesExistingDestination() {
+        val destination = File.createTempFile("mimi-existing-document", ".txt").apply { writeText("existing synthetic document") }
+        try {
+            assertThrows(IOException::class.java) {
+                exportSavedSession({ throw IOException("synthetic") }, { destination.writeText("must not write") })
+            }
+            assertEquals("existing synthetic document", destination.readText())
+        } finally { destination.delete() }
     }
-    @Test fun failedCopyRemovesTemporaryAndNewDestination() {
+    @Test fun failedCopyRemovesOnlyTemporaryAndKeepsSelectedDestination() {
         val temporary = File.createTempFile("mimi-export-test", ".txt")
-        var removed = false
-        assertThrows(IOException::class.java) {
-            exportSavedSession({ temporary }, { throw IOException("synthetic") }, { removed = true })
-        }
-        assertTrue(removed); assertFalse(temporary.exists())
+        val destination = File.createTempFile("mimi-existing-document", ".txt").apply { writeText("existing synthetic document") }
+        try {
+            assertThrows(IOException::class.java) {
+                exportSavedSession({ temporary }, {
+                    destination.writeText("partial synthetic export")
+                    throw IOException("synthetic")
+                })
+            }
+            assertFalse(temporary.exists())
+            assertEquals("partial synthetic export", destination.readText())
+        } finally { temporary.delete(); destination.delete() }
     }
     @Test fun successfulCopyRemovesOnlyTemporary() {
         val temporary = File.createTempFile("mimi-export-test", ".txt").apply { writeText("synthetic fixture") }
         var copied = false
-        exportSavedSession({ temporary }, { copied = it.readText() == "synthetic fixture" }, { fail("must preserve destination") })
+        exportSavedSession({ temporary }, { copied = it.readText() == "synthetic fixture" })
         assertTrue(copied); assertFalse(temporary.exists())
     }
 }

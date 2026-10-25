@@ -576,7 +576,7 @@ class MainActivity : AppCompatActivity() {
         try {
             val request = MimiService.prepareStart(this)
             pendingStartRequest = request
-            ContextCompat.startForegroundService(this, intent.putExtra(MimiService.EXTRA_START_REQUEST, request))
+            MimiService.startFromActivity(this, intent.putExtra(MimiService.EXTRA_START_REQUEST, request))
             requestNotificationPermissionIfNeeded()
         } catch (_: RuntimeException) {
             pendingStartRequest?.let(MimiService::cancelStartRequest)

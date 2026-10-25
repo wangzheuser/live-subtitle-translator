@@ -5,7 +5,6 @@ import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.widget.TextView
-import androidx.core.content.ContextCompat
 import app.yuxino.mimi.android.capture.MimiService
 import app.yuxino.mimi.android.capture.CaptureInput
 
@@ -42,7 +41,7 @@ class CaptureProbeActivity : Activity() {
         if (resultCode == RESULT_OK && data != null) {
             val intent = MimiService.startIntent(this, resultCode, data, selectedInput).setAction(MimiService.ACTION_CAPTURE_TEST)
             if (useStartGate) intent.putExtra(MimiService.EXTRA_START_REQUEST, MimiService.prepareStart(this))
-            ContextCompat.startForegroundService(this, intent)
+            MimiService.startFromActivity(this, intent)
         }
     }
 }

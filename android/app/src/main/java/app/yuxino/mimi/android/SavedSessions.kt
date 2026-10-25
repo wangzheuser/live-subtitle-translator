@@ -43,15 +43,13 @@ internal data class SavedSessionPage(val total: Int, val page: Int, val entries:
 // No toString() that could accidentally include private subtitle text.
 internal class SavedSessionCaption(val audioSource: String, val source: String, val translation: String, val createdAtMs: Long, val index: Int)
 
-/** Clean only this operation's new document and temporary file, including formatter failure. */
-internal fun exportSavedSession(createFile: () -> File, writeFile: (File) -> Unit, discardDestination: () -> Unit) {
+/** The picker may return an existing document. Only our private temporary file is disposable.
+ * SAF writes are not atomic; a failed copy may leave partial content, but never deletes the destination. */
+internal fun exportSavedSession(createFile: () -> File, writeFile: (File) -> Unit) {
     var temporary: File? = null
     try {
         temporary = createFile()
         writeFile(temporary)
-    } catch (error: Exception) {
-        runCatching(discardDestination)
-        throw error
     } finally {
         temporary?.delete()
     }

@@ -146,6 +146,10 @@ class UiSmokeInstrumentation : Instrumentation() {
             InterfaceLanguageChecks(this).run(captureArguments)
             return
         }
+        if (captureArguments?.getString("saved_overlay") == "true") {
+            SavedSessionOverlayChecks(this).run()
+            return
+        }
         if (captureArguments?.getString("saved_sessions") == "true") {
             SavedSessionChecks(this).run()
             return

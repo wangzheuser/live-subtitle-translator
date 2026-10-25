@@ -11,7 +11,7 @@ class MimiApplication : Application() {
         super.onCreate()
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: Activity) {
-                if (activity is MainActivity || activity is ServiceSettingsActivity)
+                if (activity is MainActivity || activity is ServiceSettingsActivity || activity is SavedSessionsActivity)
                     MimiService.setOwnUiVisible(activity, true)
             }
             override fun onActivityStopped(activity: Activity) = MimiService.setOwnUiVisible(activity, false)

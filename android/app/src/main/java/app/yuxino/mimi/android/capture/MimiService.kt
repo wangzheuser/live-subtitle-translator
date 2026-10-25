@@ -222,6 +222,11 @@ class MimiService : Service() {
                 if (!isStarting && !isRunning && lanes.isEmpty()) stopSelf(startId)
                 return START_NOT_STICKY
             }
+            if (startRequest != 0L && !startOwnerVisible(startRequest)) {
+                lastCaptureError = "capture.start_failed"
+                stopSelf(startId)
+                return START_NOT_STICKY
+            }
             return handleStartCommand(intent)
         } finally {
             if (startRequest != 0L) {
@@ -233,6 +238,7 @@ class MimiService : Service() {
 
     private fun handleStartCommand(intent: Intent?): Int {
         if (intent?.action == ACTION_STOP) {
+            startOwner?.first?.let(::completeStartRequest)
             finishSession()
             return START_NOT_STICKY
         }
@@ -270,6 +276,11 @@ class MimiService : Service() {
             SubtitleBus.onSourceDraft("もう少し歩いてみましょう。", "ja")
             SubtitleBus.onTranslationDraft("再往前走一会儿吧。")
             showOverlay()
+            return START_NOT_STICKY
+        }
+        // Actual capture is always delivered from a currently visible Activity.
+        if ((intent?.getLongExtra(EXTRA_START_REQUEST, 0L) ?: 0L) == 0L) {
+            stopSelf()
             return START_NOT_STICKY
         }
         val input = CaptureInput.request(intent?.getStringExtra(EXTRA_CAPTURE_INPUT))
@@ -1240,6 +1251,25 @@ class MimiService : Service() {
 
     companion object {
         private val startGate = CaptureStartGate()
+        private var startOwner: Pair<Long, java.lang.ref.WeakReference<android.app.Activity>>? = null
+        private fun activityVisible(activity: android.app.Activity): Boolean =
+            !activity.isFinishing && !activity.isDestroyed && activity.window.decorView.isShown &&
+                activity.window.decorView.windowVisibility == View.VISIBLE
+        private fun startOwnerVisible(request: Long): Boolean = startOwner?.takeIf { it.first == request }
+            ?.second?.get()?.let(::activityVisible) == true
+        /** Visible-activity dispatch can be rejected before promotion without an FGS promise.
+         * Accepted requests immediately enter the required typed FGS before capture. */
+        internal fun startFromActivity(activity: android.app.Activity, intent: Intent) {
+            val request = intent.getLongExtra(EXTRA_START_REQUEST, 0L).takeIf { it != 0L } ?: prepareStart(activity)
+            try {
+                check(startPending(request) && activityVisible(activity)) { "capture_activity_not_visible" }
+                startOwner = request to java.lang.ref.WeakReference(activity)
+                checkNotNull(activity.startService(intent.putExtra(EXTRA_START_REQUEST, request))) { "capture_start_failed" }
+            } catch (error: RuntimeException) {
+                cancelStartRequest(request)
+                throw error
+            }
+        }
         private const val START_DELIVERY_TIMEOUT_MS = 10_000L
         val isStarting: Boolean get() = startGate.isPending
         internal fun startPending(request: Long): Boolean = startGate.waiting(request)
@@ -1249,10 +1279,10 @@ class MimiService : Service() {
             lastCaptureError = null
             val appContext = context.applicationContext
             Handler(Looper.getMainLooper()).postDelayed({
-                if (startGate.complete(request)) {
+                if (startPending(request)) {
                     lastCaptureError = "capture.start_failed"
+                    completeStartRequest(request)
                     Toast.makeText(InterfaceLanguage.context(appContext), R.string.capture_failed, Toast.LENGTH_LONG).show()
-                    stateListeners.forEach { it() }
                 }
             }, START_DELIVERY_TIMEOUT_MS)
             return request
@@ -1262,7 +1292,10 @@ class MimiService : Service() {
             completeStartRequest(request)
         }
         private fun completeStartRequest(request: Long) {
-            if (startGate.complete(request)) stateListeners.forEach { it() }
+            if (startGate.complete(request)) {
+                if (startOwner?.first == request) startOwner = null
+                stateListeners.forEach { it() }
+            }
         }
 
         private val ownUiOwners = CopyOnWriteArraySet<android.app.Activity>()

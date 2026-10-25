@@ -4,7 +4,6 @@ import android.app.Application
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
-import android.provider.DocumentsContract
 import androidx.lifecycle.AndroidViewModel
 import java.util.concurrent.Executors
 
@@ -67,7 +66,7 @@ internal class SavedSessionsViewModel(application: Application) : AndroidViewMod
             checkNotNull(resolver.openOutputStream(destination, "wt")).use { output ->
                 file.inputStream().use { input -> input.copyTo(output) }
             }
-        }, { DocumentsContract.deleteDocument(resolver, destination) })
+        })
     }, { notice = R.string.session_history_exported }, { notice = R.string.session_history_export_error })
 
     override fun onCleared() {

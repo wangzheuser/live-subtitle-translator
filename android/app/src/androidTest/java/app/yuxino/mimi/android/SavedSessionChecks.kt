@@ -24,6 +24,13 @@ import java.util.UUID
 internal class SavedSessionChecks(private val test: Instrumentation) {
     private val context get() = test.targetContext
     private var stage = "preconditions"
+    private var listSelections = 0
+    private var buttonSelections = 0
+    private var lastTextClickable = false
+    private var monitorHits = 0
+    private var exportBusy = false
+    private var exportExists = false
+    private var exportBytes = 0L
     private lateinit var activity: SavedSessionsActivity
     private lateinit var model: SavedSessionsViewModel
     private fun onUi(action: () -> Unit) {
@@ -47,11 +54,27 @@ internal class SavedSessionChecks(private val test: Instrumentation) {
         if (root is TextView) add(root)
         if (root is ViewGroup) for (index in 0 until root.childCount) addAll(texts(root.getChildAt(index)))
     }
-    private fun clickText(resource: Int) = onUi {
-        val expected = activity.getString(resource)
-        val item = WindowInspector.getGlobalWindowViews().flatMap(::texts)
-            .lastOrNull { it.text.toString() == expected && it.isShown }
-        checkNotNull(item) { "dialog_action_missing" }.performClick()
+    private fun clickText(resource: Int) {
+        onUi {
+            val expected = activity.getString(resource)
+            val item = checkNotNull(WindowInspector.getGlobalWindowViews().flatMap(::texts)
+                .lastOrNull { it.text.toString() == expected && it.isShown }) { "dialog_action_missing" }
+            lastTextClickable = item.isClickable
+            val list = generateSequence<View>(item) { it.parent as? View }
+                .filterIsInstance<android.widget.ListView>().firstOrNull()
+            if (list != null) {
+                val position = list.getPositionForView(item)
+                check(position >= 0 && list.isEnabled && list.performItemClick(item, position, list.adapter.getItemId(position))) {
+                    "dialog_list_selection_failed"
+                }
+                listSelections++
+            } else {
+                val clickable = generateSequence<View>(item) { it.parent as? View }.firstOrNull { it.isClickable }
+                check(clickable != null && clickable.isEnabled && clickable.performClick()) { "dialog_button_selection_failed" }
+                buttonSelections++
+            }
+        }
+        test.waitForIdleSync()
     }
     private fun capture(name: String) {
         await { activity.hasWindowFocus() && activity.window.decorView.isShown }
@@ -136,16 +159,35 @@ internal class SavedSessionChecks(private val test: Instrumentation) {
                 val monitor = test.addMonitor(filter, Instrumentation.ActivityResult(Activity.RESULT_OK,
                     Intent().setData(Uri.fromFile(output))), true)
                 try {
-                    onUi { view("session-export-$id").performClick() }
+                    onUi { check(view("session-export-$id").performClick()) { "export_action_failed" } }
                     clickText(if (markdown) R.string.session_history_markdown else R.string.session_history_txt)
-                    await { monitor.hits == 1 && !model.busy && output.exists() && output.length() > 0 }
+                    stage = if (markdown) "markdown_document_interception" else "text_document_interception"
+                    await { monitor.hits >= 1 }
+                    check(monitor.hits == 1) { "duplicate_document_launch" }
+                    stage = if (markdown) "markdown_document_write" else "text_document_write"
+                    await { !model.busy && output.exists() && output.length() > 0 }
+                    stage = if (markdown) "markdown_document_content" else "text_document_content"
                     val result = output.readText()
                     check("Synthetic source 1" in result && "Synthetic translation 60" in result) { "export_bilingual_content_missing" }
                     check("Microphone" in result && "System" in result) { "export_source_labels_missing" }
                     check(exports.listFiles().orEmpty().map { it.name }.toSet() == existingExports) { "export_temporary_not_cleaned" }
                     checks++
-                } finally { test.removeMonitor(monitor) }
+                } finally {
+                    monitorHits = monitor.hits
+                    onUi { exportBusy = model.busy }
+                    exportExists = output.exists(); exportBytes = output.length()
+                    test.removeMonitor(monitor)
+                }
             }
+            stage = "export_error_preserves_existing_document"
+            val existingDocument = File(context.cacheDir, "history-existing-$id.txt").apply {
+                writeText("Synthetic existing document")
+            }
+            outputs += existingDocument
+            onUi { model.export(UUID.randomUUID().toString(), false, Uri.fromFile(existingDocument)) }
+            await { !model.busy }
+            check(existingDocument.readText() == "Synthetic existing document") { "existing_document_changed_after_format_failure" }
+            checks++
             stage = "delete_confirmation"
             onUi { view("session-more-$id").performClick() }
             clickText(R.string.session_history_delete)
@@ -172,7 +214,7 @@ internal class SavedSessionChecks(private val test: Instrumentation) {
             }
         }
         test.finish(if (failure == null) Activity.RESULT_OK else Activity.RESULT_CANCELED, Bundle().apply {
-            putString("stream", "SAVED_SESSIONS_RESULT passed=${failure == null}; checks=$checks; listScreenshot=$listScreenshot; failure=${failure ?: "none"}; synthetic archive and document result; no provider, capture or real session changes.\n")
+            putString("stream", "SAVED_SESSIONS_RESULT passed=${failure == null}; checks=$checks; listScreenshot=$listScreenshot; listSelections=$listSelections; buttonSelections=$buttonSelections; lastTextClickable=$lastTextClickable; monitorHits=$monitorHits; exportBusy=$exportBusy; exportExists=$exportExists; exportBytes=$exportBytes; failure=${failure ?: "none"}; synthetic archive and document result; no provider, capture or real session changes.\n")
         })
     }
 }

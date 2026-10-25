@@ -4838,3 +4838,73 @@
   latest main, open PRs and active worktrees. Inspected duplicate/obsolete build
   entries reclaimed about 1 GiB; current canonical build dependencies and
   installed apps were preserved. Necessary evidence is retained outside Git.
+
+### 2026-10-25 — Android inputs, saved captions and provider regressions
+
+- Candidate [PR #318](https://github.com/yuxino/Mimi/pull/318) is based on
+  `507876b4564d40f745fc741774f3cadd36d49442`, which includes merged mode-selection
+  PR #317. The final Android native checks used `a4c630cd` plus the reviewed
+  visible-Activity service-dispatch, document-export and own-UI lifecycle fixes.
+  These are development-tree results, not clean release-package acceptance.
+  Final debug APK SHA-256:
+  `ed1606942db10e2f2f92c7b56f176bc9e0d962b26885ef4c25d85f4d7c8b116d`.
+- Canonical `./scripts/check.sh` passed: shared runtime 935, Rust JNI 29,
+  desktop 665, and 153 frontend files / 2,757 tests, plus shared core/contracts,
+  strict clippy, formatting, architecture checks and production builds. Runtime
+  and desktop each retain one existing ignored case. The final Android-only
+  dispatch correction passed the complete JVM suite: 42 suites / 291 tests,
+  including actual host JNI. Four-ABI native builds and 16 KB alignment passed.
+- On the headless Android 15/API 35 emulator, `capture_sources` passed rejected
+  start recovery, microphone-only without projection, typed foreground services,
+  independent System/Microphone lanes, projection revocation, no post-stop PCM
+  delivery and bounded source-labeled confirmations after Stop. An earlier
+  rejection exposed `ForegroundServiceDidNotStartInTimeException`: visible
+  Activity dispatch now uses `startService` and immediately promotes accepted
+  requests to the required typed foreground service. Rejected, expired and
+  untokened requests cannot open capture. Stop retires pending start ownership.
+  Emulator host microphone input stayed disabled during accepted runs; its fake
+  input can emit nonzero samples. This does not establish acoustic correctness.
+- Native `saved_sessions` passed seven groups covering default-off saving, bounded
+  latest-page navigation through 60 synthetic confirmations, storage error/retry,
+  TXT and Markdown bilingual/source-labeled output, temporary export cleanup,
+  and cancel/confirm deletion. Export exercised ActivityResult and ContentResolver
+  with an injected document result; the real system picker and persisted URI
+  grants were not exercised. Instrumentation originally clicked a non-clickable
+  dialog label; selecting its ListView item fixed the fixture without weakening
+  the content or cleanup assertions. Each format launched the picker once. The
+  final rerun also verified that an actual JNI formatter failure preserved an
+  existing synthetic destination.
+- Separate native Main inspection showed all three source choices, Save captions
+  off and the Saved sessions entry opening the reader. Existing input/settings
+  were not changed. The capture fixture did not read provider credentials; normal
+  Main UI reads its configured settings. Synthetic archive fixtures restored the
+  original opt-in and removed only their own files. Internal screenshots are
+  retained outside Git; existing profile metadata is not publication evidence.
+- A synthetic native overlay check passed entry into Saved sessions, Activity
+  recreation and return to the previous non-product Activity: the overlay hid
+  over the reader and resumed afterward without stale ownership. Independent
+  review found the new reader missing from the production own-UI owner set;
+  all three production Activities now participate in the same lifecycle rule.
+- Export review found that a failed formatter/copy could delete the selected
+  destination, although Android permits the picker to return an existing document.
+  Cleanup now removes only the exact private temporary file. Focused cases cover
+  preserving existing bytes before opening the destination and retaining a
+  partially written destination after an I/O failure. SAF writes are not atomic;
+  failure is reported without deleting a user-selected file.
+- Signed macOS UI-only development preview verified Azure simultaneous-to-ASR
+  and back, a retained masked saved key, the correct Missing state for an absent
+  translation deployment, and saving after filling only that deployment. This
+  bundle contained the final desktop/shared changes with pre-bump 1.6.9 metadata.
+  Preview credentials were synthetic. The idle production app quit with prior
+  user authorization and was restored afterward; its installed bundle and data
+  were preserved. No real provider request or desktop audio capture occurred.
+- Focused regressions cover shared journal ownership/finalization, source identity,
+  disable/delete behavior, unique private export files, stale controller events,
+  retry classification, transactional credential migration, equivalent endpoint
+  key reuse, and settings completion races. A reproduced JNI journal deadlock
+  was fixed by reading state under a single lock. Stop retains the last accepted
+  final even when a later preview exists and display history is zero.
+- Live provider accuracy/latency, physical microphone acoustics, real document
+  picker interaction, full in-place updates and physical Windows/Linux/Android
+  acceptance remain pending. Release-package and public-download evidence will
+  be recorded separately after staging and verification.

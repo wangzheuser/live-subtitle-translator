@@ -49,7 +49,7 @@ internal class CaptureSourcesChecks(private val instrumentation: Instrumentation
                 val request = MimiService.prepareStart(host)
                 check(MimiService.isStarting && MimiService.startPending(request))
                 ownedSession = true
-                ContextCompat.startForegroundService(host, Intent(host, MimiService::class.java)
+                MimiService.startFromActivity(host, Intent(host, MimiService::class.java)
                     .setAction(MimiService.ACTION_CAPTURE_TEST).putExtra(MimiService.EXTRA_START_REQUEST, request))
             }
             await { !MimiService.isStarting }
@@ -64,7 +64,7 @@ internal class CaptureSourcesChecks(private val instrumentation: Instrumentation
                     MimiService.setCaptureEnginesForTests(context, engines)
                     ownedSession = true
                     if (input.needsProjection) host.requestProjection(input, guarded = true)
-                    else ContextCompat.startForegroundService(host, MimiService.microphoneIntent(host)
+                    else MimiService.startFromActivity(host, MimiService.microphoneIntent(host)
                         .setAction(MimiService.ACTION_CAPTURE_TEST)
                         .putExtra(MimiService.EXTRA_START_REQUEST, MimiService.prepareStart(host)))
                 }

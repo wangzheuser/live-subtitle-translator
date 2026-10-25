@@ -231,7 +231,10 @@ internal class HelpInteractionChecks(private val test: Instrumentation) {
                 if (!resumed) SystemClock.sleep(50)
             } while (!resumed && SystemClock.elapsedRealtime() < resumedDeadline)
             check(resumed) { "Home did not resume before guide sample" }
-            val currentGuide = FirstRunGuide(currentHome) { error("Help must not start capture") }
+            // Its ActivityResult launcher belongs to onCreate, before STARTED; reuse the activity-owned guide.
+            val currentGuide = MainActivity::class.java.getDeclaredField("guide").run {
+                isAccessible = true; get(currentHome) as FirstRunGuide
+            }
             guide = currentGuide
             ui { currentGuide.open(1) }; capture("$prefix-guide-storage")
             if (!baseline) ui { check(!contains(currentHome.getString(R.string.guide_saved_hint))) }

@@ -224,10 +224,16 @@ class UiSmokeInstrumentation : Instrumentation() {
         targetContext.getSharedPreferences("first_run", 0).edit().putBoolean("seen", true).commit()
         val home = launchHome()
         var requests = 0
-        lateinit var guide: FirstRunGuide
+        // Reuse the launcher registered in onCreate; constructing another guide after STARTED is invalid.
+        val guide = MainActivity::class.java.getDeclaredField("guide").run {
+            isAccessible = true; get(home) as FirstRunGuide
+        }
+        val start = FirstRunGuide::class.java.getDeclaredField("start").apply { isAccessible = true }
+        val originalStart = start.get(guide)
+        val fixtureStart: () -> Unit = { requests++ }
         val previousError = MimiService.lastCaptureError
         try {
-            onUi { guide = FirstRunGuide(home) { requests++ }; guide.open(2) }
+            onUi { start.set(guide, fixtureStart); guide.open(2) }
             capture("guide-access-$guideLocale-$theme")
             onUi { guide.open(4) }
             capture("guide-waiting-$guideLocale-$theme")
@@ -250,7 +256,7 @@ class UiSmokeInstrumentation : Instrumentation() {
                 check(!MimiService.isRunning)
             }
         } finally {
-            onUi { guide.dismiss(); setCaptureErrorFixture(previousError); home.finish() }
+            onUi { guide.dismiss(); start.set(guide, originalStart); setCaptureErrorFixture(previousError); home.finish() }
         }
     }
 
@@ -346,7 +352,10 @@ class UiSmokeInstrumentation : Instrumentation() {
         capture("guide-overlay-revoked-$theme")
         check(!Settings.canDrawOverlays(targetContext))
         guideClick("guide-skip")
-        val guide = FirstRunGuide(home) { error("Fixture must not request a real capture") }
+        // Later sample pages share the launcher's original onCreate registration too.
+        val guide = MainActivity::class.java.getDeclaredField("guide").run {
+            isAccessible = true; get(home) as FirstRunGuide
+        }
         onUi { guide.open(3) }; capture("guide-audio-not-started-$theme")
         onUi { guide.dismiss(); guide.open(4) }; capture("guide-caption-not-complete-$theme")
         // UI-only recovery fixture: no MediaProjection or provider is started.

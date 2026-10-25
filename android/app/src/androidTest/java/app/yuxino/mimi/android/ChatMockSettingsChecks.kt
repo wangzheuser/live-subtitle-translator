@@ -760,6 +760,9 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
             }
         }
         show(editor, "translation-preset")
+        // Earlier synthetic saves may leave a system Toast outside this app's
+        // windows. Let the short Toast expire before either menu capture.
+        SystemClock.sleep(2_500)
         val selectedPreset = picker.selectedItemPosition
         onUi { check(picker.performClick()) }
         instrumentation.waitForIdleSync()

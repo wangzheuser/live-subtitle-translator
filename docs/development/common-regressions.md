@@ -604,6 +604,14 @@ artifacts, and signing material.
 - For credential-free Android instrumentation, compare catalog files directly
   when proving cancellation did not write. `SettingsStore.profiles()` can trigger
   legacy credential migration or retirement; it is not a read-only precondition.
+  A fixture that saves synthetic profiles must restore the complete original
+  catalog, credential revisions and preferences with `ProfileSettingsSnapshot`.
+  Saving empty field values does not restore an originally empty catalog and
+  can leave a new profile or translator draft behind.
+- Android guide fixtures must reuse the guide initialized by
+  `MainActivity.onCreate`. Constructing another `FirstRunGuide` after the
+  Activity is resumed attempts late Activity Result registration and fails
+  before the intended help interaction. Keep registration checks intact.
 
 - Before replacing the canonical development app, identify the source revision
   and any unpublished provider support in the running build. A stable signature

@@ -12,6 +12,7 @@ import android.widget.CheckBox
 import android.widget.Spinner
 import app.yuxino.mimi.android.capture.MimiService
 import app.yuxino.mimi.android.provider.ServiceProvider
+import app.yuxino.mimi.android.provider.TextTranslationProvider
 import com.google.android.material.textfield.TextInputEditText
 import java.io.File
 import java.security.MessageDigest
@@ -62,7 +63,7 @@ internal class ServiceDraftRecreationChecks(private val test: Instrumentation) {
                 field<TextInputEditText>(first, "credential-apiKey").setText("synthetic-unsaved-speech-key")
                 field<TextInputEditText>(first, "credential-alibaba-workspace").setText("synthetic-workspace")
                 field<Spinner>(first, "alibaba-mode").setSelection(0)
-                field<Spinner>(first, "translation-mode").setSelection(4)
+                selectTranslationProvider(first, TextTranslationProvider.OPENAI_COMPATIBLE)
             }
             test.waitForIdleSync()
             onUi {
@@ -70,7 +71,7 @@ internal class ServiceDraftRecreationChecks(private val test: Instrumentation) {
                 field<TextInputEditText>(first, "translation-model").setText("synthetic-draft-model")
                 field<TextInputEditText>(first, "translation-key").setText("synthetic-unsaved-text-key")
                 field<CheckBox>(first, "translation-local-http").isChecked = true
-                field<Spinner>(first, "translation-mode").setSelection(0)
+                selectTranslationProvider(first, TextTranslationProvider.BUILTIN)
                 field<Spinner>(first, "qwen-mt-model").setSelection(2)
                 field<Spinner>(first, "alibaba-mode").setSelection(1)
                 first.recreate()
@@ -92,8 +93,8 @@ internal class ServiceDraftRecreationChecks(private val test: Instrumentation) {
             stage = "translation_drafts_preserved"
             onUi {
                 check(field<Spinner>(next, "qwen-mt-model").selectedItemPosition == 2)
-                check(field<Spinner>(next, "translation-mode").selectedItemPosition == 0)
-                field<Spinner>(next, "translation-mode").setSelection(4)
+                check(field<Spinner>(next, "translation-mode").selectedItem.toString() == next.getString(translationProviderLabel(TextTranslationProvider.BUILTIN)))
+                selectTranslationProvider(next, TextTranslationProvider.OPENAI_COMPATIBLE)
             }
             test.waitForIdleSync()
             onUi {
@@ -185,6 +186,11 @@ internal class ServiceDraftRecreationChecks(private val test: Instrumentation) {
                 check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
             }
         } finally { bitmap.recycle() }
+    }
+    private fun selectTranslationProvider(activity: Activity, provider: TextTranslationProvider) {
+        val picker = field<Spinner>(activity, "translation-mode")
+        val label = activity.getString(translationProviderLabel(provider))
+        picker.setSelection((0 until picker.count).single { picker.getItemAtPosition(it).toString() == label })
     }
     private fun onUi(action: () -> Unit) {
         var failure: Throwable? = null

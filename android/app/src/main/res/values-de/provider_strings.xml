@@ -27,4 +27,7 @@
     <string name="speech_translation_asr_mt">ASR + MT</string>
     <string name="speech_translation_help">Simultanübersetzung liefert Originaltext und Übersetzung direkt. ASR + MT erkennt Sprache und übersetzt sie mit dem gewählten Textdienst. Beide Konfigurationen bleiben erhalten. Zum Wechseln Untertitel stoppen.</string>
     <string name="speech_translation_failed">Übersetzungsmodus konnte nicht gespeichert werden. Bitte erneut versuchen.</string>
+    <string name="translation_preset">Schnelleinrichtung</string>
+    <string name="translation_preset_custom">Benutzerdefiniert</string>
+    <string name="translation_preset_help">Füllt bearbeitbare Adresse und Modell aus. Wählen Sie ein für Ihr Konto freigeschaltetes oder lokal heruntergeladenes Modell. Qwen nutzt standardmäßig Peking. Falls ein Schlüssel nötig ist, muss er zur Dienstadresse gehören.</string>
 </resources>

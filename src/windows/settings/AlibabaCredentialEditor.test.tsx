@@ -119,7 +119,7 @@ it("uses the unified picker with keyboard selection without submitting the form"
   await render();
   expect(picker().getAttribute("aria-label")).toBe(I18N.settings.textTranslationLabel);
   await key("Enter"); await key("End"); await key("Enter");
-  expect(picker().textContent).toBe(I18N.settings.textTranslationOpenAICompatible);
+  expect(picker().textContent).toBe("ChatMock");
   expect(document.activeElement).toBe(picker());
   expect(props.onSave).not.toHaveBeenCalled();
   expect(host.querySelector('button[type="submit"]')!.hasAttribute("disabled")).toBe(true);

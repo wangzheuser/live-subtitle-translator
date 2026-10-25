@@ -14,6 +14,19 @@ internal class TextTranslationDraft(val saved: TranslationConfiguration) {
     var localHttp = saved.allowLocalHttp
     var forgetKey = false
 
+    fun presetId(): String? = TextTranslationPresets.entries.firstOrNull {
+        NativeRuntimeConfiguration.textEndpointsEquivalent(TextTranslationProvider.OPENAI_COMPATIBLE, it.endpoint, endpoint)
+    }?.id
+
+    fun applyPreset(preset: TextTranslationPreset) {
+        if (!NativeRuntimeConfiguration.textEndpointsEquivalent(TextTranslationProvider.OPENAI_COMPATIBLE, endpoint, preset.endpoint)) {
+            key = ""
+            forgetKey = true
+        }
+        endpoint = preset.endpoint
+        model = preset.model
+    }
+
     fun reusesSavedKey() = !forgetKey && saved.apiKey.isNotBlank() &&
         (!saved.provider.hasCustomEndpoint || NativeRuntimeConfiguration.textEndpointsEquivalent(saved.provider, saved.endpoint, endpoint))
 

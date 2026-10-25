@@ -109,7 +109,11 @@ internal class ServiceProfileChecks(private val test: Instrumentation) {
                 field<Spinner>(secondEditor, "alibaba-mode").setSelection(0)
             }
             test.waitForIdleSync()
-            onUi { field<Spinner>(secondEditor, "translation-mode").setSelection(4) }
+            onUi {
+                val picker = field<Spinner>(secondEditor, "translation-mode")
+                val label = secondEditor.getString(translationProviderLabel(app.yuxino.mimi.android.provider.TextTranslationProvider.OPENAI_COMPATIBLE))
+                picker.setSelection((0 until picker.count).single { picker.getItemAtPosition(it).toString() == label })
+            }
             test.waitForIdleSync()
             onUi {
                 field<TextInputEditText>(secondEditor, "translation-endpoint").setText("https://synthetic.example.invalid/v1")

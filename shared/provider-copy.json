@@ -531,6 +531,98 @@
         "th": "บันทึกโหมดการแปลไม่สำเร็จ ลองอีกครั้ง"
       },
       "desktopSetting": null
+    },
+    "compatiblePresetLabel": {
+      "scope": [
+        "desktop",
+        "android"
+      ],
+      "androidResource": "translation_preset",
+      "desktopSetting": null,
+      "translations": {
+        "zh": "快速填写",
+        "zh-TW": "快速填入",
+        "en": "Quick setup",
+        "ja": "簡単入力",
+        "de": "Schnelleinrichtung",
+        "ko": "빠른 설정",
+        "fr": "Configuration rapide",
+        "th": "ตั้งค่าด่วน"
+      }
+    },
+    "compatiblePresetCustom": {
+      "scope": [
+        "desktop",
+        "android"
+      ],
+      "androidResource": "translation_preset_custom",
+      "desktopSetting": null,
+      "translations": {
+        "zh": "自定义",
+        "zh-TW": "自訂",
+        "en": "Custom",
+        "ja": "カスタム",
+        "de": "Benutzerdefiniert",
+        "ko": "사용자 지정",
+        "fr": "Personnalisé",
+        "th": "กำหนดเอง"
+      }
+    },
+    "compatiblePresetHelp": {
+      "scope": [
+        "desktop",
+        "android"
+      ],
+      "androidResource": "translation_preset_help",
+      "desktopSetting": null,
+      "translations": {
+        "zh": "快速填入服务地址和模型，仍可修改。请选择账号已开通或本机已下载的模型。千问默认使用北京地域；服务需要 Key 时，须使用与地址对应的 Key。",
+        "zh-TW": "快速填入服務位址和模型，仍可修改。請選擇帳號已開通或本機已下載的模型。千問預設使用北京地域；服務需要 Key 時，須使用與位址對應的 Key。",
+        "en": "Prefills an editable address and model. Choose a model enabled for your account or downloaded locally. Qwen defaults to Beijing. If a key is required, use one for that service address.",
+        "ja": "サービスのアドレスとモデルを入力し、後から変更できます。アカウントで利用可能なモデルか、ダウンロード済みのローカルモデルを選んでください。Qwen の初期設定は北京リージョンです。キーが必要な場合は、そのアドレスに対応するキーを使用してください。",
+        "de": "Füllt bearbeitbare Adresse und Modell aus. Wählen Sie ein für Ihr Konto freigeschaltetes oder lokal heruntergeladenes Modell. Qwen nutzt standardmäßig Peking. Falls ein Schlüssel nötig ist, muss er zur Dienstadresse gehören.",
+        "ko": "수정 가능한 주소와 모델을 채웁니다. 계정에서 활성화한 모델이나 로컬에 다운로드한 모델을 선택하세요. Qwen은 베이징 리전이 기본입니다. 키가 필요한 경우 해당 서비스 주소에 맞는 키를 사용하세요.",
+        "fr": "Préremplit une adresse et un modèle modifiables. Choisissez un modèle activé pour votre compte ou téléchargé localement. Qwen utilise Pékin par défaut. Si une clé est nécessaire, utilisez celle correspondant à cette adresse.",
+        "th": "กรอกที่อยู่และโมเดลให้โดยยังแก้ไขได้ เลือกโมเดลที่เปิดใช้ในบัญชีหรือดาวน์โหลดไว้ในเครื่อง Qwen ใช้ภูมิภาคปักกิ่งเป็นค่าเริ่มต้น หากต้องใช้คีย์ ให้ใช้คีย์ที่ตรงกับที่อยู่บริการนั้น"
+      }
     }
-  }
+  },
+  "compatiblePresets": [
+    {
+      "id": "openai",
+      "label": "OpenAI",
+      "endpoint": "https://api.openai.com/v1",
+      "model": "gpt-6-luna"
+    },
+    {
+      "id": "deepseek",
+      "label": "DeepSeek",
+      "endpoint": "https://api.deepseek.com",
+      "model": "deepseek-flash"
+    },
+    {
+      "id": "qwen",
+      "label": "Qwen (Alibaba Cloud)",
+      "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "model": "qwen-flash"
+    },
+    {
+      "id": "gemini",
+      "label": "Google Gemini",
+      "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "model": ""
+    },
+    {
+      "id": "ollama",
+      "label": "Ollama",
+      "endpoint": "http://127.0.0.1:11434/v1",
+      "model": ""
+    },
+    {
+      "id": "lmStudio",
+      "label": "LM Studio",
+      "endpoint": "http://127.0.0.1:1234/v1",
+      "model": ""
+    }
+  ]
 }

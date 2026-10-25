@@ -237,8 +237,9 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
         onUi {
             check(mode.selectedItemPosition == 0 && mode.count == 7) { "Built-in translation must remain the default among seven text choices" }
             check((0 until mode.count).map { mode.getItemAtPosition(it).toString() } ==
-                listOf(TextTranslationProvider.BUILTIN, TextTranslationProvider.DEEPL, TextTranslationProvider.DEEPLX,
-                    TextTranslationProvider.CHAT_MOCK, TextTranslationProvider.OPENAI_COMPATIBLE, TextTranslationProvider.NONE)
+                listOf(TextTranslationProvider.BUILTIN, TextTranslationProvider.NONE, TextTranslationProvider.XAI,
+                    TextTranslationProvider.DEEPL, TextTranslationProvider.DEEPLX,
+                    TextTranslationProvider.OPENAI_COMPATIBLE, TextTranslationProvider.CHAT_MOCK)
                     .map { editor.getString(translationProviderLabel(it)) }) { "Text services are not in the expected order" }
             check(!translationKey.isShown) { "Custom fields must follow the selected translation mode" }
             val qwen = field<Spinner>(editor, "qwen-mt-model")
@@ -276,6 +277,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
         onUi { check(field<TextView>(editor, "translation-status").text.toString() == context.getString(R.string.translation_required)) }
         unchanged()
         checkProviderDrafts(editor)
+        checkCompatiblePresets(editor)
 
         onUi { check(editor.window.decorView.findViewWithTag<View>("translation-help").performLongClick()) }
         instrumentation.waitForIdleSync()
@@ -595,6 +597,59 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
             check(field<TextInputEditText>(editor, "translation-key").text.toString() == "synthetic-compatible-draft")
         }
         select(TextTranslationProvider.CHAT_MOCK)
+    }
+
+    private fun checkCompatiblePresets(editor: ServiceSettingsActivity) {
+        onUi { selectMode(editor, TextTranslationProvider.OPENAI_COMPATIBLE) }
+        instrumentation.waitForIdleSync()
+        val picker = field<Spinner>(editor, "translation-preset")
+        val endpoint = field<TextInputEditText>(editor, "translation-endpoint")
+        val model = field<TextInputEditText>(editor, "translation-model")
+        val key = field<TextInputEditText>(editor, "translation-key")
+        val localHttp = field<CheckBox>(editor, "translation-local-http")
+        onUi {
+            check(picker.isShown && picker.count == TextTranslationPresets.entries.size + 1)
+            localHttp.isChecked = false
+            key.setText("synthetic-preset-old-key")
+            picker.setSelection(TextTranslationPresets.entries.indexOfFirst { it.id == "openai" } + 1)
+        }
+        instrumentation.waitForIdleSync()
+        onUi {
+            val openai = TextTranslationPresets.entries.first { it.id == "openai" }
+            check(endpoint.text.toString() == openai.endpoint && model.text.toString() == openai.model)
+            check(key.text.isNullOrBlank()) { "A preset moved a typed key to another destination" }
+            key.setText("synthetic-preset-same-key")
+            picker.setSelection(0)
+        }
+        instrumentation.waitForIdleSync()
+        onUi {
+            check(key.text.toString() == "synthetic-preset-same-key")
+            val customEndpoint = endpoint.text.toString()
+            model.setText("synthetic-custom-model")
+            key.setText("synthetic-custom-key")
+            check(picker.selectedItemPosition == 0) { "Editing custom fields changed the selected preset" }
+            check(endpoint.text.toString() == customEndpoint && model.text.toString() == "synthetic-custom-model")
+            picker.setSelection(TextTranslationPresets.entries.indexOfFirst { it.id == "openai" } + 1)
+        }
+        instrumentation.waitForIdleSync()
+        onUi {
+            check(key.text.toString() == "synthetic-custom-key") { "An equivalent preset discarded a typed key" }
+            picker.setSelection(TextTranslationPresets.entries.indexOfFirst { it.id == "ollama" } + 1)
+        }
+        instrumentation.waitForIdleSync()
+        onUi {
+            check(endpoint.text.toString() == TextTranslationPresets.entries.first { it.id == "ollama" }.endpoint)
+            check(key.text.isNullOrBlank())
+            check(!localHttp.isChecked) { "A local preset silently enabled HTTP" }
+            endpoint.setText("https://custom.example.invalid/v1")
+        }
+        instrumentation.waitForIdleSync()
+        onUi {
+            check(picker.selectedItemPosition == 0)
+            selectMode(editor, TextTranslationProvider.CHAT_MOCK)
+        }
+        instrumentation.waitForIdleSync()
+        check(!field<View>(editor, "translation-preset").isShown)
     }
 
     private fun selectMode(activity: Activity, provider: TextTranslationProvider) {

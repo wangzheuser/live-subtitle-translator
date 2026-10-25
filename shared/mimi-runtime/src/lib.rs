@@ -19,3 +19,5 @@ pub mod development_content;
 #[path = "development_content_disabled.rs"]
 pub mod development_content;
 pub mod resource_cleanup;
+pub mod session_history;
+pub mod session_journal;

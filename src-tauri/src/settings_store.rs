@@ -1246,37 +1246,7 @@ impl SettingsStore {
             .cloned()
             .collect();
         for profile in candidates {
-            self.retry_profile_credential_errors(&profile, true, true);
-            let previous = self.destination_value(&profile)?;
-            let mut destination = previous
-                .as_deref()
-                .map(serde_json::from_str::<TextTranslationDestination>)
-                .transpose()
-                .map_err(|_| CREDENTIAL_STORE_UNAVAILABLE.to_string())?
-                .unwrap_or_default();
-            if destination.xai.is_none() {
-                let key = self
-                    .load_api_key_for_profile(&profile)
-                    .map_err(SecretStoreError::public_error)?
-                    .map(|value| ProviderCredentials::decode_for_profile(&profile, &value))
-                    .transpose()
-                    .map_err(|error| error.to_string())?
-                    .and_then(|speech| speech.direct_api_key().map(str::to_owned))
-                    .unwrap_or_default();
-                let model = crate::core::protocols::openai_compatible::validate_model(
-                    &profile.xai_text_model,
-                )
-                .map_err(|error| error.to_string())?;
-                // Preserve a legacy setup's chosen model even without a key.
-                // Authentication stays missing and is never borrowed later.
-                destination.xai = Some(XAITextDestination {
-                    api_key: key,
-                    model,
-                });
-                let value = serde_json::to_string(&destination)
-                    .map_err(|_| CREDENTIAL_STORE_UNAVAILABLE.to_string())?;
-                self.write_destination_value(&profile, Some(&value), true)?;
-            }
+            self.prepare_xai_translation_destination(&profile)?;
             self.mutate_catalog_with_normalization(Some(&profile.id), |catalog| {
                 let current = catalog
                     .profiles
@@ -1289,6 +1259,42 @@ impl SettingsStore {
                 }
                 Ok(())
             })?;
+        }
+        Ok(())
+    }
+
+    /// May precede a catalog commit. A verified destination is retained and
+    /// reused if the mode/checkpoint write fails, never overwritten on retry.
+    fn prepare_xai_translation_destination(&self, profile: &ServiceProfile) -> Result<(), String> {
+        self.retry_profile_credential_errors(profile, true, true);
+        let previous = self.destination_value(profile)?;
+        let mut destination = previous
+            .as_deref()
+            .map(serde_json::from_str::<TextTranslationDestination>)
+            .transpose()
+            .map_err(|_| CREDENTIAL_STORE_UNAVAILABLE.to_string())?
+            .unwrap_or_default();
+        if destination.xai.is_none() {
+            let key = self
+                .load_api_key_for_profile(profile)
+                .map_err(SecretStoreError::public_error)?
+                .map(|value| ProviderCredentials::decode_for_profile(profile, &value))
+                .transpose()
+                .map_err(|error| error.to_string())?
+                .and_then(|speech| speech.direct_api_key().map(str::to_owned))
+                .unwrap_or_default();
+            let model =
+                crate::core::protocols::openai_compatible::validate_model(&profile.xai_text_model)
+                    .map_err(|error| error.to_string())?;
+            // Preserve a legacy setup's chosen model even without a key.
+            // Authentication stays missing and is never borrowed later.
+            destination.xai = Some(XAITextDestination {
+                api_key: key,
+                model,
+            });
+            let value = serde_json::to_string(&destination)
+                .map_err(|_| CREDENTIAL_STORE_UNAVAILABLE.to_string())?;
+            self.write_destination_value(profile, Some(&value), true)?;
         }
         Ok(())
     }
@@ -1571,6 +1577,10 @@ impl SettingsStore {
         xai_text_model: Option<&str>,
         speech_translation_mode: Option<crate::core::provider::SpeechTranslationMode>,
     ) -> Result<ServiceProfile, String> {
+        // Complete pre-existing upgrades before changing this profile. A
+        // newly selected ASR route is prepared inside the same catalog update.
+        self.migrate_xai_translation_profiles()?;
+        let _upgrade = self.xai_translation_upgrade.lock().unwrap();
         let normalize_profile = (custom_speech_languages_patch.is_some()
             || alibaba_realtime_mode.is_some()
             || xai_speech_mode.is_some()
@@ -1652,12 +1662,19 @@ impl SettingsStore {
                 }
                 updated.language_preset = patch.preset;
             }
-            let updated = updated.validated().map_err(|error| error.to_string())?;
+            let mut updated = updated.validated().map_err(|error| error.to_string())?;
+            if !self.is_ui_test
+                && updated.uses_xai_asr()
+                && !updated.xai_independent_translation_migrated
+            {
+                self.prepare_xai_translation_destination(&updated)?;
+                updated.text_translation = Some(TextTranslation::XAI);
+                updated.xai_independent_translation_migrated = true;
+            }
             *current = updated.clone();
             Ok(updated)
         })?;
-        self.migrate_xai_translation_profiles()?;
-        self.profile(&updated.id)
+        Ok(updated)
     }
 
     pub fn select_profile(&self, profile_id: &str) -> Result<(), String> {
@@ -1845,8 +1862,29 @@ impl SettingsStore {
         match self.credentials_for_profile(profile) {
             Ok(Some(_)) => CredentialState::Present,
             Ok(None) => CredentialState::Missing,
+            Err(_) if self.azure_translation_deployment_is_missing(profile) => {
+                CredentialState::Missing
+            }
             Err(_) => CredentialState::Unavailable,
         }
+    }
+
+    fn azure_translation_deployment_is_missing(&self, profile: &ServiceProfile) -> bool {
+        if profile.provider != ProviderKind::AzureOpenAIRealtime
+            || profile.speech_translation_mode
+                != crate::core::provider::SpeechTranslationMode::Simultaneous
+        {
+            return false;
+        }
+        // A valid saved ASR setup needs one more field for simultaneous mode.
+        // Other validation and storage errors remain unavailable.
+        matches!(
+            self.load_api_key_for_profile(profile)
+                .ok()
+                .flatten()
+                .and_then(|value| Self::decode_speech_editor_credentials(profile, &value).ok()),
+            Some(ProviderCredentials::AzureOpenAI { deployment, .. }) if deployment.is_empty()
+        )
     }
 
     /// Settings show saved-item presence; selection does not authorize secrets.
@@ -2260,6 +2298,24 @@ impl SettingsStore {
                 (!api_key.trim().is_empty()).then_some(api_key.as_str()),
                 model,
             );
+        }
+        if profile.provider == ProviderKind::AzureOpenAIRealtime
+            && matches!(credentials, ProviderCredentials::AzureOpenAI { api_key, .. } if api_key.trim().is_empty())
+        {
+            self.retry_profile_credential_errors(&profile, true, false);
+            let saved = self
+                .load_api_key_for_profile(&profile)
+                .map_err(SecretStoreError::public_error)?
+                .map(|value| Self::decode_speech_editor_credentials(&profile, &value))
+                .transpose()
+                .map_err(|error| error.to_string())?;
+            // The same native merge used by checks keeps the key bound to its
+            // resource, including when ASR metadata needs a new deployment.
+            let value = credentials
+                .resolve_draft_for_profile(&profile, saved.as_ref())
+                .and_then(|resolved| resolved.encode_for_profile(&profile))
+                .map_err(|error| error.to_string())?;
+            return self.save_api_key_for_profile(&profile, &value, true);
         }
         let value = credentials
             .encode_for_profile(&profile)
@@ -4311,7 +4367,10 @@ mod tests {
     fn azure_asr_configuration_remains_editable_when_simultaneous_needs_a_deployment() {
         use crate::core::provider::SpeechTranslationMode;
         let directory = tempfile::tempdir().unwrap();
-        let fake = FakeSecretStore::default();
+        let fake = FakeSecretStore {
+            local_file: true,
+            ..Default::default()
+        };
         let store = fresh_store(directory.path(), &fake);
         let profile = store
             .create_profile_for_setup(ProviderKind::AzureOpenAIRealtime, "Azure fixture")
@@ -4330,6 +4389,11 @@ mod tests {
             save_realtime_speech_mode(&store, &profile.id, SpeechTranslationMode::Simultaneous)
                 .unwrap();
         assert!(store.configuration_for_profile_probe(&profile).is_err());
+        assert_eq!(
+            store.credential_state_for_snapshot(&profile),
+            CredentialState::Missing,
+            "a missing translation deployment is incomplete configuration, not a file error"
+        );
         let editor = store.credential_editor_state(&profile.id, None).unwrap();
         assert_eq!(editor.deployment.as_deref(), Some(""));
         assert_eq!(
@@ -4362,6 +4426,134 @@ mod tests {
             Some(""),
             "a draft check must not persist the deployment"
         );
+    }
+
+    #[test]
+    fn azure_incomplete_snapshot_keeps_corrupt_or_unreadable_credentials_unavailable() {
+        let fake = FakeSecretStore {
+            local_file: true,
+            ..Default::default()
+        };
+        let store = settings(&fake);
+        let profile = store
+            .create_profile_for_setup(ProviderKind::AzureOpenAIRealtime, "Azure state")
+            .unwrap();
+        let account = credential_account(&profile);
+        assert_eq!(
+            store.credential_state_for_snapshot(&profile),
+            CredentialState::Missing
+        );
+        let valid = ProviderCredentials::AzureOpenAI {
+            endpoint: "https://synthetic.openai.azure.com".into(),
+            deployment: "translation-deployment".into(),
+            transcription_deployment: "transcription-deployment".into(),
+            api_key: "synthetic-recognition-key".into(),
+        };
+        store.save_credentials(&profile.id, &valid).unwrap();
+        assert_eq!(
+            store.credential_state_for_snapshot(&profile),
+            CredentialState::Present
+        );
+        let mut incomplete = serde_json::to_value(&valid).unwrap();
+        incomplete["deployment"] = serde_json::json!("");
+        let mut invalid_endpoint = incomplete.clone();
+        invalid_endpoint["endpoint"] = serde_json::json!("invalid endpoint");
+        let mut missing_key = incomplete.clone();
+        missing_key["apiKey"] = serde_json::json!("");
+        let mut missing_transcription = incomplete;
+        missing_transcription["transcriptionDeployment"] = serde_json::json!("");
+        for value in [
+            "not-json".to_string(),
+            invalid_endpoint.to_string(),
+            missing_key.to_string(),
+            missing_transcription.to_string(),
+        ] {
+            fake.put(PROFILE_KEYCHAIN_SERVICE, &account, &value);
+            store.secret_cache.lock().unwrap().clear();
+            assert_eq!(
+                store.credential_state_for_snapshot(&profile),
+                CredentialState::Unavailable
+            );
+        }
+        fake.put(
+            PROFILE_KEYCHAIN_SERVICE,
+            &account,
+            &valid.encode_for_profile(&profile).unwrap(),
+        );
+        fake.state.lock().unwrap().failures.insert(
+            cache_key(PROFILE_KEYCHAIN_SERVICE, &account),
+            SecretStoreError::AccessDenied,
+        );
+        store.secret_cache.lock().unwrap().clear();
+        assert_eq!(
+            store.credential_state_for_snapshot(&profile),
+            CredentialState::Unavailable
+        );
+    }
+
+    #[test]
+    fn azure_saved_key_repairs_simultaneous_deployment_without_crossing_resource_boundaries() {
+        use crate::core::provider::SpeechTranslationMode;
+        let directory = tempfile::tempdir().unwrap();
+        let fake = FakeSecretStore::default();
+        let store = fresh_store(directory.path(), &fake);
+        let profile = store
+            .create_profile_for_setup(ProviderKind::AzureOpenAIRealtime, "Azure repair")
+            .unwrap();
+        let profile =
+            save_realtime_speech_mode(&store, &profile.id, SpeechTranslationMode::AsrMt).unwrap();
+        store
+            .save_credentials(
+                &profile.id,
+                &ProviderCredentials::AzureOpenAI {
+                    endpoint: "https://synthetic.openai.azure.com".into(),
+                    deployment: String::new(),
+                    transcription_deployment: "saved-transcription".into(),
+                    api_key: "synthetic-saved-key".into(),
+                },
+            )
+            .unwrap();
+        let profile =
+            save_realtime_speech_mode(&store, &profile.id, SpeechTranslationMode::Simultaneous)
+                .unwrap();
+        let repair = ProviderCredentials::AzureOpenAI {
+            endpoint: "https://SYNTHETIC.openai.azure.com/".into(),
+            deployment: "new-translation".into(),
+            transcription_deployment: "saved-transcription".into(),
+            api_key: String::new(),
+        };
+        store.save_credentials(&profile.id, &repair).unwrap();
+        assert_eq!(
+            store
+                .configuration_for_profile_probe(&profile)
+                .unwrap()
+                .credentials,
+            ProviderCredentials::AzureOpenAI {
+                endpoint: "https://synthetic.openai.azure.com".into(),
+                deployment: "new-translation".into(),
+                transcription_deployment: "saved-transcription".into(),
+                api_key: "synthetic-saved-key".into(),
+            }
+        );
+        let saved = fake.value(PROFILE_KEYCHAIN_SERVICE, &credential_account(&profile));
+        let replacement = ProviderCredentials::AzureOpenAI {
+            endpoint: "https://other.openai.azure.com".into(),
+            deployment: "new-translation".into(),
+            transcription_deployment: "saved-transcription".into(),
+            api_key: String::new(),
+        };
+        assert!(store.save_credentials(&profile.id, &replacement).is_err());
+        assert_eq!(
+            fake.value(PROFILE_KEYCHAIN_SERVICE, &credential_account(&profile)),
+            saved
+        );
+        let other = store
+            .create_profile_for_setup(ProviderKind::AzureOpenAIRealtime, "Other Azure")
+            .unwrap();
+        assert!(store.save_credentials(&other.id, &repair).is_err());
+        assert!(fake
+            .value(PROFILE_KEYCHAIN_SERVICE, &credential_account(&other))
+            .is_none());
     }
 
     #[test]
@@ -4679,6 +4871,98 @@ mod tests {
             profile.xai_text_model = "legacy-custom-grok".into();
         }
         store.persist_catalog().unwrap();
+    }
+
+    #[test]
+    fn failed_legacy_xai_mode_migration_preserves_the_saved_mode_and_preferences() {
+        use crate::core::provider::XAISpeechMode;
+        let directory = tempfile::tempdir().unwrap();
+        let fake = FakeSecretStore::default();
+        let store = fresh_store(directory.path(), &fake);
+        let profile = store
+            .create_profile_for_setup(ProviderKind::XAIRealtime, "Legacy voice")
+            .unwrap();
+        store
+            .save_api_key(&profile.id, "synthetic-legacy-key")
+            .unwrap();
+        save_xai_options(&store, &profile.id, Some(XAISpeechMode::Voice), None).unwrap();
+        mark_legacy_xai_profile(&store, &profile.id);
+        store
+            .save_preferences(|prefs| {
+                prefs.source_language = SourceLanguage::Japanese;
+                prefs.target_language = TargetLanguage::Korean;
+            })
+            .unwrap();
+        let catalog_before = std::fs::read(&store.catalog_path).unwrap();
+        let prefs_before = std::fs::read(&store.prefs_path).unwrap();
+        let preferences = store.preferences();
+        fake.state.lock().unwrap().saves_before_failure = Some(0);
+        assert!(save_xai_options(&store, &profile.id, Some(XAISpeechMode::AsrMt), None).is_err());
+        assert_eq!(std::fs::read(&store.catalog_path).unwrap(), catalog_before);
+        assert_eq!(std::fs::read(&store.prefs_path).unwrap(), prefs_before);
+        assert_eq!(store.preferences(), preferences);
+        assert_eq!(
+            store.catalog.lock().unwrap().profiles[0].xai_speech_mode,
+            XAISpeechMode::Voice
+        );
+        fake.state.lock().unwrap().saves_before_failure = None;
+        let migrated =
+            save_xai_options(&store, &profile.id, Some(XAISpeechMode::AsrMt), None).unwrap();
+        assert!(migrated.xai_independent_translation_migrated);
+        assert!(
+            matches!(store.text_credentials_for_profile(&migrated).unwrap(),
+            Some(TextTranslationCredentials::XAI { api_key, .. }) if api_key == "synthetic-legacy-key")
+        );
+    }
+
+    #[test]
+    fn legacy_xai_mode_retry_reuses_verified_destination_after_catalog_failure() {
+        use crate::core::provider::XAISpeechMode;
+        let directory = tempfile::tempdir().unwrap();
+        let fake = FakeSecretStore::default();
+        let store = fresh_store(directory.path(), &fake);
+        let profile = store
+            .create_profile_for_setup(ProviderKind::XAIRealtime, "Legacy voice")
+            .unwrap();
+        store
+            .save_api_key(&profile.id, "synthetic-original-key")
+            .unwrap();
+        save_xai_options(&store, &profile.id, Some(XAISpeechMode::Voice), None).unwrap();
+        mark_legacy_xai_profile(&store, &profile.id);
+        let backup = directory.path().join("catalog-backup");
+        std::fs::rename(&store.catalog_path, &backup).unwrap();
+        std::fs::create_dir(&store.catalog_path).unwrap();
+        assert!(save_xai_options(&store, &profile.id, Some(XAISpeechMode::AsrMt), None).is_err());
+        assert_eq!(
+            store.catalog.lock().unwrap().profiles[0].xai_speech_mode,
+            XAISpeechMode::Voice
+        );
+        let verified = fake
+            .value(
+                PROFILE_KEYCHAIN_SERVICE,
+                &SettingsStore::destination_account(&profile),
+            )
+            .unwrap();
+        std::fs::remove_dir(&store.catalog_path).unwrap();
+        std::fs::rename(&backup, &store.catalog_path).unwrap();
+        store
+            .save_api_key(&profile.id, "synthetic-replacement-speech-key")
+            .unwrap();
+        let migrated =
+            save_xai_options(&store, &profile.id, Some(XAISpeechMode::AsrMt), None).unwrap();
+        assert!(migrated.xai_independent_translation_migrated);
+        assert_eq!(
+            fake.value(
+                PROFILE_KEYCHAIN_SERVICE,
+                &SettingsStore::destination_account(&profile)
+            )
+            .as_deref(),
+            Some(verified.as_str())
+        );
+        assert!(
+            matches!(store.text_credentials_for_profile(&migrated).unwrap(),
+            Some(TextTranslationCredentials::XAI { api_key, .. }) if api_key == "synthetic-original-key")
+        );
     }
 
     #[test]
@@ -8580,6 +8864,7 @@ mod tests {
     #[derive(Clone, Default)]
     struct FakeSecretStore {
         state: Arc<Mutex<FakeState>>,
+        local_file: bool,
     }
 
     impl FakeSecretStore {
@@ -8628,6 +8913,10 @@ mod tests {
     }
 
     impl SecretStore for FakeSecretStore {
+        fn uses_local_file(&self) -> bool {
+            self.local_file
+        }
+
         fn contains(&self, service: &str, account: &str) -> Result<bool, SecretStoreError> {
             let state = self.state.lock().unwrap();
             let key = cache_key(service, account);

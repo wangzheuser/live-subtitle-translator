@@ -23,7 +23,7 @@ class SharedRuntimeBoundaryTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         for directory in ("src-tauri/src/clients", "src-tauri/src/core", "shared/mimi-runtime/src", "android/app/src/main/java"):
             shutil.copytree(guard.ROOT / directory, self.root / directory)
-        for filename in ("src-tauri/src/audio/send_pipeline.rs", "src-tauri/Cargo.toml",
+        for filename in ("src-tauri/src/audio/send_pipeline.rs", "src-tauri/src/session_history.rs", "src-tauri/Cargo.toml",
                          "shared/mimi-runtime/Cargo.toml", "shared/mimi-android-jni/Cargo.toml",
                          "android/app/build.gradle.kts", ".github/workflows/android.yml",
                          ".github/workflows/ci.yml", "scripts/build-shared-core.py",
@@ -84,6 +84,10 @@ class SharedRuntimeBoundaryTests(unittest.TestCase):
     def test_desktop_controller_cannot_be_reimplemented(self):
         self.edit("src-tauri/src/core/session.rs", lambda _: "pub struct TranslationSessionController;\n")
         self.rejected("desktop facade must only re-export shared code: core/session.rs")
+
+    def test_session_file_persistence_cannot_be_reimplemented_on_desktop(self):
+        self.edit("src-tauri/src/session_history.rs", lambda text: text + "\nfn save_caption() {}\n")
+        self.rejected("desktop facade must only re-export shared code: session_history.rs")
 
     def test_desktop_facade_cannot_redirect_to_another_client(self):
         self.edit("src-tauri/src/clients/audio3_client.rs", lambda text: text.replace("audio3_client", "live_translate_client"))

@@ -4,12 +4,14 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use mimi_runtime::{
     audio::send_pipeline::{AudioIngress, AudioIngressError, AudioSendPipeline},
     clients::{
-        provider_events::{provider_event_channel, ProviderEventReceiver, ProviderEventSender},
+        provider_events::{
+            provider_event_channel, ProviderEvent, ProviderEventReceiver, ProviderEventSender,
+        },
         provider_network::ProviderNetwork,
         translation_client::TranslationClient,
     },
     core::{
-        audio_input::AudioSource,
+        audio_input::{AudioInput, AudioSource},
         configuration::LiveTranslationConfiguration,
         diagnostics::TranslationRecovery,
         models::{
@@ -86,6 +88,8 @@ struct SnapshotMetadata {
     version: u64,
     finished: bool,
     error_code: Option<String>,
+    history_save_error: bool,
+    history_limited: bool,
 }
 
 #[derive(Serialize)]
@@ -172,6 +176,9 @@ impl Drop for AbortTask {
     }
 }
 struct Session {
+    audio_source: AudioSource,
+    history: Mutex<Option<crate::history::Lease>>,
+    history_status: Mutex<mimi_runtime::session_journal::JournalState>,
     configuration: LiveTranslationConfiguration,
     speech_network: ProviderNetwork,
     text_network: ProviderNetwork,
@@ -203,10 +210,13 @@ impl Session {
         let finished = self.finished.load(Ordering::SeqCst);
         let error_code = self.error_code.lock().unwrap().clone();
         let version = self.version.load(Ordering::SeqCst);
+        let history_status = *self.history_status.lock().unwrap();
         let metadata = SnapshotMetadata {
             version,
             finished,
             error_code,
+            history_save_error: history_status.save_error,
+            history_limited: history_status.limited,
         };
         if since_version == Some(version) {
             drop(controller);
@@ -248,6 +258,29 @@ impl Session {
         let mut controller = self.controller.lock().unwrap();
         update(&mut controller);
         self.version.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn apply_event(&self, event: ProviderEvent) {
+        self.publish(|controller| {
+            let application = event.apply_to(controller, self.audio_source);
+            if let Some(pair) = application.confirmed_pair {
+                if let Some(history) = self.history.lock().unwrap().as_ref() {
+                    history.append(&pair);
+                    *self.history_status.lock().unwrap() = history.state();
+                }
+            }
+        });
+    }
+
+    fn release_history(&self) {
+        if let Some(history) = self.history.lock().unwrap().take() {
+            *self.history_status.lock().unwrap() = history.release();
+        }
+    }
+
+    fn mark_finished(&self) {
+        self.release_history();
+        self.finished.store(true, Ordering::SeqCst);
     }
 
     fn tick(&self, now: std::time::Instant) {
@@ -410,6 +443,7 @@ impl Session {
                 }
                 native.retire(0).await;
                 native.cleanup_owners.wait_registered().await;
+                native.release_history();
             },
             None,
         )
@@ -417,7 +451,7 @@ impl Session {
     fn fail(&self, code: &str) {
         *self.error_code.lock().unwrap() = Some(code.into());
         self.publish(|controller| controller.did_fail(code));
-        self.finished.store(true, Ordering::SeqCst);
+        self.mark_finished();
     }
     async fn drive(self: Arc<Self>, mut receiver: ProviderEventReceiver) {
         let mut generation = 1;
@@ -488,10 +522,10 @@ impl Session {
                                     health.abort();
                                     self.publish(TranslationSessionController::did_stop);
                                     self.retire(generation).await;
-                                    self.finished.store(true,Ordering::SeqCst);
+                                    self.mark_finished();
                                     return;
                                 }
-                                _ => self.publish(|controller| { event.apply_to(controller, AudioSource::System); }),
+                                _ => self.apply_event(event),
                             }
                         }
                         _ = ticks.tick() => {
@@ -506,7 +540,7 @@ impl Session {
             self.retire(generation).await;
             if self.stopping.load(Ordering::SeqCst) {
                 self.publish(TranslationSessionController::did_stop);
-                self.finished.store(true, Ordering::SeqCst);
+                self.mark_finished();
                 return;
             }
             if !provider_error_is_retryable(code) {
@@ -533,7 +567,7 @@ impl Session {
                 return;
             };
             self.publish(TranslationSessionController::begin_connecting);
-            tokio::select! { _ = tokio::time::sleep(attempt.delay) => {}, _ = self.signal.notified() => {self.publish(TranslationSessionController::did_stop);self.finished.store(true,Ordering::SeqCst);return;} }
+            tokio::select! { _ = tokio::time::sleep(attempt.delay) => {}, _ = self.signal.notified() => {self.publish(TranslationSessionController::did_stop);self.mark_finished();return;} }
             generation = if attempt.index == 0 {
                 schedule.generation()
             } else {
@@ -575,19 +609,17 @@ impl Session {
                 loop {
                     tokio::select! {
                         _ = &mut finish => break,
-                        event = receiver.recv_with_revision() => {if let Some(event)=event {self.publish(|controller|{event.apply_to(controller,AudioSource::System);});}else{break;}}
+                        event = receiver.recv_with_revision() => {if let Some(event)=event {self.apply_event(event);}else{break;}}
                     }
                 }
             }
             while let Ok(event) = receiver.try_recv_with_revision() {
-                self.publish(|controller| {
-                    event.apply_to(controller, AudioSource::System);
-                });
+                self.apply_event(event);
             }
             connection.disconnected().await;
         }
         self.publish(TranslationSessionController::did_stop);
-        self.finished.store(true, Ordering::SeqCst);
+        self.mark_finished();
     }
 }
 
@@ -731,9 +763,35 @@ pub fn exchange(request: &str) -> Result<String, &'static str> {
         .as_str()
         .ok_or("native_runtime_invalid_request")?
     {
+        "merge_snapshots" => crate::snapshot_merge::merge(&value)?,
         "policy" => {
             json!({"snapshotPublishIntervalMs":mimi_runtime::core::health::SNAPSHOT_PUBLISH_INTERVAL.as_millis() as u64,
                 "sessionFinishTimeoutMs":mimi_runtime::core::health::SESSION_FINISH_TIMEOUT.as_millis() as u64})
+        }
+        "text_endpoints_equivalent" => {
+            let route: TextTranslation = serde_json::from_value(value["route"].clone())
+                .map_err(|_| "native_runtime_invalid_request")?;
+            let saved = value["savedEndpoint"]
+                .as_str()
+                .ok_or("native_runtime_invalid_request")?;
+            let draft = value["draftEndpoint"]
+                .as_str()
+                .ok_or("native_runtime_invalid_request")?;
+            // Delegate destination identity to the same protocol parser that
+            // constructs production requests. Invalid drafts never retain auth.
+            let endpoints = match route {
+                TextTranslation::OpenAICompatible | TextTranslation::ChatMock => (
+                    mimi_runtime::core::protocols::openai_compatible::endpoint(saved).ok(),
+                    mimi_runtime::core::protocols::openai_compatible::endpoint(draft).ok(),
+                ),
+                TextTranslation::DeepLX => (
+                    mimi_runtime::core::protocols::deeplx::endpoint(saved).ok(),
+                    mimi_runtime::core::protocols::deeplx::endpoint(draft).ok(),
+                ),
+                _ => return Err("native_runtime_invalid_request"),
+            };
+            let equivalent = matches!(endpoints, (Some(saved), Some(draft)) if saved == draft);
+            json!({"equivalent": equivalent})
         }
         "volcano_decode" => volcano_decode(&value)?,
         "gemini_streaming_transcripts" => {
@@ -985,7 +1043,18 @@ pub fn exchange(request: &str) -> Result<String, &'static str> {
                 .map_err(|_| "invalid_configuration")?;
             json!({"speechEndpoint":speech,"textEndpoint":text,"modelNames":configuration.model_names()})
         }
+        "history_begin" | "history_finish" | "history_disable" | "history_state"
+        | "history_list" | "history_page" | "history_export" | "history_delete" => {
+            crate::history::exchange(&value)?
+        }
         "create" => {
+            let audio_source: AudioSource = value
+                .get("audioSource")
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|_| "invalid_configuration")?
+                .unwrap_or(AudioSource::System);
             let configuration: LiveTranslationConfiguration =
                 serde_json::from_value(value["configuration"].clone())
                     .map_err(|_| "invalid_configuration")?;
@@ -1011,7 +1080,16 @@ pub fn exchange(request: &str) -> Result<String, &'static str> {
             }
             static NEXT: AtomicU64 = AtomicU64::new(1);
             let id = NEXT.fetch_add(1, Ordering::SeqCst);
+            let history = value
+                .get("historyHandle")
+                .map(|handle| {
+                    crate::history::attach(handle.as_u64().ok_or("session_history_unavailable")?)
+                })
+                .transpose()?;
             let native = Arc::new(Session {
+                audio_source,
+                history: Mutex::new(history),
+                history_status: Mutex::new(Default::default()),
                 configuration,
                 speech_network,
                 text_network,
@@ -1029,7 +1107,13 @@ pub fn exchange(request: &str) -> Result<String, &'static str> {
                 error_code: Mutex::new(None),
                 budget: Mutex::new(Default::default()),
             });
-            native.publish(TranslationSessionController::begin_session);
+            native.publish(|controller| {
+                controller.set_audio_input(match audio_source {
+                    AudioSource::System => AudioInput::System,
+                    AudioSource::Microphone => AudioInput::Microphone,
+                });
+                controller.begin_session();
+            });
             registry.insert(id, native);
             json!({"handle":id})
         }
@@ -1098,6 +1182,50 @@ pub fn pcm(handle: u64, data: Vec<u8>) -> Result<bool, &'static str> {
 mod tests {
     use super::*;
     use std::time::Duration;
+    #[test]
+    fn text_endpoint_identity_uses_shared_protocols_and_rejects_invalid_pairs() {
+        for (route, suffix) in [
+            ("openAICompatible", "chat/completions"),
+            ("chatMock", "chat/completions"),
+            ("deepLX", "translate"),
+        ] {
+            let equivalent = |saved: &str, draft: &str| -> bool {
+                let output: Value = serde_json::from_str(
+                    &exchange(
+                        &json!({"operation":"text_endpoints_equivalent", "route":route,
+                        "savedEndpoint":saved,"draftEndpoint":draft})
+                        .to_string(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+                output["equivalent"].as_bool().unwrap()
+            };
+            let saved = "https://example.invalid/v1";
+            for draft in [
+                "https://example.invalid/v1/".to_string(),
+                "https://EXAMPLE.invalid:443/v1".to_string(),
+                format!("https://example.invalid/v1/{suffix}"),
+            ] {
+                assert!(equivalent(saved, &draft));
+            }
+            for draft in [
+                "",
+                "invalid",
+                "https://other.invalid/v1",
+                "https://example.invalid/v2",
+                "https://example.invalid:8443/v1",
+                "https://example.invalid/v1?token=synthetic",
+                "https://example.invalid/v1#fragment",
+                "http://example.invalid/v1",
+            ] {
+                assert!(!equivalent(saved, draft));
+            }
+            assert!(!equivalent("", ""));
+            assert!(!equivalent("invalid", "invalid"));
+        }
+        assert!(exchange(r#"{"operation":"text_endpoints_equivalent","route":"xAI","savedEndpoint":"","draftEndpoint":""}"#).is_err());
+    }
     #[test]
     fn typed_grok_probe_and_xai_asr_capabilities_follow_the_selected_text_route() {
         let probe = json!({"credentials":{"kind":"xAI","apiKey":"synthetic-text-key","model":"selected-grok-model"},
@@ -1173,6 +1301,9 @@ mod tests {
             url: None,
         };
         Arc::new(Session {
+            audio_source: AudioSource::System,
+            history: Mutex::new(None),
+            history_status: Mutex::new(Default::default()),
             configuration,
             speech_network: ProviderNetwork::resolve(&direct).unwrap(),
             text_network: ProviderNetwork::resolve(&direct).unwrap(),
@@ -1225,6 +1356,7 @@ mod tests {
     fn legacy_full_response(native: &Session) -> Value {
         let controller = native.controller.lock().unwrap();
         let state = &controller.state;
+        let history = *native.history_status.lock().unwrap();
         let connection_status = match state.status {
             SessionStatus::Idle => "idle",
             SessionStatus::Connecting => "connecting",
@@ -1232,7 +1364,7 @@ mod tests {
             SessionStatus::Stopping => "stopping",
             SessionStatus::Error(_) => "error",
         };
-        json!({"version":native.version.load(Ordering::SeqCst),"connectionStatus":connection_status,"snapshot":state.subtitles,"atomicPreview":state.atomic_preview,"detectedLanguage":state.detected_language.as_ref().map(|language|language.code.as_str()),"isTranslationPending":state.is_translation_pending,"isTranslationPreviewPending":state.is_translation_preview_pending,"isTranslationTimedOut":state.is_translation_timed_out,"translationRecovery":state.translation_recovery,"finished":native.finished.load(Ordering::SeqCst),"errorCode":*native.error_code.lock().unwrap()})
+        json!({"version":native.version.load(Ordering::SeqCst),"historySaveError":history.save_error,"historyLimited":history.limited,"connectionStatus":connection_status,"snapshot":state.subtitles,"atomicPreview":state.atomic_preview,"detectedLanguage":state.detected_language.as_ref().map(|language|language.code.as_str()),"isTranslationPending":state.is_translation_pending,"isTranslationPreviewPending":state.is_translation_preview_pending,"isTranslationTimedOut":state.is_translation_timed_out,"translationRecovery":state.translation_recovery,"finished":native.finished.load(Ordering::SeqCst),"errorCode":*native.error_code.lock().unwrap()})
     }
 
     #[test]
@@ -1244,7 +1376,7 @@ mod tests {
         assert_eq!(fixture.poll(Some(json!(u64::MAX))).unwrap(), expected);
         assert_eq!(
             fixture.poll(Some(json!(1))).unwrap(),
-            json!({"unchanged":true,"version":1,"finished":false,"errorCode":null})
+            json!({"unchanged":true,"version":1,"finished":false,"errorCode":null,"historySaveError":false,"historyLimited":false})
         );
     }
 
@@ -1262,9 +1394,14 @@ mod tests {
         assert_eq!(pending["errorCode"], "transport_error");
         assert_eq!(pending["finished"], false);
         fixture.native.finished.store(true, Ordering::SeqCst);
+        {
+            let mut history = fixture.native.history_status.lock().unwrap();
+            history.save_error = true;
+            history.limited = true;
+        }
         assert_eq!(
             fixture.poll(Some(version.clone())).unwrap(),
-            json!({"unchanged":true,"version":version,"finished":true,"errorCode":"transport_error"})
+            json!({"unchanged":true,"version":version,"finished":true,"errorCode":"transport_error","historySaveError":true,"historyLimited":true})
         );
     }
 

@@ -10,6 +10,7 @@ import android.widget.LinearLayout
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import app.yuxino.mimi.android.capture.MimiService
+import app.yuxino.mimi.android.capture.CaptureInput
 import app.yuxino.mimi.android.provider.ServiceProvider
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
@@ -72,7 +73,7 @@ internal class FirstRunGuide(private val activity: AppCompatActivity, private va
         if (audioPermission()) prefs.edit().putBoolean("audio-granted", true).apply()
         if (!showing) return
         val state = "$profileId:${selectedTitle()}:${configured()}:${Settings.canDrawOverlays(activity)}:" +
-            "${audioPermission()}:${MimiService.isRunning}:${MimiService.captureObservation?.state}:" +
+            "${input()}:${audioPermission()}:${MimiService.isRunning}:${MimiService.captureObservation?.state}:" +
             "${prefs.getBoolean("overlay-denied", false)}:${prefs.getBoolean("audio-denied", false)}:${prefs.getBoolean("projection-denied", false)}:${MimiService.lastCaptureError}:" +
             "${synchronized(MimiService.firstRunEvidence) { MimiService.firstRunEvidence.complete }}"
         if (state != lastState) { lastState = state; render() }
@@ -101,6 +102,12 @@ internal class FirstRunGuide(private val activity: AppCompatActivity, private va
             else -> activity.getString(R.string.guide_unknown)
         }
     }
+    private fun input() = SettingsStore.captureInput(activity)
+    private fun inputLabel() = activity.getString(when (input()) {
+        CaptureInput.SYSTEM -> R.string.capture_input_system
+        CaptureInput.MICROPHONE -> R.string.capture_input_microphone
+        CaptureInput.BOTH -> R.string.capture_input_both
+    })
     private fun audioPermission() = ContextCompat.checkSelfPermission(activity, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     private fun render() {
         body.removeAllViews()
@@ -113,7 +120,7 @@ internal class FirstRunGuide(private val activity: AppCompatActivity, private va
         when (step) {
             0 -> {
                 label(activity.getString(R.string.guide_intro), 24f)
-                label(activity.getString(R.string.guide_intro_hint), muted = true)
+                label(activity.getString(R.string.guide_selected_input, inputLabel()), muted = true)
                 val profiles = runCatching { SettingsStore.profiles(activity) }.getOrElse {
                     label(activity.getString(R.string.guide_storage_unavailable))
                     button(activity.getString(R.string.profiles_retry), "guide-storage-retry") { render() }
@@ -158,25 +165,35 @@ internal class FirstRunGuide(private val activity: AppCompatActivity, private va
             }
             2 -> {
                 label(activity.getString(R.string.guide_permission_title), 24f)
-                label(activity.getString(R.string.guide_permission_states,
-                    permissionStatus("overlay", Settings.canDrawOverlays(activity)), permissionStatus("audio", audioPermission()),
-                    activity.getString(if (MimiService.isRunning) R.string.guide_projection_current else if (projectionSharingEnded(MimiService.isRunning, MimiService.lastCaptureError)) R.string.guide_projection_revoked else if (prefs.getBoolean("projection-denied", false)) R.string.guide_projection_cancelled else R.string.guide_projection_unknown)), muted = true)
-                label(activity.getString(R.string.guide_permission_audio))
-                label(activity.getString(R.string.guide_permission_hint), muted = true)
+                val input = input()
+                if (input.needsProjection) {
+                    label(activity.getString(R.string.guide_permission_states,
+                        permissionStatus("overlay", Settings.canDrawOverlays(activity)), permissionStatus("audio", audioPermission()),
+                        activity.getString(if (MimiService.isRunning) R.string.guide_projection_current else if (projectionSharingEnded(MimiService.isRunning, MimiService.lastCaptureError)) R.string.guide_projection_revoked else if (prefs.getBoolean("projection-denied", false)) R.string.guide_projection_cancelled else R.string.guide_projection_unknown)), muted = true)
+                } else {
+                    label(activity.getString(R.string.guide_microphone_states,
+                        permissionStatus("overlay", Settings.canDrawOverlays(activity)), permissionStatus("audio", audioPermission())), muted = true)
+                }
+                label(activity.getString(if (input.usesMicrophone) R.string.microphone_permission_hint else R.string.guide_permission_audio))
+                label(activity.getString(if (input.needsProjection) R.string.guide_permission_hint else R.string.guide_microphone_steps), muted = true)
                 button(activity.getString(R.string.guide_grant), "guide-permissions") { start() }
                 if (Settings.canDrawOverlays(activity) && audioPermission()) button(activity.getString(R.string.guide_trial_next), "guide-next") { step = 3; render() }
             }
             3 -> {
-                heading(activity.getString(R.string.guide_play_title), activity.getString(R.string.guide_capture_limits), "guide-capture-help")
-                label(activity.getString(R.string.guide_trial_hint, providerTitle(activity, selected)), muted = true)
+                heading(activity.getString(when (input()) {
+                    CaptureInput.SYSTEM -> R.string.guide_play_title
+                    CaptureInput.MICROPHONE -> R.string.guide_microphone_trial
+                    CaptureInput.BOTH -> R.string.guide_both_trial
+                }), activity.getString(if (input().usesMicrophone) R.string.microphone_source_hint else R.string.guide_capture_limits), "guide-capture-help")
+                label(activity.getString(if (input().usesMicrophone) R.string.guide_microphone_trial_hint else R.string.guide_trial_hint, providerTitle(activity, selected)), muted = true)
                 label(when {
                     !MimiService.isRunning -> activity.getString(R.string.guide_not_started)
                     MimiService.captureObservation?.state == app.yuxino.mimi.android.capture.CaptureHealth.State.NO_PCM -> activity.getString(R.string.guide_no_pcm)
-                    MimiService.captureObservation?.state == app.yuxino.mimi.android.capture.CaptureHealth.State.SILENT -> activity.getString(R.string.guide_silent)
+                    MimiService.captureObservation?.state == app.yuxino.mimi.android.capture.CaptureHealth.State.SILENT -> activity.getString(if (input() == CaptureInput.BOTH) R.string.capture_both_no_sound_hint else if (input() == CaptureInput.MICROPHONE) R.string.microphone_no_sound_hint else R.string.guide_silent)
                     MimiService.captureObservation?.state == app.yuxino.mimi.android.capture.CaptureHealth.State.AUDIO -> activity.getString(R.string.guide_audio)
-                    else -> activity.getString(R.string.guide_wait_audio)
+                    else -> activity.getString(if (input() == CaptureInput.BOTH) R.string.capture_both_source_hint else if (input() == CaptureInput.MICROPHONE) R.string.microphone_ready_hint else R.string.guide_wait_audio)
                 })
-                button(if (MimiService.isRunning) activity.getString(R.string.guide_see_caption) else activity.getString(R.string.guide_start_trial), "guide-test") {
+                button(if (MimiService.isRunning) activity.getString(R.string.guide_see_caption) else activity.getString(if (input().needsProjection) R.string.guide_start_trial else R.string.guide_microphone_start), "guide-test") {
                     if (MimiService.isRunning) { step = 4; render() } else start()
                 }
             }
@@ -184,7 +201,7 @@ internal class FirstRunGuide(private val activity: AppCompatActivity, private va
                 val complete = MimiService.isRunning && Settings.canDrawOverlays(activity) && audioPermission() &&
                     synchronized(MimiService.firstRunEvidence) { MimiService.firstRunEvidence.complete }
                 label(if (complete) activity.getString(R.string.guide_complete_title) else activity.getString(R.string.guide_wait_caption_title), 24f)
-                val sharingEnded = projectionSharingEnded(MimiService.isRunning, MimiService.lastCaptureError)
+                val sharingEnded = input().needsProjection && projectionSharingEnded(MimiService.isRunning, MimiService.lastCaptureError)
                 if (sharingEnded) label(activity.getString(R.string.guide_stopped), muted = true)
                 button(if (complete) activity.getString(R.string.guide_finish) else if (sharingEnded) activity.getString(R.string.guide_reopen_sharing) else if (MimiService.isRunning) activity.getString(R.string.guide_waiting_back) else activity.getString(R.string.guide_retry), "guide-finish") {
                     if (complete || MimiService.isRunning) dismiss()

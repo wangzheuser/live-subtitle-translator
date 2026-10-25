@@ -15,7 +15,7 @@ class RuntimeSubtitleProjectionTest {
     @Before fun reset() { SubtitleBus.clear(); SubtitleBus.setHistoryLimit(2) }
     @After fun cleanup() { SubtitleBus.clear(); SubtitleBus.setHistoryLimit(0) }
 
-    private class Snapshots(private val atomic: Boolean, private val historyLimit: Int = 2) {
+    private class Snapshots(private val atomic: Boolean, private val historyLimit: Int = 2, private val audioSource: String = "system") {
         private var response = SharedSubtitleCore.exchange(JSONObject().put("operation",
             JSONObject().put("type", "create").put("history_limit", historyLimit)))
         fun apply(event: JSONObject, publish: Boolean = true) =
@@ -28,18 +28,58 @@ class RuntimeSubtitleProjectionTest {
             if (publish) this.publish()
         }
         fun publish() = SubtitleBus.onRuntimeSnapshot(JSONObject().put("atomicPreview", atomic)
-            .put("detectedLanguage", "en").put("snapshot", response.getJSONObject("snapshot")), false)
+            .put("detectedLanguage", "en").put("snapshot", response.getJSONObject("snapshot")), false, audioSource)
         fun sourceOwner(): Any? = response.getJSONObject("snapshot").getJSONObject("source")
             .opt("utteranceId").takeUnless { it == JSONObject.NULL }
         fun translationOwner(): Any? = response.getJSONObject("snapshot").getJSONObject("translation")
             .opt("utteranceId").takeUnless { it == JSONObject.NULL }
         fun feedback(fields: JSONObject) = SubtitleBus.onRuntimeSnapshot(fields.put("atomicPreview", atomic)
-            .put("snapshot", response.getJSONObject("snapshot")), false)
+            .put("snapshot", response.getJSONObject("snapshot")), false, audioSource)
     }
     private fun pair(id: String, source: String, translation: String) = JSONObject()
         .put("type", "identified_final_pair").put("utterance_id", id).put("source", source).put("translation", translation)
     private fun draft(role: String, text: String) = JSONObject().put("type", "utterance_text")
         .put("utterance_id", "B").put("role", role).put("text", text).put("is_final", false)
+
+    @Test fun independentSourcesPreservePairsAndBoundedHistoryAcrossStop() {
+        val system = Snapshots(false, 2, "system")
+        val microphone = Snapshots(false, 2, "microphone")
+        system.apply(pair("A", "Synthetic system.", "系统合成。"))
+        microphone.apply(pair("A", "Synthetic microphone.", "麦克风合成。"))
+        system.apply(draft("source", "System unfinished draft"))
+        microphone.apply(draft("source", "Microphone unfinished draft"))
+        val live = SubtitleBus.displaySnapshots()
+        assertEquals(listOf("system", "microphone"), live.map { it.audioSource })
+        assertEquals(listOf("System unfinished draft", "Microphone unfinished draft"), live.map { it.source })
+        assertEquals(listOf("系统合成。", "麦克风合成。"), live.map { it.forReading(CaptionDisplayMode.BILINGUAL).translation })
+        assertEquals(setOf("system", "microphone"), SubtitleBus.historySnapshot().map { it.audioSource }.toSet())
+        assertEquals(2, SubtitleBus.historySnapshot().size)
+        SubtitleBus.finishSnapshot()
+        val stopped = SubtitleBus.displaySnapshots()
+        assertTrue(SubtitleBus.hasRetainedContent)
+        assertEquals(listOf("Synthetic system.", "Synthetic microphone."), stopped.map { it.source })
+        assertTrue(stopped.all { it.confirmed && it.feedback == SubtitleBus.RuntimeFeedback() })
+        assertEquals(listOf("系统合成。", "麦克风合成。"), stopped.map { it.translation })
+        SubtitleBus.finishSnapshot()
+        assertEquals(stopped, SubtitleBus.displaySnapshots())
+        SubtitleBus.setHistoryLimit(1)
+        assertEquals(1, SubtitleBus.historySnapshot().size)
+        assertTrue(SubtitleBus.displaySnapshots().all { it.confirmed })
+        SubtitleBus.clear()
+        assertFalse(SubtitleBus.hasRetainedContent)
+    }
+
+    @Test fun microphoneOnlyDraftsAndFeedbackCannotSurviveStop() {
+        val microphone = Snapshots(false, 0, "microphone")
+        microphone.apply(draft("source", "Synthetic microphone draft"))
+        microphone.feedback(JSONObject().put("connectionStatus", "connecting").put("isTranslationTimedOut", true))
+        assertEquals("microphone", SubtitleBus.displaySnapshots().single().audioSource)
+        assertTrue(SubtitleBus.hasRetainedContent)
+        SubtitleBus.finishSnapshot()
+        assertFalse(SubtitleBus.hasRetainedContent)
+        assertEquals(SubtitleBus.RuntimeFeedback(), SubtitleBus.runtimeFeedback)
+        assertTrue(SubtitleBus.displaySnapshots().single().source.isEmpty())
+    }
 
     @Test fun pendingRealtimeTranslationKeepsAWholeConfirmedReadingPairWithoutHistory() {
         SubtitleBus.setHistoryLimit(0)
@@ -169,7 +209,7 @@ class RuntimeSubtitleProjectionTest {
         )) {
             for (scheduled in listOf(true, false)) {
                 snapshots.feedback(JSONObject().put("connectionStatus", "listening")
-                    .put("translationRecovery", JSONObject().put("reason", reason).put("retryScheduled", scheduled)))
+                    .put("translationRecovery", JSONObject().put("reason", reason).put("retryAfterMs", 0).put("retryScheduled", scheduled)))
                 assertEquals(if (scheduled) retryResource else waitingResource, runtimeFeedbackResource(SubtitleBus.runtimeFeedback))
                 assertEquals("Synthetic A.", SubtitleBus.displaySource)
                 assertEquals("合成 A。", SubtitleBus.displayTranslation)
@@ -181,8 +221,13 @@ class RuntimeSubtitleProjectionTest {
         assertEquals(R.string.runtime_translation_delayed, runtimeFeedbackResource(SubtitleBus.runtimeFeedback))
         snapshots.feedback(JSONObject().put("connectionStatus", "listening"))
         assertNull(runtimeFeedbackResource(SubtitleBus.runtimeFeedback))
-        snapshots.feedback(JSONObject().put("translationRecovery", JSONObject().put("reason", "synthetic-private-error")))
+        assertThrows(IllegalArgumentException::class.java) {
+            snapshots.feedback(JSONObject().put("translationRecovery", JSONObject().put("reason", "synthetic-private-error")))
+        }
+        assertNull(runtimeFeedbackResource(SubtitleBus.RuntimeFeedback(recoveryReason = "synthetic-private-error")))
         assertNull(runtimeFeedbackResource(SubtitleBus.runtimeFeedback))
+        SubtitleBus.finishSnapshot()
+        assertEquals("Synthetic A.", SubtitleBus.displaySource)
         SubtitleBus.clear()
         assertNull(runtimeFeedbackResource(SubtitleBus.runtimeFeedback))
     }

@@ -507,9 +507,8 @@ export const useStore = create<StoreState>()((set, get) => ({
       if (settingsResponseGate.applyIfCurrent(revision)) {
         settingsSaveCoordinator.invalidate();
         set({ settings: snapshot });
-        return snapshot;
       }
-      return get().settings;
+      return snapshot;
     }
     const current = get().settings;
     if (current.profiles.length >= 20) throw new Error("profile-limit");

@@ -694,3 +694,23 @@ that backup until every fixture has finished. Verify the installed APK and actua
 renderer again. After a hang, finish heavy builds before native acceptance and
 rerun the same case serially. A successful recovery does not establish the
 original cause or physical-device performance.
+
+## Android service dispatch and document export
+
+Capture requests originate from a visible Activity and carry a bounded start
+token. Use the shared native dispatch helper so rejected requests can stop
+without an outstanding `startForegroundService` promise; accepted requests must
+immediately enter the foreground-service types required by their audio sources.
+Exercise rejection followed by a successful start and Stop during pending
+delivery. Never bypass visibility, permission or token checks to fix a timeout.
+Register every production control Activity with the existing own-UI lifecycle
+owner set so the subtitle overlay stays hidden while those controls are visible.
+
+An `ACTION_CREATE_DOCUMENT` result does not prove that Mimi created the returned
+document: the [Intent API contract](https://developer.android.com/reference/android/content/Intent#ACTION_CREATE_DOCUMENT)
+also permits an existing document. On export failure, clean only the exact
+app-private temporary file, never delete the selected destination. A provider
+write failure can leave partial output; report failure without claiming atomic
+replacement. Test formatter failure before opening the destination, write failure,
+and private temporary-file cleanup. Native dialog fixtures must activate the
+ListView item or clickable control, not call `performClick` on its text child.

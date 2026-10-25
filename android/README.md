@@ -1,7 +1,7 @@
 # Mimi for Android
 
-Floating translated subtitles for audio playing on your phone. Watch a video,
-stream, or class with the original text, translation, or both on screen.
+Floating translated subtitles for app playback, your microphone, or both. Watch a video,
+follow a class, or translate a conversation with the original text and translation on screen.
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [Desktop home](../README_EN.md)
 
@@ -11,15 +11,17 @@ stream, or class with the original text, translation, or both on screen.
 
 1. [Download the Android APK](https://github.com/yuxino/mimi/releases/latest) and install it on Android 10 or later.
 2. Open **Services → Add**, choose a service, enter its credentials, and save. The first configuration is selected automatically; tap a saved configuration to switch later. The [service setup guide](../docs/provider-setup.md#choose) explains where to get them; cloud usage may cost money.
-3. In **Captions**, choose the spoken and translation languages, then start. Allow display over other apps, audio recording, and the system capture prompt when asked.
+3. In **Captions**, choose the audio input and languages, then start. System audio is the default; microphone capture requires choosing Microphone or Both. Allow display over other apps and audio recording. The system capture prompt appears only for inputs that include app playback.
 4. Switch to the app you want to hear and play speech. Subtitles appear over it; use Immersive Mode to keep just the text and pass touches through.
 
-Android captures app playback, **not the microphone**. Android still requires the
+System-only sessions never open the microphone. Android still requires the
 audio-recording permission for playback capture. Some apps block capture, so protected
 content may produce no subtitles. Cloud recognition receives the captured audio;
 remote text translation receives recognized text. New installs retain the three most recent
 confirmed captions in memory; existing installations keep their previous setting.
-Stopping clears these captions without saving a transcript.
+Stopping keeps the bounded confirmed captions readable until the next session. Enable
+**Save captions** before starting to keep a private local transcript. **Saved sessions**
+lets you read, export TXT/Markdown, or explicitly delete it; saving is off by default.
 
 Need to change the text translator? See [independent text translation](#independent-text-translation).
 Android has no Apple Speech or custom recognition setup. See [known limits](#known-limits)
@@ -42,9 +44,10 @@ code does not prove availability on every device; see [verification status](#ver
   setup guide. Switching sections retains their scroll positions.
 - **System-audio capture** — `MediaProjection` + `AudioPlaybackCapture`
   (API 29+). Requires Android’s `RECORD_AUDIO` runtime grant for playback capture;
-  never uses a microphone source. Captures what other apps play
+  never uses a microphone source unless selected. Captures what other apps play
   (`USAGE_MEDIA/GAME/UNKNOWN`), 48 kHz stereo float, box-filter downmix +
   resample to the provider's target rate (16 kHz / 24 kHz mono PCM16).
+- **Microphone and Both** — explicit microphone capture uses a separate mono AudioRecord. Both keeps independent capture buffers, recognition sessions and source-labeled captions; audio is never mixed and a failed input never silently falls back. Stop before changing the input. Microphone-only does not request screen capture permission.
 - **Services** — Alibaba Cloud DashScope, OpenAI Realtime Translation, Google Gemini Live,
   Azure OpenAI, Volcano Engine Doubao, Tencent Cloud, Baidu realtime translation and xAI Grok Voice.
   Their production clients are shared with desktop. Grok is turn-based voice translation;
@@ -88,8 +91,11 @@ code does not prove availability on every device; see [verification status](#ver
   stored separately from profile metadata and isolated per configuration.
 - **Subtitle history** — new installations keep the three most recent confirmed
   captions in memory by default. Existing installations keep their previous setting,
-  including the former zero default. Set the count to zero or stop the session to
-  clear retained subtitles; this does not save a transcript to disk.
+  including the former zero default. This bounded display is independent of **Save captions**,
+  which is off by default. Saved sessions use the desktop Rust journal and export formatter,
+  keep confirmed original/translation pairs and source identity, and survive Stop/restart.
+  Disable saving to discard the current session; older saved sessions require explicit deletion.
+  Saving must be enabled before Start. Audio recording/export remains desktop-only.
 - **Interface language** — More offers Follow system and the same eight interface
   languages as desktop: 简体中文, 繁體中文, English, 日本語, Deutsch, 한국어, Français and ภาษาไทย.
   Changes apply immediately and persist after restart, independently of subtitle
@@ -108,7 +114,7 @@ Setup, permission and audio-recovery instructions remain visible.
 - Android 10+ (API 29); the original contributor reported Android 17 testing,
   and the updated interface is checked on an Android 15 emulator
 - Credentials for one supported service (usage may incur provider charges)
-- The "Display over other apps" and `RECORD_AUDIO` grants, plus per-start MediaProjection consent
+- The "Display over other apps" and `RECORD_AUDIO` grants, plus per-start MediaProjection consent for system playback
 
 ## Build
 

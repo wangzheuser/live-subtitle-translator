@@ -21,6 +21,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
+import android.media.MediaRecorder
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Handler
@@ -51,18 +52,21 @@ import androidx.appcompat.app.AlertDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import app.yuxino.mimi.android.R
 import app.yuxino.mimi.android.SettingsStore
 import app.yuxino.mimi.android.ImmersiveModeHelp
 import app.yuxino.mimi.android.InterfaceLanguage
 import app.yuxino.mimi.android.provider.EngineListener
 import app.yuxino.mimi.android.provider.ProviderEngine
+import app.yuxino.mimi.android.provider.NativeRuntimeConfiguration
+import org.json.JSONObject
 import app.yuxino.mimi.android.provider.SubtitleBus
 import app.yuxino.mimi.android.resample.StreamResampler
 import kotlin.concurrent.thread
 
 /**
- * Foreground service that owns the MediaProjection playback-capture loop and
+ * Foreground service that owns independent selected audio-capture lanes and
  * the overlay subtitle window. One service, one lifecycle, one notification.
  */
 class MimiService : Service() {
@@ -70,32 +74,42 @@ class MimiService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private var mediaProjection: MediaProjection? = null
-    private var audioRecord: AudioRecord? = null
-    private var captureThread: Thread? = null
-    private var capturing: AtomicBoolean? = null
-    private var health: CaptureHealth? = null
+    private class CaptureLane(val source: CaptureSource, val engine: ProviderEngine) {
+        var record: AudioRecord? = null
+        var worker: Thread? = null
+        val capturing = AtomicBoolean(false)
+        var health: CaptureHealth? = null
+    }
+    private val lanes = linkedMapOf<CaptureSource, CaptureLane>()
     private val healthTick = object : Runnable {
         override fun run() {
-            if (health != null && (!android.provider.Settings.canDrawOverlays(this@MimiService) ||
+            if (lanes.isEmpty()) return
+            if (!android.provider.Settings.canDrawOverlays(this@MimiService) ||
                 ContextCompat.checkSelfPermission(this@MimiService, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ||
                 getSystemService(android.app.KeyguardManager::class.java).isDeviceLocked ||
-                !getSystemService(android.os.PowerManager::class.java).isInteractive)) {
+                !getSystemService(android.os.PowerManager::class.java).isInteractive) {
                 lastCaptureError = "capture.permission_or_lock_changed"
                 stopEverything()
                 return
             }
-            health?.let {
-                captureObservation = it.snapshot(SystemClock.elapsedRealtime())
-                stateListeners.forEach { listener -> listener() }
-                renderBus()
-                mainHandler.postDelayed(this, 1_000)
-            }
+            updateCaptureObservations()
+            stateListeners.forEach { listener -> listener() }
+            renderBus()
+            mainHandler.postDelayed(this, 1_000)
         }
     }
+    private fun updateCaptureObservations() {
+        val now = SystemClock.elapsedRealtime()
+        captureObservations = lanes.mapNotNull { (source, lane) -> lane.health?.snapshot(now)?.let { source to it } }.toMap()
+        captureObservation = captureObservationForSources(captureObservations.values)
+    }
+    private var testCaptureMode = false
+    private var historyHandle: Long? = null
+    private var stopObservingStorage: (() -> Unit)? = null
+    private val historyStates = mutableMapOf<CaptureSource, Pair<Boolean, Boolean>>()
     private var generation = 0
     private var finishingSession = false
     private var projectionCallback: MediaProjection.Callback? = null
-    private var engine: ProviderEngine? = null
     private lateinit var immersiveHelp: ImmersiveModeHelp
 
     private var windowManager: WindowManager? = null
@@ -181,6 +195,11 @@ class MimiService : Service() {
             mainHandler.removeCallbacks(appearanceUpdate)
             mainHandler.post(appearanceUpdate)
         }
+        stopObservingStorage = SettingsStore.observeSessionStorage(this) {
+            mainHandler.post {
+                if (!SettingsStore.retainSessionHistory(this)) disableSessionHistory()
+            }
+        }
         ownUiChanged = {
             mainHandler.removeCallbacks(ownUiUpdate)
             if (ownUiVisible) {
@@ -196,7 +215,30 @@ class MimiService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val startRequest = intent?.getLongExtra(EXTRA_START_REQUEST, 0L) ?: 0L
+        try {
+            // Expired delivery must not begin unexpected capture after controls unlock.
+            if (startRequest != 0L && !startPending(startRequest)) {
+                if (!isStarting && !isRunning && lanes.isEmpty()) stopSelf(startId)
+                return START_NOT_STICKY
+            }
+            if (startRequest != 0L && !startOwnerVisible(startRequest)) {
+                lastCaptureError = "capture.start_failed"
+                stopSelf(startId)
+                return START_NOT_STICKY
+            }
+            return handleStartCommand(intent)
+        } finally {
+            if (startRequest != 0L) {
+                if (startPending(startRequest) && !isRunning && lastCaptureError == null) lastCaptureError = "capture.start_failed"
+                completeStartRequest(startRequest)
+            }
+        }
+    }
+
+    private fun handleStartCommand(intent: Intent?): Int {
         if (intent?.action == ACTION_STOP) {
+            startOwner?.first?.let(::completeStartRequest)
             finishSession()
             return START_NOT_STICKY
         }
@@ -214,9 +256,9 @@ class MimiService : Service() {
             return START_NOT_STICKY
         }
         if (isRunning || overlayView != null) return START_NOT_STICKY
-        val testEngine = if (intent?.action == ACTION_CAPTURE_TEST &&
-            applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) captureEngineForTests else null
-        if (intent?.action == ACTION_CAPTURE_TEST && testEngine == null) {
+        val testEngines = if (intent?.action == ACTION_CAPTURE_TEST &&
+            applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) captureEnginesForTests else null
+        if (intent?.action == ACTION_CAPTURE_TEST && testEngines == null) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -236,24 +278,31 @@ class MimiService : Service() {
             showOverlay()
             return START_NOT_STICKY
         }
-        val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, Int.MIN_VALUE) ?: Int.MIN_VALUE
-        val resultData = intent?.compatGetParcelableExtra(EXTRA_RESULT_DATA)
-        if (resultCode == Int.MIN_VALUE || resultData == null) {
+        // Actual capture is always delivered from a currently visible Activity.
+        if ((intent?.getLongExtra(EXTRA_START_REQUEST, 0L) ?: 0L) == 0L) {
             stopSelf()
             return START_NOT_STICKY
         }
-        // Official order on Android 14+: startForeground with the
-        // mediaProjection type first — getMediaProjection() then requires the
-        // FGS to already be running with that type, and startForeground's
-        // token deadline is satisfied by calling it immediately after.
-        val projectionManager =
-            getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        val input = CaptureInput.request(intent?.getStringExtra(EXTRA_CAPTURE_INPUT))
+        val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, Int.MIN_VALUE) ?: Int.MIN_VALUE
+        val resultData = intent?.compatGetParcelableExtra(EXTRA_RESULT_DATA)
+        if (input == null || input.needsProjection && (resultCode != android.app.Activity.RESULT_OK || resultData == null) ||
+            testEngines != null && testEngines.keys != input.sources.toSet()) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         try {
             lastCaptureError = null
-            startAsForeground()
-            val projection = checkNotNull(projectionManager.getMediaProjection(resultCode, resultData))
-            mediaProjection = projection
-            startCapture(projection, testEngine)
+            captureInput = input
+            // Start from the visible activity after all required user grants.
+            // Projection creation requires its foreground type on Android 14+.
+            startAsForeground(input)
+            val projection = if (input.needsProjection) {
+                val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                checkNotNull(manager.getMediaProjection(resultCode, checkNotNull(resultData)))
+                    .also { mediaProjection = it }
+            } else null
+            startCapture(input, projection, testEngines)
             setRunning(true)
             renderBus()
         } catch (_: Exception) {
@@ -265,11 +314,11 @@ class MimiService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun startAsForeground() {
-        startForeground(
-            NOTIFICATION_ID, notification(),
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION,
-        )
+    private fun startAsForeground(input: CaptureInput) {
+        val type = (if (input.needsProjection) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION else 0) or
+            (if (input.usesMicrophone && Build.VERSION.SDK_INT >= 30) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0)
+        startForeground(NOTIFICATION_ID, notification(), type)
+        captureForegroundTypesForTests = foregroundServiceType
     }
 
     private fun notification(): Notification {
@@ -281,7 +330,7 @@ class MimiService : Service() {
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_mimi)
             .setContentTitle(interfaceString(R.string.notification_title))
-            .setContentText(interfaceString(R.string.notification_text))
+            .setContentText(interfaceString(if (captureInput == CaptureInput.MICROPHONE) R.string.notification_microphone_text else if (captureInput == CaptureInput.BOTH) R.string.capture_both_source_hint else R.string.notification_text))
             .setContentIntent(mainActivityIntent())
             .addAction(
                 Notification.Action.Builder(
@@ -299,7 +348,7 @@ class MimiService : Service() {
             PendingIntent.FLAG_IMMUTABLE,
         )
 
-    private fun startCapture(projection: MediaProjection, testEngine: ProviderEngine? = null) {
+    private fun startCapture(input: CaptureInput, projection: MediaProjection?, testEngines: Map<CaptureSource, ProviderEngine>? = null) {
         check(ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             "audio_permission_required"
         }
@@ -307,109 +356,119 @@ class MimiService : Service() {
             getSystemService(android.os.PowerManager::class.java).isInteractive &&
             !getSystemService(android.app.KeyguardManager::class.java).isDeviceLocked) { "capture_permission_or_lock_changed" }
         val sessionGeneration = ++generation
+        testCaptureMode = testEngines != null
         sessionOriginalOnly = false
         SubtitleBus.clear()
         SubtitleBus.setHistoryLimit(SettingsStore.historyLines(this))
-        val callback = object : MediaProjection.Callback() {
-            override fun onStop() {
-                if (generation == sessionGeneration) {
-                    lastCaptureError = "capture.projection_stopped"
-                    stopEverything()
-                }
-            }
-        }
-        projectionCallback = callback
-        projection.registerCallback(callback, mainHandler)
-
-        // Serialize provider callbacks with stop/start and ignore stale sessions.
-        fun dispatch(action: () -> Unit) {
-            mainHandler.post { if (generation == sessionGeneration) action() }
-        }
-        if (testEngine != null) {
-            // Instrumentation exercises real playback capture without credentials or a provider connection.
-            engine = testEngine
-            sessionSourceLanguage = "auto"
-            captureProjectionForTests = projection
-        } else {
-            val configuration = SettingsStore.runtimeConfiguration(this)
-            sessionSourceLanguage = configuration.getString("sourceLanguage")
-            sessionTargetLanguage = configuration.getString("targetLanguage")
-            activeModelNames = app.yuxino.mimi.android.runtimeModelNames(configuration)
-            sessionOriginalOnly = configuration.getString("targetLanguage") == "original"
-            val listener = object : EngineListener {
-                override fun onRuntimeSnapshot(state: org.json.JSONObject, originalOnly: Boolean) = dispatch {
-                    SubtitleBus.onRuntimeSnapshot(state, originalOnly)
-                    if (SubtitleBus.displayPairFinal) scheduleAutoHide() else cancelAutoHide()
-                }
-                override fun onSessionReady() = Unit
-                override fun onSourceDraft(text: String, language: String?) = Unit
-                override fun onSourceFinal(text: String, language: String?) = Unit
-                override fun onTranslationDraft(text: String) = Unit
-                override fun onTranslationFinal(text: String) = Unit
-                override fun onError(code: String, message: String) = dispatch {
-                    Toast.makeText(InterfaceLanguage.context(this@MimiService), providerErrorMessageResource(code), Toast.LENGTH_LONG).show()
-                    stopEverything()
-                }
-                override fun onClosed() = dispatch { if (!finishingSession) stopEverything() }
-                override fun onLog(message: String) = Unit
-            }
-            engine = app.yuxino.mimi.android.provider.SharedRuntimeEngine(configuration, listener)
-            engine?.start("", sessionSourceLanguage, configuration.getString("targetLanguage"))
-
-        }
-
-        // Playback capture at a fixed 48 kHz stereo float; the system resamples
-        // whatever the apps actually play into this format for us.
-        val captureConfig =
-            AudioPlaybackCaptureConfiguration.Builder(projection)
-                .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-                .addMatchingUsage(AudioAttributes.USAGE_GAME)
-                .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
-                .build()
-        val format = AudioFormat.Builder()
-            .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
-            .setSampleRate(CAPTURE_RATE_HZ)
-            .setChannelMask(AudioFormat.CHANNEL_IN_STEREO)
-            .build()
-        val minBuffer = AudioRecord.getMinBufferSize(
-            CAPTURE_RATE_HZ, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_FLOAT,
-        )
-        check(minBuffer > 0) { "unsupported_capture_format" }
-        val record = AudioRecord.Builder()
-            .setAudioFormat(format)
-            .setBufferSizeInBytes(minBuffer * 4)
-            .setAudioPlaybackCaptureConfig(captureConfig)
-            .build()
-        audioRecord = record
-        check(record.state == AudioRecord.STATE_INITIALIZED) { "capture_uninitialized" }
-
-        val resampler = StreamResampler(CAPTURE_RATE_HZ, engine!!.sampleRateHz, 2)
-        val readBuffer = FloatArray(CAPTURE_RATE_HZ / 10 * 2) // 100 ms of stereo
-
-        val captureActive = AtomicBoolean(true)
-        capturing = captureActive
-        val sessionEngine = checkNotNull(engine)
-        val sessionHealth = CaptureHealth(SystemClock.elapsedRealtime())
         synchronized(firstRunEvidence) { firstRunEvidence.reset() }
-        health = sessionHealth
-        captureObservation = sessionHealth.snapshot(SystemClock.elapsedRealtime())
-        record.startRecording()
-        check(record.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "capture_not_started" }
+        if (projection != null) {
+            val callback = object : MediaProjection.Callback() {
+                override fun onStop() {
+                    if (generation == sessionGeneration) {
+                        lastCaptureError = "capture.projection_stopped"
+                        stopEverything()
+                    }
+                }
+            }
+            projectionCallback = callback
+            projection.registerCallback(callback, mainHandler)
+        }
+        captureProjectionForTests = if (testEngines != null) projection else null
+        val configuration = if (testEngines == null) SettingsStore.runtimeConfiguration(this) else null
+        sessionSourceLanguage = configuration?.getString("sourceLanguage") ?: "auto"
+        sessionTargetLanguage = configuration?.getString("targetLanguage") ?: "original"
+        sessionOriginalOnly = sessionTargetLanguage == "original"
+        activeModelNames = configuration?.let { app.yuxino.mimi.android.runtimeModelNames(it) } ?: emptyList()
+        historyStatusGeneration.incrementAndGet()
+        historySaveError = false
+        historyLimited = false
+        historyStates.clear()
+        if (testEngines == null && SettingsStore.retainSessionHistory(this)) {
+            historyHandle = runCatching {
+                NativeRuntimeConfiguration.exchange(JSONObject().put("operation", "history_begin")
+                    .put("directory", java.io.File(filesDir, "session-history").absolutePath)).getLong("historyHandle")
+            }.getOrElse { historySaveError = true; null }
+        }
+
+        for (source in input.sources) {
+            fun dispatch(action: () -> Unit) {
+                mainHandler.post { if (generation == sessionGeneration) action() }
+            }
+            val sessionEngine = testEngines?.get(source) ?: run {
+                val listener = object : EngineListener {
+                    override fun onRuntimeSnapshot(state: org.json.JSONObject, originalOnly: Boolean) = dispatch {
+                        val previousStorage = historySaveError to historyLimited
+                        historyStates[source] = state.optBoolean("historySaveError") to state.optBoolean("historyLimited")
+                        historySaveError = historySaveError || historyStates.values.any { it.first }
+                        historyLimited = historyLimited || historyStates.values.any { it.second }
+                        if (previousStorage != (historySaveError to historyLimited)) stateListeners.forEach { it() }
+                        SubtitleBus.onRuntimeSnapshot(state, originalOnly, source.id)
+                        if (SubtitleBus.displayPairFinal) scheduleAutoHide() else cancelAutoHide()
+                    }
+                    override fun onSessionReady() = Unit
+                    override fun onSourceDraft(text: String, language: String?) = Unit
+                    override fun onSourceFinal(text: String, language: String?) = Unit
+                    override fun onTranslationDraft(text: String) = Unit
+                    override fun onTranslationFinal(text: String) = Unit
+                    override fun onError(code: String, message: String) = dispatch {
+                        Toast.makeText(InterfaceLanguage.context(this@MimiService), providerErrorMessageResource(code), Toast.LENGTH_LONG).show()
+                        stopEverything()
+                    }
+                    override fun onClosed() = dispatch { if (!finishingSession) stopEverything() }
+                    override fun onLog(message: String) = Unit
+                }
+                app.yuxino.mimi.android.provider.SharedRuntimeEngine(checkNotNull(configuration), listener, source.id, historyHandle)
+            }
+            val lane = CaptureLane(source, sessionEngine)
+            lanes[source] = lane
+            if (testEngines == null) sessionEngine.start("", sessionSourceLanguage, sessionTargetLanguage)
+            val channels = if (source == CaptureSource.SYSTEM) AudioFormat.CHANNEL_IN_STEREO else AudioFormat.CHANNEL_IN_MONO
+            val encoding = if (source == CaptureSource.SYSTEM) AudioFormat.ENCODING_PCM_FLOAT else AudioFormat.ENCODING_PCM_16BIT
+            val format = AudioFormat.Builder().setEncoding(encoding).setSampleRate(CAPTURE_RATE_HZ).setChannelMask(channels).build()
+            val minBuffer = AudioRecord.getMinBufferSize(CAPTURE_RATE_HZ, channels, encoding)
+            check(minBuffer > 0) { "unsupported_capture_format" }
+            val builder = AudioRecord.Builder().setAudioFormat(format).setBufferSizeInBytes(minBuffer * 4)
+            if (source == CaptureSource.SYSTEM) {
+                builder.setAudioPlaybackCaptureConfig(AudioPlaybackCaptureConfiguration.Builder(checkNotNull(projection))
+                    .addMatchingUsage(AudioAttributes.USAGE_MEDIA).addMatchingUsage(AudioAttributes.USAGE_GAME)
+                    .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN).build())
+            } else builder.setAudioSource(MediaRecorder.AudioSource.MIC)
+            lane.record = builder.build()
+            check(lane.record?.state == AudioRecord.STATE_INITIALIZED) { "capture_uninitialized" }
+        }
+        // Prepare every selected lane before admitting any audio. A failed lane
+        // tears the whole session down; it cannot silently become single-source.
+        for (lane in lanes.values) startCaptureLane(lane, sessionGeneration)
+        updateCaptureObservations()
         showOverlay()
         mainHandler.post(healthTick)
-        captureThread = thread(name = "mimi-capture") {
+    }
+
+    private fun startCaptureLane(lane: CaptureLane, sessionGeneration: Int) {
+        val record = checkNotNull(lane.record)
+        val resampler = StreamResampler(CAPTURE_RATE_HZ, lane.engine.sampleRateHz, lane.source.channels)
+        val floatBuffer = if (lane.source == CaptureSource.SYSTEM) FloatArray(CAPTURE_RATE_HZ / 10 * lane.source.channels) else null
+        val shortBuffer = if (lane.source == CaptureSource.MICROPHONE) ShortArray(CAPTURE_RATE_HZ / 10) else null
+        val sessionHealth = CaptureHealth(SystemClock.elapsedRealtime())
+        lane.health = sessionHealth
+        record.startRecording()
+        check(record.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "capture_not_started" }
+        lane.capturing.set(true)
+        lane.worker = thread(name = "mimi-capture-${lane.source.id}") {
             try {
                 android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
-                while (captureActive.get()) {
-                    val read = record.read(readBuffer, 0, readBuffer.size, AudioRecord.READ_BLOCKING)
-                    if (!captureActive.get()) break
+                while (lane.capturing.get()) {
+                    val read = if (floatBuffer != null) record.read(floatBuffer, 0, floatBuffer.size, AudioRecord.READ_BLOCKING)
+                        else record.read(checkNotNull(shortBuffer), 0, shortBuffer.size, AudioRecord.READ_BLOCKING)
+                    if (!lane.capturing.get()) break
                     check(read >= 0) { "capture_read_failed" }
                     if (read == 0) continue
-                    val pcm = resampler.push(readBuffer.copyOf(read))
+                    val samples = floatBuffer?.copyOf(read) ?: FloatArray(read) { checkNotNull(shortBuffer)[it] / 32768f }
+                    val pcm = resampler.push(samples)
                     sessionHealth.observe(pcm, SystemClock.elapsedRealtime())
-                    if (captureActive.get() && pcm.isNotEmpty()) {
-                        sessionEngine.sendAudio(pcm)
-                        synchronized(firstRunEvidence) { if (captureActive.get()) firstRunEvidence.submitted(pcm) }
+                    if (lane.capturing.get() && pcm.isNotEmpty()) {
+                        lane.engine.sendAudio(pcm)
+                        synchronized(firstRunEvidence) { if (lane.capturing.get()) firstRunEvidence.submitted(pcm) }
                     }
                 }
             } catch (_: Exception) {
@@ -420,9 +479,7 @@ class MimiService : Service() {
                         stopEverything()
                     }
                 }
-            } finally {
-                record.release()
-            }
+            } finally { record.release() }
         }
     }
 
@@ -433,31 +490,43 @@ class MimiService : Service() {
         ++generation
         finishingSession = false
         isStopping = false
-        health = null
         captureObservation = null
+        captureObservations = emptyMap()
         mainHandler.removeCallbacksAndMessages(null)
         captionUpdatePending.set(false)
-        capturing?.set(false)
-        capturing = null
-        // Stop blocking reads before waiting for the worker to finish.
-        val record = audioRecord
-        audioRecord = null
-        try { record?.stop() } catch (_: Exception) { }
-        val worker = captureThread
-        captureThread = null
-        if (worker != null) worker.join(600) else record?.release()
+        val retired = lanes.values.toList()
+        lanes.clear()
+        retired.forEach { lane ->
+            lane.capturing.set(false)
+            try { lane.record?.stop() } catch (_: Exception) { }
+        }
+        retired.forEach { lane ->
+            try { if (lane.worker != null) lane.worker?.join(600) else lane.record?.release() } catch (_: Exception) { }
+            try { lane.engine.stop() } catch (_: Exception) { Log.w(TAG, "capture_engine_stop_failed") }
+        }
+        historyHandle?.let { handle ->
+            val operation = if (SettingsStore.retainSessionHistory(this)) "history_finish" else "history_disable"
+            runCatching { NativeRuntimeConfiguration.exchange(JSONObject().put("operation", operation).put("historyHandle", handle)) }
+                .onSuccess { response ->
+                    historySaveError = historySaveError || response.optJSONObject("state")?.optBoolean("saveError") == true
+                    if (response.optBoolean("pending")) observeHistoryFinalization(handle)
+                }
+                .onFailure { historySaveError = true }
+        }
+        historyHandle = null
+        historyStates.clear()
         synchronized(firstRunEvidence) { firstRunEvidence.reset() }
-        engine?.stop()
-        engine = null
         val projection = mediaProjection
         mediaProjection = null
         captureProjectionForTests = null
+        captureForegroundTypesForTests = 0
         projectionCallback?.let { projection?.unregisterCallback(it) }
         projectionCallback = null
         try { projection?.stop() } catch (_: Exception) { }
-        SubtitleBus.clear()
+        SubtitleBus.finishSnapshot()
         hideOverlay()
         previewMode = false
+        testCaptureMode = false
         activeModelNames = emptyList()
         setRunning(false)
     }
@@ -465,35 +534,47 @@ class MimiService : Service() {
     /** User stop drains accepted work; revocation/errors/destruction still abort. */
     private fun finishSession() {
         if (finishingSession) return
-        if (engine == null || previewMode) { stopEverything(); return }
+        if (lanes.isEmpty() || previewMode) { stopEverything(); return }
         finishingSession = true
         isStopping = true
         stateListeners.forEach { it() }
         val owner = generation
-        capturing?.set(false)
-        try { audioRecord?.stop() } catch (_: Exception) { }
+        lanes.values.forEach { lane ->
+            lane.capturing.set(false)
+            try { lane.record?.stop() } catch (_: Exception) { }
+        }
         mainHandler.removeCallbacks(healthTick)
         cancelAutoHide()
         val policy = app.yuxino.mimi.android.provider.NativeRuntimeConfiguration.policy
         // Cover audio drain, bounded provider finish, disconnect and publication;
         // the provider-only timeout can expire before Rust publishes its tail.
         mainHandler.postDelayed({ if (generation == owner && finishingSession) stopEverything() }, policy.getLong("sessionFinishTimeoutMs"))
-        engine?.finish {
-            mainHandler.post {
-                if (generation != owner || !finishingSession) return@post
-                val publishAndClose = {
-                    mainHandler.post {
-                        if (generation == owner && finishingSession) {
-                            renderBus()
-                            // Let the native snapshot publication run before its overlay is retired.
-                            mainHandler.post { if (generation == owner && finishingSession) stopEverything() }
-                        }
+        var remaining = lanes.size
+        lanes.values.forEach { lane ->
+            val acknowledged = AtomicBoolean(false)
+            lane.engine.finish {
+                mainHandler.post {
+                    if (generation != owner || !finishingSession || !acknowledged.compareAndSet(false, true)) return@post
+                    remaining--
+                    if (remaining == 0) {
+                        // Snapshot publication is queued before each finish callback.
+                        renderBus()
+                        mainHandler.post { if (generation == owner && finishingSession) stopEverything() }
                     }
-                    Unit
                 }
-                publishAndClose()
             }
         }
+    }
+
+    private fun disableSessionHistory() {
+        val handle = historyHandle ?: return
+        runCatching { NativeRuntimeConfiguration.exchange(JSONObject().put("operation", "history_disable").put("historyHandle", handle)) }
+            .onSuccess { response ->
+                historySaveError = response.optJSONObject("state")?.optBoolean("saveError") == true
+                historyLimited = false
+                historyStates.clear()
+            }.onFailure { historySaveError = true }
+        stateListeners.forEach { it() }
     }
 
     private fun stopEverything() {
@@ -508,6 +589,8 @@ class MimiService : Service() {
         InterfaceLanguage.removeListener(interfaceLanguageListener)
         stopObservingAppearance?.invoke()
         stopObservingAppearance = null
+        stopObservingStorage?.invoke()
+        stopObservingStorage = null
         SubtitleBus.removeListener(busListener)
         releaseSession()
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -824,7 +907,7 @@ class MimiService : Service() {
     private fun buildExpandedPanel(): View {
         val route = if (sessionOriginalOnly) languageName(sessionSourceLanguage)
             else "${languageName(sessionSourceLanguage)} → ${languageName(sessionTargetLanguage)}"
-        val panel = app.yuxino.mimi.android.CaptionPanelView(this, route, overlayProviderLabel(), app.yuxino.mimi.android.captionProviderMarks(this),
+        val panel = app.yuxino.mimi.android.CaptionPanelView(this, route, overlayProviderLabel(), if (testCaptureMode) listOf(R.drawable.ic_mimi) else app.yuxino.mimi.android.captionProviderMarks(this),
             app.yuxino.mimi.android.CaptionPanelActions(
                 home = { startActivity(Intent(this, app.yuxino.mimi.android.MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) },
                 style = { showAppearanceControls() },
@@ -1148,7 +1231,8 @@ class MimiService : Service() {
     private fun interfaceString(@androidx.annotation.StringRes id: Int): String =
         InterfaceLanguage.context(this).getString(id)
 
-    private fun overlayProviderLabel(): String = app.yuxino.mimi.android.overlayServiceLabel(InterfaceLanguage.context(this))
+    private fun overlayProviderLabel(): String = if (testCaptureMode) "Mimi"
+        else app.yuxino.mimi.android.overlayServiceLabel(InterfaceLanguage.context(this))
 
     private fun interfaceString(@androidx.annotation.StringRes id: Int, value: Int): String =
         InterfaceLanguage.context(this).getString(id, value)
@@ -1166,6 +1250,54 @@ class MimiService : Service() {
     }
 
     companion object {
+        private val startGate = CaptureStartGate()
+        private var startOwner: Pair<Long, java.lang.ref.WeakReference<android.app.Activity>>? = null
+        private fun activityVisible(activity: android.app.Activity): Boolean =
+            !activity.isFinishing && !activity.isDestroyed && activity.window.decorView.isShown &&
+                activity.window.decorView.windowVisibility == View.VISIBLE
+        private fun startOwnerVisible(request: Long): Boolean = startOwner?.takeIf { it.first == request }
+            ?.second?.get()?.let(::activityVisible) == true
+        /** Visible-activity dispatch can be rejected before promotion without an FGS promise.
+         * Accepted requests immediately enter the required typed FGS before capture. */
+        internal fun startFromActivity(activity: android.app.Activity, intent: Intent) {
+            val request = intent.getLongExtra(EXTRA_START_REQUEST, 0L).takeIf { it != 0L } ?: prepareStart(activity)
+            try {
+                check(startPending(request) && activityVisible(activity)) { "capture_activity_not_visible" }
+                startOwner = request to java.lang.ref.WeakReference(activity)
+                checkNotNull(activity.startService(intent.putExtra(EXTRA_START_REQUEST, request))) { "capture_start_failed" }
+            } catch (error: RuntimeException) {
+                cancelStartRequest(request)
+                throw error
+            }
+        }
+        private const val START_DELIVERY_TIMEOUT_MS = 10_000L
+        val isStarting: Boolean get() = startGate.isPending
+        internal fun startPending(request: Long): Boolean = startGate.waiting(request)
+        internal fun prepareStart(context: Context): Long {
+            check(!isRunning && !isStopping) { "capture_session_active" }
+            val request = startGate.begin()
+            lastCaptureError = null
+            val appContext = context.applicationContext
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (startPending(request)) {
+                    lastCaptureError = "capture.start_failed"
+                    completeStartRequest(request)
+                    Toast.makeText(InterfaceLanguage.context(appContext), R.string.capture_failed, Toast.LENGTH_LONG).show()
+                }
+            }, START_DELIVERY_TIMEOUT_MS)
+            return request
+        }
+        internal fun cancelStartRequest(request: Long) {
+            if (startGate.waiting(request)) lastCaptureError = "capture.start_failed"
+            completeStartRequest(request)
+        }
+        private fun completeStartRequest(request: Long) {
+            if (startGate.complete(request)) {
+                if (startOwner?.first == request) startOwner = null
+                stateListeners.forEach { it() }
+            }
+        }
+
         private val ownUiOwners = CopyOnWriteArraySet<android.app.Activity>()
         private var ownUiChanged: (() -> Unit)? = null
         private val ownUiVisible: Boolean get() = ownUiOwners.isNotEmpty()
@@ -1173,7 +1305,9 @@ class MimiService : Service() {
             val changed = if (visible) ownUiOwners.add(owner) else ownUiOwners.remove(owner)
             if (changed) ownUiChanged?.invoke()
         }
-        @Volatile private var captureEngineForTests: ProviderEngine? = null
+        @Volatile private var captureEnginesForTests: Map<CaptureSource, ProviderEngine>? = null
+        @Volatile internal var captureForegroundTypesForTests: Int = 0
+            private set
         @Volatile internal var captureProjectionForTests: MediaProjection? = null
             private set
 
@@ -1181,9 +1315,53 @@ class MimiService : Service() {
         internal fun setCaptureEngineForTests(context: Context, value: ProviderEngine?) {
             check(context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0)
             check(!isRunning)
-            captureEngineForTests = value
+            captureEnginesForTests = value?.let { mapOf(CaptureSource.SYSTEM to it) }
         }
 
+        internal fun setCaptureEnginesForTests(context: Context, value: Map<CaptureSource, ProviderEngine>?) {
+            check(context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0)
+            check(!isRunning)
+            captureEnginesForTests = value?.toMap()
+        }
+
+        private val historyStatusGeneration = AtomicLong()
+        /** A terminal runtime can release its journal after its service is destroyed. */
+        private fun observeHistoryFinalization(handle: Long) {
+            val owner = historyStatusGeneration.get()
+            val timeout = NativeRuntimeConfiguration.policy.getLong("sessionFinishTimeoutMs")
+            thread(name = "mimi-history-finalize", isDaemon = true) {
+                var failed = false
+                var limited = false
+                try {
+                    val deadline = SystemClock.elapsedRealtime() + timeout
+                    while (historyStatusGeneration.get() == owner) {
+                        val result = NativeRuntimeConfiguration.exchange(JSONObject()
+                            .put("operation", "history_state").put("historyHandle", handle))
+                        failed = result.getJSONObject("state").getBoolean("saveError")
+                        limited = result.getJSONObject("state").getBoolean("limited")
+                        if (!result.getBoolean("pending")) break
+                        if (SystemClock.elapsedRealtime() >= deadline) { failed = true; break }
+                        Thread.sleep(100)
+                    }
+                } catch (_: Exception) { failed = true }
+                Handler(Looper.getMainLooper()).post {
+                    if (historyStatusGeneration.get() == owner) {
+                        historySaveError = historySaveError || failed
+                        historyLimited = historyLimited || limited
+                        stateListeners.forEach { it() }
+                    }
+                }
+            }
+        }
+
+        @Volatile var historySaveError: Boolean = false
+            private set
+        @Volatile var historyLimited: Boolean = false
+            private set
+        @Volatile var captureInput: CaptureInput = CaptureInput.SYSTEM
+            private set
+        @Volatile var captureObservations: Map<CaptureSource, CaptureHealth.Snapshot> = emptyMap()
+            private set
         val firstRunEvidence = app.yuxino.mimi.android.FirstRunEvidence()
         private const val TAG = "MimiService"
         private const val CHANNEL_ID = "capture"
@@ -1216,11 +1394,17 @@ class MimiService : Service() {
         const val ACTION_UI_PREVIEW_HISTORY = "app.yuxino.mimi.android.action.UI_PREVIEW_HISTORY"
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_RESULT_DATA = "result_data"
+        const val EXTRA_CAPTURE_INPUT = "capture_input"
+        internal const val EXTRA_START_REQUEST = "capture_start_request"
 
-        fun startIntent(context: Context, resultCode: Int, resultData: Intent): Intent =
+        fun startIntent(context: Context, resultCode: Int, resultData: Intent, input: CaptureInput = CaptureInput.SYSTEM): Intent =
             Intent(context, MimiService::class.java)
+                .putExtra(EXTRA_CAPTURE_INPUT, input.id)
                 .putExtra(EXTRA_RESULT_CODE, resultCode)
                 .putExtra(EXTRA_RESULT_DATA, resultData)
+
+        fun microphoneIntent(context: Context): Intent =
+            Intent(context, MimiService::class.java).putExtra(EXTRA_CAPTURE_INPUT, CaptureInput.MICROPHONE.id)
 
         fun stopIntent(context: Context): Intent =
             Intent(context, MimiService::class.java).setAction(ACTION_STOP)

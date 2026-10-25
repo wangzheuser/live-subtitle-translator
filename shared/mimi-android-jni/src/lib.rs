@@ -56,7 +56,9 @@ pub extern "system" fn Java_app_yuxino_mimi_android_provider_SharedSubtitleCore_
     }
 }
 
+mod history;
 mod runtime;
+mod snapshot_merge;
 
 #[no_mangle]
 pub extern "system" fn Java_app_yuxino_mimi_android_provider_NativeRuntimeConfiguration_exchangeRaw(

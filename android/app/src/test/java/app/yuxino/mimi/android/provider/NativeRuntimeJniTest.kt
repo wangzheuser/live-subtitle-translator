@@ -789,6 +789,99 @@ class NativeRuntimeJniTest {
         }
     }
 
+    @Test fun savingIsOptInAndOptOutRejectsLateFinalsAcrossActualJni() {
+        val root = Files.createTempDirectory("mimi-history-optout-jni-").toFile()
+        val directory = java.io.File(root, "history")
+        fun request(operation: String) = JSONObject().put("operation", operation).put("directory", directory.absolutePath)
+        try {
+            assertEquals(0, NativeRuntimeConfiguration.exchange(request("history_list")).getJSONArray("items").length())
+            val unsaved = create(configuration())
+            NativeRuntimeConfiguration.command("stop", unsaved)
+            assertFalse(directory.exists())
+            val journal = NativeRuntimeConfiguration.exchange(request("history_begin")).getLong("historyHandle")
+            RealtimeLoopback(ServiceProvider.DASHSCOPE, liveTranslate = true, finishTail = true).use { fixture ->
+                val handle = NativeRuntimeConfiguration.exchange(JSONObject().put("operation", "create")
+                    .put("configuration", configuration().put("alibabaRealtimeMode", "liveTranslate")
+                        .put("alibabaWorkspaceId", "synthetic-workspace").put("sourceLanguage", "auto"))
+                    .put("network", fixture.network).put("audioSource", "microphone").put("historyHandle", journal)).getLong("handle")
+                try {
+                    NativeRuntimeConfiguration.command("start", handle)
+                    awaitRuntimeState(handle, fixture) { it.getString("connectionStatus") == "listening" }
+                    NativeRuntimeConfiguration.exchange(request("history_disable").put("historyHandle", journal))
+                    NativeRuntimeConfiguration.command("finish", handle)
+                    val finished = awaitRuntimeState(handle, fixture) { it.getBoolean("finished") }
+                    assertEquals(1, finished.getJSONObject("snapshot").getJSONArray("history").length())
+                    val status = NativeRuntimeConfiguration.exchange(request("history_state").put("historyHandle", journal))
+                    assertTrue(status.getBoolean("finalized"))
+                    assertFalse(status.getBoolean("pending"))
+                    assertEquals(0, status.getJSONObject("state").getInt("count"))
+                    assertEquals(0, NativeRuntimeConfiguration.exchange(request("history_list")).getJSONArray("items").length())
+                } finally { NativeRuntimeConfiguration.command("stop", handle) }
+            }
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun savedHistoryKeepsBothSourcesAndUnpolledFinalsAcrossActualJni() {
+        val root = Files.createTempDirectory("mimi-history-jni-").toFile()
+        val historyDirectory = java.io.File(root, "history")
+        fun request(operation: String) = JSONObject().put("operation", operation).put("directory", historyDirectory.absolutePath)
+        val journal = NativeRuntimeConfiguration.exchange(request("history_begin")).getLong("historyHandle")
+        val handles = mutableListOf<Long>()
+        try {
+            RealtimeLoopback(ServiceProvider.DASHSCOPE, liveTranslate = true, finishTail = true, finishTailCount = 25).use { system ->
+                RealtimeLoopback(ServiceProvider.DASHSCOPE, liveTranslate = true, finishTail = true).use { microphone ->
+                    fun createSource(source: String, fixture: RealtimeLoopback): Long = NativeRuntimeConfiguration.exchange(
+                        JSONObject().put("operation", "create").put("configuration", configuration()
+                            .put("alibabaRealtimeMode", "liveTranslate").put("alibabaWorkspaceId", "synthetic-workspace")
+                            .put("sourceLanguage", "auto")).put("network", fixture.network)
+                            .put("audioSource", source).put("historyHandle", journal)).getLong("handle").also(handles::add)
+                    val systemHandle = createSource("system", system)
+                    val microphoneHandle = createSource("microphone", microphone)
+                    NativeRuntimeConfiguration.command("start", systemHandle)
+                    NativeRuntimeConfiguration.command("start", microphoneHandle)
+                    awaitRuntimeState(systemHandle, system) { it.getString("connectionStatus") == "listening" }
+                    awaitRuntimeState(microphoneHandle, microphone) { it.getString("connectionStatus") == "listening" }
+                    NativeRuntimeConfiguration.exchange(request("history_finish").put("historyHandle", journal))
+                    NativeRuntimeConfiguration.command("finish", systemHandle)
+                    val finishedSystem = awaitRuntimeState(systemHandle, system) { it.getBoolean("finished") }
+                    assertEquals(20, finishedSystem.getJSONObject("snapshot").getJSONArray("history").length())
+                    assertEquals(0, NativeRuntimeConfiguration.exchange(request("history_list")).getJSONArray("items").length())
+                    NativeRuntimeConfiguration.command("finish", microphoneHandle)
+                    awaitRuntimeState(microphoneHandle, microphone) { it.getBoolean("finished") }
+                    val items = NativeRuntimeConfiguration.exchange(request("history_list")).getJSONArray("items")
+                    assertEquals(1, items.length())
+                    val item = items.getJSONObject(0)
+                    assertEquals(26, item.getInt("count"))
+                    assertFalse(item.getBoolean("hasAudio"))
+                    val id = item.getString("id")
+                    val page = NativeRuntimeConfiguration.exchange(request("history_page").put("id", id).put("page", 0))
+                    assertEquals(26, page.getInt("total"))
+                    val rows = page.getJSONArray("entries")
+                    assertEquals("microphone", rows.getJSONObject(0).getString("audioSource"))
+                    assertEquals("system", rows.getJSONObject(1).getString("audioSource"))
+                    for ((format, suffix) in listOf("txt" to ".txt", "markdown" to ".md")) {
+                        val exported = NativeRuntimeConfiguration.exchange(request("history_export").put("id", id)
+                            .put("exportDirectory", java.io.File(root, "exports").absolutePath)
+                            .put("options", JSONObject().put("format", format)))
+                        val file = java.io.File(exported.getString("path"))
+                        assertTrue(file.name.endsWith(suffix))
+                        val text = file.readText()
+                        assertTrue(text.contains("Synthetic finish tail 0"))
+                        assertTrue(text.contains("Synthetic finish tail 24"))
+                        assertTrue(text.contains("Microphone"))
+                        assertTrue(text.contains("System"))
+                    }
+                    NativeRuntimeConfiguration.exchange(request("history_delete").put("id", id))
+                    assertEquals(0, NativeRuntimeConfiguration.exchange(request("history_list")).getJSONArray("items").length())
+                }
+            }
+        } finally {
+            handles.forEach { NativeRuntimeConfiguration.command("stop", it) }
+            NativeRuntimeConfiguration.exchange(request("history_finish").put("historyHandle", journal))
+            root.deleteRecursively()
+        }
+    }
+
     private fun createLiveTranslate(fixture: RealtimeLoopback): Long = NativeRuntimeConfiguration.exchange(
         JSONObject().put("operation", "create").put("configuration", configuration()
             .put("alibabaRealtimeMode", "liveTranslate").put("alibabaWorkspaceId", "synthetic-workspace")
@@ -951,7 +1044,7 @@ class NativeRuntimeJniTest {
         private val liveTranslate: Boolean = false, private val finishTail: Boolean = false,
         private val holdSetup: Boolean = false, private val recoverOverflow: Boolean = false,
         private val lateFinalReplay: Boolean = false, private val sourceOrderReplay: Boolean = false,
-        private val translationStartReplay: Boolean = false) : AutoCloseable {
+        private val translationStartReplay: Boolean = false, private val finishTailCount: Int = 1) : AutoCloseable {
         private val tencent = provider == ServiceProvider.TENCENT
         private val qwen = provider == ServiceProvider.DASHSCOPE && !liveTranslate
         private val host = if (liveTranslate) "synthetic-workspace.cn-beijing.maas.aliyuncs.com"
@@ -1187,14 +1280,17 @@ class NativeRuntimeJniTest {
                     send(output, """{"type":"response.done","response":{"id":"response_a","status":"completed","output":[{"id":"translation_a","content":[{"type":"output_text","text":"Synthetic current translation."}]}]}}""")
                     send(output, """{"type":"session.finished"}""")
                 } else if (finishTail) {
-                    for (event in listOf(
-                        """{"type":"conversation.item.input_audio_transcription.delta","item_id":"source","delta":"Synthetic finish tail."}""",
-                        """{"type":"conversation.item.created","previous_item_id":"source","item":{"id":"out","role":"assistant"}}""",
-                        """{"type":"response.text.done","item_id":"out","response_id":"response","text":"合成收尾字幕。"}""",
-                        """{"type":"conversation.item.input_audio_transcription.completed","item_id":"source","transcript":"Synthetic finish tail."}""",
-                        """{"type":"response.done","response":{"id":"response","status":"completed","output":[]}}""",
-                        """{"type":"session.finished"}""",
-                    )) send(output, event)
+                    repeat(finishTailCount) { index ->
+                        val source = if (finishTailCount == 1) "Synthetic finish tail." else "Synthetic finish tail $index."
+                        for (event in listOf(
+                            """{"type":"conversation.item.input_audio_transcription.delta","item_id":"source$index","delta":"$source"}""",
+                            """{"type":"conversation.item.created","previous_item_id":"source$index","item":{"id":"out$index","role":"assistant"}}""",
+                            """{"type":"response.text.done","item_id":"out$index","response_id":"response$index","text":"合成收尾字幕。"}""",
+                            """{"type":"conversation.item.input_audio_transcription.completed","item_id":"source$index","transcript":"$source"}""",
+                            """{"type":"response.done","response":{"id":"response$index","status":"completed","output":[]}}""",
+                        )) send(output, event)
+                    }
+                    send(output, """{"type":"session.finished"}""")
                 } else if (lateFinalReplay) {
                     send(output, """{"type":"session.finished"}""")
                 }

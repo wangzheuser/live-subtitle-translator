@@ -846,6 +846,19 @@ it("creates the selected provider only after confirmation and opens the created 
   expect(actions.selectProfile).not.toHaveBeenCalled();
 });
 
+it("opens its own newly appended profile when another profile was added while creation waited", async () => {
+  const provider = "googleGeminiLive" as const;
+  const concurrent: ServiceProfile = { id: "concurrent", provider: "openAIRealtime", name: "Concurrent profile", credentialState: "missing" };
+  const created: ServiceProfile = { id: "requested", provider, name: providerDisplayName(provider), credentialState: "missing" };
+  const next = { ...settings, profiles: [...settings.profiles, concurrent, created] };
+  actions.createProfile.mockResolvedValue(next);
+  await render(); await click(I18N.settings.addProfile); await previewProvider(provider);
+  await click(I18N.settings.confirmAddProfile);
+  await render(next);
+  expect(host.querySelector(".service-detail__identity h2")?.textContent).toBe(created.name);
+  expect(actions.selectProfile).not.toHaveBeenCalled();
+});
+
 it("starts with no service and creates the first chosen provider only after confirmation", async () => {
   const empty = { ...settings, profiles: [], activeProfileId: "" };
   const created: ServiceProfile = { id: "first", provider: "googleGeminiLive", name: providerDisplayName("googleGeminiLive"), credentialState: "missing" };
@@ -1422,6 +1435,25 @@ it("prefills Azure nonsecret fields without reading its key and preserves an edi
   actions.selectProfile.mockResolvedValue(snapshot);
   await submit();
   expect(actions.saveProfileCredentials).toHaveBeenCalledExactlyOnceWith(profile.id, { kind: "azureOpenAI", endpoint: "https://synthetic.openai.azure.com", deployment: "edited-deployment", transcriptionDeployment: "stored-transcription", apiKey: "synthetic-new-key" });
+});
+
+it("repairs an Azure simultaneous deployment while leaving the saved API key native", async () => {
+  vi.mocked(profileCredentialEditorState).mockResolvedValue({ savedFields: ["apiKey"], endpoint: "https://synthetic.openai.azure.com", deployment: "", transcriptionDeployment: "stored-transcription" });
+  const azure: ServiceProfile = { ...profile, provider: "azureOpenAIRealtime", speechTranslationMode: "simultaneous", credentialState: "unavailable" };
+  const snapshot = { ...settings, profiles: [azure] };
+  const repaired = { ...snapshot, profiles: [{ ...azure, credentialState: "present" as const }] };
+  actions.saveProfileCredentials.mockResolvedValue(repaired);
+  actions.selectProfile.mockResolvedValue(repaired);
+  await render(snapshot);
+  await act(async () => host.querySelector<HTMLButtonElement>(".service-row__edit")?.click());
+  await change('input[id$="-deployment"]', "new-translation");
+  expect(host.querySelector<HTMLButtonElement>('.credential-form button[type="submit"]')!.disabled).toBe(false);
+  expect(host.querySelector<HTMLInputElement>('input[id$="-apiKey"]')!.value).toBe("");
+  await submit();
+  expect(actions.saveProfileCredentials).toHaveBeenCalledExactlyOnceWith(profile.id, {
+    kind: "azureOpenAI", endpoint: "https://synthetic.openai.azure.com", deployment: "new-translation", transcriptionDeployment: "stored-transcription", apiKey: "",
+  });
+  expect(profileRevealCredential).not.toHaveBeenCalled();
 });
 
 it("expands long Azure configuration values and checks the edited deployment without saving or revealing its key", async () => {

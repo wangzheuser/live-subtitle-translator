@@ -114,9 +114,15 @@ export function OverlayControlPanel({
   const dividersHelpId = useId();
   const timestampsHelpId = useId();
   const actionInFlight = useRef(false);
+  const mounted = useRef(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const canChangeSessionSettings = !isChangingSession && pendingAction === null;
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   useLayoutEffect(() => {
     if (!isTauri || !panelRef.current || !contentRef.current) return;
@@ -210,16 +216,21 @@ export function OverlayControlPanel({
     setOperationError(null);
     void operation()
       .then(() => {
-        if (dismissAfter) onDismiss();
+        if (mounted.current && dismissAfter) onDismiss();
       })
       .catch((error: unknown) => {
+        if (!mounted.current) return;
         setOperationError(
           name === "profile" ? profileErrorMessage(error)
             : name === "source" || name === "target" || name === "translation" ? languageActionErrorMessage(error, failureMessage)
               : name === "retry" ? sessionActionErrorMessage(error, failureMessage) : failureMessage,
         );
       })
-      .finally(() => { actionInFlight.current = false; setPendingAction(null); });
+      .finally(() => {
+        if (!mounted.current) return;
+        actionInFlight.current = false;
+        setPendingAction(null);
+      });
   };
 
   return (

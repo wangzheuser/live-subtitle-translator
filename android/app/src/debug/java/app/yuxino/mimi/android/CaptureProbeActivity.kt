@@ -5,8 +5,8 @@ import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.widget.TextView
-import androidx.core.content.ContextCompat
 import app.yuxino.mimi.android.capture.MimiService
+import app.yuxino.mimi.android.capture.CaptureInput
 
 /** Debug-only consent host: never opens settings or reads service credentials. */
 class CaptureProbeActivity : Activity() {
@@ -20,7 +20,13 @@ class CaptureProbeActivity : Activity() {
         setContentView(TextView(this).apply { text = "Android system playback capture test" })
     }
 
-    fun requestProjection() {
+    private var selectedInput = CaptureInput.SYSTEM
+    private var useStartGate = false
+
+    fun requestProjection(input: CaptureInput = CaptureInput.SYSTEM, guarded: Boolean = false) {
+        check(input.needsProjection)
+        selectedInput = input
+        useStartGate = guarded
         requests++
         consentResult = null
         @Suppress("DEPRECATION")
@@ -33,8 +39,9 @@ class CaptureProbeActivity : Activity() {
         if (requestCode != 1) return
         consentResult = resultCode
         if (resultCode == RESULT_OK && data != null) {
-            ContextCompat.startForegroundService(this, MimiService.startIntent(this, resultCode, data)
-                .setAction(MimiService.ACTION_CAPTURE_TEST))
+            val intent = MimiService.startIntent(this, resultCode, data, selectedInput).setAction(MimiService.ACTION_CAPTURE_TEST)
+            if (useStartGate) intent.putExtra(MimiService.EXTRA_START_REQUEST, MimiService.prepareStart(this))
+            MimiService.startFromActivity(this, intent)
         }
     }
 }

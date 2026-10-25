@@ -124,6 +124,22 @@ it("blocks conflicting operations and retains an inline error after a failed tog
   expect(props.onDismiss).not.toHaveBeenCalled();
 });
 
+it.each(["immersive", "lock"] as const)("does not dismiss a reopened panel when an old %s save completes", async action => {
+  let finish!: () => void;
+  const operation = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+  if (action === "immersive") props.onSetImmersiveMode = operation;
+  else props.onSetOverlayLocked = operation;
+  await mount();
+  const label = action === "immersive" ? I18N.overlay.immersiveMode : I18N.overlay.lockPosition;
+  await act(async () => host.querySelector<HTMLButtonElement>(`[role="switch"][aria-label="${label}"]`)!.click());
+  expect(operation).toHaveBeenCalledOnce();
+  await act(async () => root.render(null));
+  await mount();
+  await act(async () => finish());
+  expect(props.onDismiss).not.toHaveBeenCalled();
+  expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+});
+
 it.each([false, true])("preserves saved reading mode %j while error presentation overrides lock and immersive actions", async enabled => {
   configure({ subtitleBlendsWithBackground: enabled, isOverlayLocked: enabled });
   const savedSettings = props.settings;

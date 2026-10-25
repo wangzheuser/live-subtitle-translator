@@ -4979,3 +4979,27 @@
   availability/accuracy/latency remain unverified by this run. The existing
   production app and its settings were preserved; no release or install
   was performed. PR CI records cross-platform compilation and Android checks.
+
+### 2026-10-25 — complete compatible text-service catalog
+
+- Source `1024859c3422802a499b6a3805e86d2251833a72` extends the shared preset
+  catalog from six to 13 entries. The original six entries are byte-for-byte
+  equivalent as parsed metadata. Added Kimi, SiliconFlow, OpenRouter,
+  Index-Translate, Tencent TokenHub, Baidu Qianfan and Volcano Ark / Doubao.
+  The three integrated speech services and their compatible text products keep
+  separate endpoint/account/key requirements. Runtime request fields, provider
+  identities, credentials, recognition and capture code are unchanged.
+- Focused frontend checks passed: typecheck, lint and 2,447 related tests.
+  Nine generator regressions, generated-output synchronization, shared-runtime
+  architecture and diff checks passed. This metadata/copy change did not rerun
+  local packaging, native application installation or the full Rust suite.
+- Ego Lite verified all 14 choices including Custom, bounded scrolling,
+  keyboard End to LM Studio and a 520 px Chinese light/dark layout. Selecting
+  TokenHub and Index filled the expected address/model, with zero fixture
+  save, reveal, connection-check or capture calls. Private screenshots and the
+  focused check log remain outside Git; the browser task closed normally.
+- These checks establish configuration/layout behavior, not live service
+  availability, model entitlement or latency. Local Android/JNI execution and
+  manual native desktop/Android acceptance were not repeated for this catalog
+  edit; cross-platform CI is recorded with the delivery PR. No production app
+  restart, release, recording or real provider request occurred.

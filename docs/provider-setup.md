@@ -305,7 +305,27 @@ Keep account sign-in inside ChatMock. **Do not enter a ChatGPT password or login
 
 Enable a text model with your chosen provider and obtain its **service address, model ID, and an API key if required**. Select **OpenAI-compatible API** under **Text translation** in Mimi, enter each value, and save.
 
-**Quick setup** fills an editable address and, where available, an example model for [OpenAI](https://developers.openai.com/api/docs/models/gpt-6-luna), [DeepSeek](https://api-docs.deepseek.com/), [Qwen](https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope), [Google Gemini](https://ai.google.dev/gemini-api/docs/openai), [Ollama](https://docs.ollama.com/api/openai-compatibility), or [LM Studio](https://lmstudio.ai/docs/developer/openai-compat). Gemini and local servers require your available model ID. Qwen starts with the Beijing endpoint; change it to match your key's region. Start and load your local model server first; Android also requires explicitly allowing local HTTP. A preset does not save or connect. Selecting a preset for a different destination clears the entered key and prevents reuse of the old saved key; enter the new service's key if needed, then save and check translation.
+**Quick setup** offers these 13 editable presets. A preset fills the service address and any example model; enter an available model ID where the field is blank.
+
+| Service | Model setup |
+| --- | --- |
+| [OpenAI](https://developers.openai.com/api/docs/models/gpt-6-luna) | An example model is filled in; confirm it is enabled for your key. |
+| [DeepSeek](https://api-docs.deepseek.com/) | An example model is filled in; confirm it is enabled for your key. |
+| [Qwen](https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope) | An example model is filled in; confirm its region and access. |
+| [Google Gemini](https://ai.google.dev/gemini-api/docs/openai) | Enter a model ID available to your key. |
+| [Kimi](https://www.kimi.com/help/kimi-api/api-troubleshooting) | Enter a model ID from the matching regional API account. |
+| [SiliconFlow](https://docs.siliconflow.cn/docs/api/chat-completions-post) | Enter an available model ID. |
+| [OpenRouter](https://openrouter.ai/docs/quickstart) | Enter the complete model slug, including its provider prefix. |
+| [Index-Translate](https://github.com/bilibili/Index-Translate/blob/main/inference/llm/call_api.py) | Fills `Index-Translate-35B-A3B`; no API key is required by the public example. |
+| [Tencent TokenHub](https://cloud.tencent.com/document/product/1823/130078) | Enter a model ID enabled in TokenHub. |
+| [Baidu Qianfan](https://cloud.baidu.com/doc/qianfan-docs/s/Fm9l6ocai) | Enter a model ID enabled in Qianfan. |
+| [Volcano Ark / Doubao](https://docs.volcengine.com/docs/ark/base-url-and-authentication?lang=zh) | Enter the model or inference endpoint ID available to your Ark key. |
+| [Ollama](https://docs.ollama.com/api/openai-compatibility) | Enter a downloaded model ID and start the local server. |
+| [LM Studio](https://lmstudio.ai/docs/developer/openai-compat) | Enter the loaded server model ID and start the local server. |
+
+Qwen and Volcano Ark default to Beijing; Tencent TokenHub defaults to Guangzhou. Kimi defaults to its China endpoint; international accounts can use `https://api.moonshot.ai/v1`. TokenHub Singapore accounts can use `https://tokenhub-intl.tencentmaas.com/v1`. Edit the address to match your account region, API product and key. These are the ordinary text-model APIs: Tencent speech AppID/SecretID/SecretKey, Baidu speech-translation AppID/AppKey and Doubao Speech keys are not substitutes. Ark plan subscriptions also use different endpoints from its ordinary API.
+
+A preset does not save or connect. Selecting a preset for a different destination clears the entered key and prevents reuse of the old saved key; enter the text service’s key if needed, then save and check translation. Start and load local model servers first; Android also requires explicitly allowing local HTTP. The entries configure compatible APIs; selecting one does not verify account access, availability or translation speed.
 
 The endpoint must support non-streaming Chat Completions and return `choices[0].message.content`. The service address can be an API base path such as `/v1` or the full `/chat/completions` path. Mimi appends only `/chat/completions`; **it does not add `/v1` automatically**. For example, `https://example.com/v1` produces requests to `https://example.com/v1/chat/completions`. Use HTTPS for remote services; HTTP is allowed for loopback addresses. Addresses cannot contain a username, password, query parameters, or fragment.
 

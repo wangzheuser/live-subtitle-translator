@@ -305,7 +305,27 @@ Apple Speech 只在**Apple 芯片、macOS 26 或更新版本、系统识别引�
 
 向你选择的服务提供方开通文字模型，获取**服务地址、模型 ID，以及按需提供的 API Key**。在 Mimi 的「文字翻译」选择「**OpenAI 兼容接口**」，分别填写并保存。
 
-「**快速填写**」可填入 [OpenAI](https://developers.openai.com/api/docs/models/gpt-6-luna)、[DeepSeek](https://api-docs.deepseek.com/)、[通义千问](https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope)、[Google Gemini](https://ai.google.dev/gemini-api/docs/openai)、[Ollama](https://docs.ollama.com/api/openai-compatibility) 或 [LM Studio](https://lmstudio.ai/docs/developer/openai-compat) 的地址，以及适用的示例模型，字段仍可修改。Gemini 和本机服务需填写实际可用的模型 ID；千问默认使用北京地址，需与 Key 的地域匹配。本机模型服务须先启动并加载模型；Android 还需明确允许本机 HTTP。选择预设不会保存或连接；选择另一地址的服务预设时，会清空输入中的密钥，并阻止沿用旧地址已保存的密钥。按需填写新服务的 Key，再保存并检查翻译。
+「**快速填写**」提供以下 13 项可编辑预设，填入服务地址及适用的示例模型；模型字段为空时，需填写实际可用的模型 ID。
+
+| 服务 | 模型填写方式 |
+| --- | --- |
+| [OpenAI](https://developers.openai.com/api/docs/models/gpt-6-luna) | 已填示例模型，请确认 Key 已开通该模型。 |
+| [DeepSeek](https://api-docs.deepseek.com/) | 已填示例模型，请确认 Key 已开通该模型。 |
+| [通义千问 Qwen](https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope) | 已填示例模型，请确认地域及开通状态。 |
+| [Google Gemini](https://ai.google.dev/gemini-api/docs/openai) | 填写 Key 实际可用的模型 ID。 |
+| [Kimi](https://www.kimi.com/help/kimi-api/api-troubleshooting) | 填写对应地域开放平台账号可用的模型 ID。 |
+| [硅基流动 SiliconFlow](https://docs.siliconflow.cn/docs/api/chat-completions-post) | 填写实际可用的模型 ID。 |
+| [OpenRouter](https://openrouter.ai/docs/quickstart) | 填写包含提供商前缀的完整模型名称。 |
+| [Index-Translate](https://github.com/bilibili/Index-Translate/blob/main/inference/llm/call_api.py) | 预填 `Index-Translate-35B-A3B`；公开示例无需 API Key。 |
+| [腾讯 TokenHub](https://cloud.tencent.com/document/product/1823/130078) | 填写 TokenHub 已开通的模型 ID。 |
+| [百度千帆](https://cloud.baidu.com/doc/qianfan-docs/s/Fm9l6ocai) | 填写千帆已开通的模型 ID。 |
+| [火山方舟 / 豆包](https://docs.volcengine.com/docs/ark/base-url-and-authentication?lang=zh) | 填写方舟 Key 可用的模型或推理接入点 ID。 |
+| [Ollama](https://docs.ollama.com/api/openai-compatibility) | 填写已下载的模型 ID，并启动本机服务。 |
+| [LM Studio](https://lmstudio.ai/docs/developer/openai-compat) | 填写服务器已加载的模型 ID，并启动本机服务。 |
+
+千问和火山方舟默认使用北京地址，腾讯 TokenHub 默认使用广州地址。Kimi 默认连接中国站，国际站账号可改填 `https://api.moonshot.ai/v1`；TokenHub 新加坡账号可改填 `https://tokenhub-intl.tencentmaas.com/v1`。地址须与账号的地域、API 产品和 Key 匹配。这些预设调用普通文字模型 API，不能拿腾讯语音的 AppID/SecretID/SecretKey、百度语音翻译的 AppID/AppKey 或豆包语音 Key 代替；方舟套餐订阅与普通 API 也使用不同端点。
+
+选择预设不会保存或连接；选择另一地址的服务预设时，会清空输入中的密钥，并阻止沿用旧地址已保存的密钥。按需填写文字服务的 Key，再保存并检查翻译。本机模型服务须先启动并加载模型；Android 还需明确允许本机 HTTP。预设用于配置兼容接口，选择成功不代表账号权限、服务可用性或翻译速度已验证。
 
 该接口需要支持非流式 Chat Completions，并返回 `choices[0].message.content`。服务地址可填 `/v1` 等 API 基础路径，也可填完整 `/chat/completions` 路径；Mimi 只补 `/chat/completions`，**不会自动补 `/v1`**。例如：`https://example.com/v1` 会请求 `https://example.com/v1/chat/completions`。远程服务使用 HTTPS，本机回环地址可使用 HTTP；地址不接受用户名、密码、查询参数或片段。
 

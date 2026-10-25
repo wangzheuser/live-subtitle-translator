@@ -29,5 +29,5 @@
     <string name="speech_translation_failed">翻譯模式儲存失敗，請重試。</string>
     <string name="translation_preset">快速填入</string>
     <string name="translation_preset_custom">自訂</string>
-    <string name="translation_preset_help">快速填入服務位址和模型，仍可修改。請選擇帳號已開通或本機已下載的模型。千問預設使用北京地域；服務需要 Key 時，須使用與位址對應的 Key。</string>
+    <string name="translation_preset_help">快速填入服務位址，部分模型 ID 需自行填寫，欄位仍可修改。請選擇已開通或本機已下載的模型；位址須與帳號的地域、產品及 API Key 對應。文字翻譯憑據與語音辨識分別設定。</string>
 </resources>

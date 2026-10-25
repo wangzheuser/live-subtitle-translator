@@ -29,10 +29,8 @@ failed export, query "Synthetic", page 1 of 3, and 61 synthetic entries/count.
 | Current TXT export, cancel, wait | Endless Loading subtitles | Same synthetic current pair remains |
 | Select A, confirm deletion, click again, select B, resolve A | 2 delete requests; selection resets to current | 1 delete request; B and its pair remain |
 
-![Before canceled export](history-interaction/before-export-cancel.png)
-![After canceled export](history-interaction/after-export-cancel.png)
-![Before late deletion completion](history-interaction/before-delete-completion.png)
-![After late deletion completion](history-interaction/after-delete-completion.png)
+The [PR comment attachments](https://github.com/yuxino/Mimi/pull/84#issuecomment-6398719875)
+show the before/after pairs for canceled export and late deletion completion.
 
 ## Executable regression checks
 

@@ -74,11 +74,11 @@ and discarded the resampled 16 kHz PCM after counting it.
 The final run passed all ten checkpoints in the
 [content-free report](../screenshots/platform-capture/android-api35-results.json).
 The first permitted tone produced 51 nonzero chunks and `AUDIO`; zero media then
-produced 54 zero chunks and `SILENT`, with the actual
-[static no-sound hint visible](../screenshots/platform-capture/android-api35-silent.png).
+produced 54 zero chunks and `SILENT`, with the actual static no-sound hint visible.
 Restoring the tone returned to `AUDIO` and removed that hint. The
-[permitted-audio screenshot](../screenshots/platform-capture/android-api35-audio.png)
-contains no captions because the test engine does not generate them.
+[PR comment attachments](https://github.com/yuxino/Mimi/pull/103#issuecomment-6398722022)
+show both states; the permitted-audio screenshot contains no captions because
+the test engine does not generate them.
 
 Normal stop removed capture, projection, overlay, first-run evidence and worker,
 with no later PCM. A fresh consent/session started with `WAITING` and only zero

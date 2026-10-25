@@ -4,19 +4,11 @@ Refs #74 (capture/Audio3), #75 (safe diagnostics). These are acceptance steps, n
 
 ## UI evidence conditions
 
-The screenshots below are untouched macOS native `mimi-dev.app --ui-only` captures, app version 1.5.5, Chinese, light theme, 760×720 logical window (2× pixels). This mode uses synthetic local session state and makes no audio capture, credential or service connection. It is not Windows hardware evidence. Before is the real previous PR iteration at `2ec1b92`, not a reconstructed baseline or the user's private email screenshot.
-
-![Before: sidebar inline feedback](assets/windows-audio-source/diagnostics-before-inline-2ec1b92.png)
+The [screenshots attached to the PR comment](https://github.com/yuxino/Mimi/pull/72#issuecomment-6398718962) include untouched macOS native `mimi-dev.app --ui-only` captures, app version 1.5.5, Chinese, light theme, 760×720 logical window (2× pixels). This mode uses synthetic local session state and makes no audio capture, credential or service connection. It is not Windows hardware evidence. Before is the real previous PR iteration at `2ec1b92`, not a reconstructed baseline or the user's private email screenshot.
 
 After screenshots show the same General settings scene: floating toast and automatic disappearance, with no extra sidebar status row. These were captured from the final toast/navigation build (binary SHA-256 `96fab3738fc995916a44ec506502047060c1e27d676488b6aafda8ba64f3fb36`). Native copy → automatic expiry and copy → actual settings navigation were both verified. Closing the UI-test settings window was verified; immediate restoration of a hidden UI-test window was not successfully verified, so normal-mode close/reopen remains in the checklist.
 
-![After: floating copy success](assets/windows-audio-source/diagnostics-after-toast.png)
-
-![After: toast automatically dismissed](assets/windows-audio-source/diagnostics-after-dismissed.png)
-
 Failure screenshot is the real component running in macOS Chromium with mocked IPC and deliberately denied clipboard access, not a real Windows/ASR failure.
-
-![Controlled clipboard failure](assets/windows-audio-source/diagnostics-error-fixture.png)
 
 ## Reproducible regression checklist
 

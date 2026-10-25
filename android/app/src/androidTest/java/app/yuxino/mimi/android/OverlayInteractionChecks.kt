@@ -244,65 +244,54 @@ internal class OverlayInteractionChecks(private val test: Instrumentation) {
             }
         }
     }
-    private fun providerMarkChecks(home: MainActivity) {
+    // The first badge sample can create a profile; restoring empty values would retain that profile and translator draft.
+    private fun providerMarkChecks(home: MainActivity) = ProfileSettingsSnapshot(context).use {
         val provider = app.yuxino.mimi.android.provider.ServiceProvider.DASHSCOPE
         val saved = SettingsStore.configuration(context, provider)
-        val translation = SettingsStore.translationConfiguration(context)
-        val deepL = SettingsStore.translationConfiguration(context, app.yuxino.mimi.android.provider.TextTranslationProvider.DEEPL).let {
-            if (it.apiKey == "synthetic-ui-fixture-never-sent") it.copy(apiKey = "") else it
-        }
         val model = SettingsStore.qwenMtModel(context)
-        val active = SettingsStore.provider(context)
         val synthetic = app.yuxino.mimi.android.provider.ServiceConfiguration(provider,
             mapOf("apiKey" to "synthetic-ui-fixture-never-sent"), saved.endpoint, saved.model)
-        try {
-            for (independent in listOf(false, true)) {
-                val translator = if (independent) app.yuxino.mimi.android.provider.TranslationConfiguration(
-                    provider = app.yuxino.mimi.android.provider.TextTranslationProvider.DEEPL,
-                    apiKey = "synthetic-ui-fixture-never-sent",
-                ) else app.yuxino.mimi.android.provider.TranslationConfiguration(
-                    provider = app.yuxino.mimi.android.provider.TextTranslationProvider.BUILTIN,
-                )
-                check(SettingsStore.saveConfiguration(context, synthetic, translator, true, model))
-                check(SettingsStore.activateProvider(context, provider))
-                context.stopService(Intent(context, MimiService::class.java))
-                waitFor { WindowInspector.getGlobalWindowViews().none { it.tag == "mimi-overlay" } }
-                context.startService(Intent(context, MimiService::class.java).setAction(MimiService.ACTION_UI_PREVIEW)
-                    .putExtra("preview_over_own_ui", true))
-                waitFor { WindowInspector.getGlobalWindowViews().any { it.tag == "mimi-overlay" } }
-                val page = test.startActivitySync(Intent(context, ServiceSettingsActivity::class.java)
-                    .putExtra("provider", provider.id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ServiceSettingsActivity
-                onUi { page.finish() }
-                waitFor { home.hasWindowFocus() }
-                onUi { SubtitleBus.onSourceDraft("Synthetic provider badge check.", "en"); SubtitleBus.onTranslationDraft("合成译文。") }
-                waitFor { home.findViewById<View>(R.id.translation_provider_icon).isShown == independent }
-                waitFor { root().findViewWithTag<View>("expanded-subtitles").isShown }
-                onUi {
-                    val marks = root().findViewWithTag<android.widget.LinearLayout>("overlay-providers")
-                    check(marks.childCount == if (independent) 3 else 2)
-                    val preview = home.findViewById<SubtitlePreviewView>(R.id.subtitle_preview).frame as CaptionPanelView
-                    val previewMarks = preview.findViewWithTag<android.widget.LinearLayout>("overlay-providers")
-                    check(previewMarks.childCount == marks.childCount && previewMarks.contentDescription == marks.contentDescription)
-                    check(previewMarks.width == marks.width) { "Preview provider group differs from the floating frame" }
-                    checkOverlayChromeAlignment(root())
-                }
-                capture(if (independent) "two-provider-marks" else "one-provider-mark")
-                tapVisible(root().findViewWithTag("overlay-font"))
-                waitFor { !root().findViewWithTag<View>("overlay-font").isClickable }
-                assertCompleteInertPreview()
-                capture(if (independent) "quick-two-provider-marks" else "quick-one-provider-mark")
-                tapVisible(editor().findViewById(android.R.id.button1))
-                waitFor { root().findViewWithTag<View>("overlay-providers").isClickable }
-                tapVisible(root().findViewWithTag("overlay-providers"))
-                waitFor { home.hasWindowFocus() && home.findViewById<android.widget.RadioGroup>(R.id.settings_tabs)
-                    .checkedRadioButtonId == R.id.tab_service }
-                onUi { home.findViewById<android.widget.RadioGroup>(R.id.settings_tabs).check(R.id.tab_caption) }
+        for (independent in listOf(false, true)) {
+            val translator = if (independent) app.yuxino.mimi.android.provider.TranslationConfiguration(
+                provider = app.yuxino.mimi.android.provider.TextTranslationProvider.DEEPL,
+                apiKey = "synthetic-ui-fixture-never-sent",
+            ) else app.yuxino.mimi.android.provider.TranslationConfiguration(
+                provider = app.yuxino.mimi.android.provider.TextTranslationProvider.BUILTIN,
+            )
+            check(SettingsStore.saveConfiguration(context, synthetic, translator, true, model))
+            check(SettingsStore.activateProvider(context, provider))
+            context.stopService(Intent(context, MimiService::class.java))
+            waitFor { WindowInspector.getGlobalWindowViews().none { it.tag == "mimi-overlay" } }
+            context.startService(Intent(context, MimiService::class.java).setAction(MimiService.ACTION_UI_PREVIEW)
+                .putExtra("preview_over_own_ui", true))
+            waitFor { WindowInspector.getGlobalWindowViews().any { it.tag == "mimi-overlay" } }
+            val page = test.startActivitySync(Intent(context, ServiceSettingsActivity::class.java)
+                .putExtra("provider", provider.id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ServiceSettingsActivity
+            onUi { page.finish() }
+            waitFor { home.hasWindowFocus() }
+            onUi { SubtitleBus.onSourceDraft("Synthetic provider badge check.", "en"); SubtitleBus.onTranslationDraft("合成译文。") }
+            waitFor { home.findViewById<View>(R.id.translation_provider_icon).isShown == independent }
+            waitFor { root().findViewWithTag<View>("expanded-subtitles").isShown }
+            onUi {
+                val marks = root().findViewWithTag<android.widget.LinearLayout>("overlay-providers")
+                check(marks.childCount == if (independent) 3 else 2)
+                val preview = home.findViewById<SubtitlePreviewView>(R.id.subtitle_preview).frame as CaptionPanelView
+                val previewMarks = preview.findViewWithTag<android.widget.LinearLayout>("overlay-providers")
+                check(previewMarks.childCount == marks.childCount && previewMarks.contentDescription == marks.contentDescription)
+                check(previewMarks.width == marks.width) { "Preview provider group differs from the floating frame" }
+                checkOverlayChromeAlignment(root())
             }
-        } finally {
-            check(SettingsStore.saveConfiguration(context, saved, deepL, false, model))
-            check(SettingsStore.saveConfiguration(context, saved, translation, true, model))
-            SettingsStore.setProvider(context, active)
-            check(SettingsStore.flushPendingWritesForTests(context))
+            capture(if (independent) "two-provider-marks" else "one-provider-mark")
+            tapVisible(root().findViewWithTag("overlay-font"))
+            waitFor { !root().findViewWithTag<View>("overlay-font").isClickable }
+            assertCompleteInertPreview()
+            capture(if (independent) "quick-two-provider-marks" else "quick-one-provider-mark")
+            tapVisible(editor().findViewById(android.R.id.button1))
+            waitFor { root().findViewWithTag<View>("overlay-providers").isClickable }
+            tapVisible(root().findViewWithTag("overlay-providers"))
+            waitFor { home.hasWindowFocus() && home.findViewById<android.widget.RadioGroup>(R.id.settings_tabs)
+                .checkedRadioButtonId == R.id.tab_service }
+            onUi { home.findViewById<android.widget.RadioGroup>(R.id.settings_tabs).check(R.id.tab_caption) }
         }
     }
 

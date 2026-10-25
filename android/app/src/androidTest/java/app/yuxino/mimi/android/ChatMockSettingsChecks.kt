@@ -16,6 +16,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.inspector.WindowInspector
 import android.widget.CheckBox
+import android.widget.ListView
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
@@ -392,10 +393,20 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
         }
         instrumentation.waitForIdleSync()
         val openAI = open(ServiceProvider.OPENAI)
+        stage = "forms_openai_simultaneous_translation_hidden"
         onUi {
-            check(openAI.findViewById<View>(android.R.id.content).findViewWithTag<View>("translation-mode") == null) {
-                "ChatMock must not be presented as a realtime recognition provider"
-            }
+            check(field<Spinner>(openAI, "speech-translation-mode").selectedItemPosition == 0)
+            check(!field<View>(openAI, "translation-mode").isShown) { "Integrated speech translation exposes an independent text route" }
+            check(openAI.window.decorView.findViewWithTag<View>("credential-baseUrl") == null)
+            check(openAI.window.decorView.findViewWithTag<View>("credential-model") == null)
+            field<Spinner>(openAI, "speech-translation-mode").setSelection(1)
+        }
+        instrumentation.waitForIdleSync()
+        stage = "forms_openai_asr_mt_translation_scope"
+        onUi {
+            val textMode = field<Spinner>(openAI, "translation-mode")
+            check(textMode.isShown) { "ASR+MT hides its independent text route" }
+            check((0 until textMode.count).any { textMode.getItemAtPosition(it).toString() == "ChatMock" })
             check(openAI.window.decorView.findViewWithTag<View>("credential-baseUrl") == null)
             check(openAI.window.decorView.findViewWithTag<View>("credential-model") == null)
             openAI.finish()
@@ -749,9 +760,27 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
             }
         }
         show(editor, "translation-preset")
+        val selectedPreset = picker.selectedItemPosition
         onUi { check(picker.performClick()) }
         instrumentation.waitForIdleSync()
+        fun findList(view: View): ListView? {
+            if (view is ListView) return view
+            if (view !is ViewGroup) return null
+            for (index in 0 until view.childCount) findList(view.getChildAt(index))?.let { return it }
+            return null
+        }
+        lateinit var popup: ListView
+        onUi {
+            popup = WindowInspector.getGlobalWindowViews().mapNotNull(::findList)
+                .single { it.isShown && it.count == picker.count }
+            popup.setSelection(0)
+        }
+        instrumentation.waitForIdleSync()
         capture("translation-preset-icons-$theme")
+        onUi { popup.setSelection(popup.count - 1) }
+        instrumentation.waitForIdleSync()
+        capture("translation-preset-icons-bottom-$theme")
+        onUi { check(picker.selectedItemPosition == selectedPreset) { "Scrolling the quick-setup menu committed a preset" } }
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
         instrumentation.waitForIdleSync()
     }

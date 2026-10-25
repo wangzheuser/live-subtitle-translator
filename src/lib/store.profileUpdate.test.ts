@@ -3,10 +3,10 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { SettingsSnapshot } from "./types";
 import { disposeStoreSnapshotStreams, useStore } from "./store";
 
-const native = vi.hoisted(() => ({ listenSettings: vi.fn(), listenSession: vi.fn(), getSettings: vi.fn(), getSession: vi.fn(), updateProfile: vi.fn() }));
+const native = vi.hoisted(() => ({ listenSettings: vi.fn(), listenSession: vi.fn(), getSettings: vi.fn(), getSession: vi.fn(), updateProfile: vi.fn(), createProfile: vi.fn() }));
 vi.mock("./ipc", async original => ({ ...await original<typeof import("./ipc")>(), isTauri: true,
   listenSettingsChanged: native.listenSettings, listenSessionState: native.listenSession,
-  settingsGet: native.getSettings, sessionGetState: native.getSession, profileUpdate: native.updateProfile,
+  settingsGet: native.getSettings, sessionGetState: native.getSession, profileUpdate: native.updateProfile, profileCreate: native.createProfile,
 }));
 
 const initial = useStore.getState();
@@ -26,6 +26,19 @@ beforeEach(async () => {
   await useStore.getState().init();
 });
 afterEach(() => { disposeStoreSnapshotStreams(); useStore.setState(initial, true); });
+
+it("returns its own created profile acknowledgment without replacing a newer settings event", async () => {
+  let finish!: (snapshot: SettingsSnapshot) => void;
+  native.createProfile.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const pending = useStore.getState().createProfile("googleGeminiLive", "Requested profile");
+  const newer = { ...settings, fontSize: settings.fontSize + 1 };
+  emitSettings(newer);
+  const acknowledgment: SettingsSnapshot = { ...settings, profiles: [...settings.profiles,
+    { id: "requested", name: "Requested profile", provider: "googleGeminiLive", credentialState: "missing" }] };
+  finish(acknowledgment);
+  expect(await pending).toBe(acknowledgment);
+  expect(useStore.getState().settings).toBe(newer);
+});
 
 it("acknowledges a persisted rename after an unrelated event without replacing newer global settings", async () => {
   let finish!: (snapshot: SettingsSnapshot) => void;

@@ -8,6 +8,7 @@ import app.yuxino.mimi.android.provider.TextTranslationProvider
 import app.yuxino.mimi.android.provider.TranslationConfiguration
 import app.yuxino.mimi.android.provider.validateTranslationConfiguration
 import app.yuxino.mimi.android.provider.buildRuntimeConfiguration
+import app.yuxino.mimi.android.capture.CaptureInput
 import org.json.JSONObject
 
 /** App-private settings. Service metadata and encrypted, profile-scoped credentials are separate. */
@@ -21,6 +22,8 @@ object SettingsStore {
     private const val KEY_OVERLAY_BG_ALPHA = "overlay_bg_alpha"
     private const val KEY_IMMERSIVE_SUBTITLES = "immersive_subtitles"
     private const val KEY_HISTORY_LINES = "history_lines"
+    private const val KEY_CAPTURE_INPUT = "capture_input"
+    private const val KEY_RETAIN_SESSION_HISTORY = "retain_session_history"
     private const val KEY_SUBTITLE_DIVIDERS = "subtitle_dividers"
     private const val KEY_SUBTITLE_TIMESTAMPS = "subtitle_timestamps"
     private const val KEY_HOTWORDS = "hotwords"
@@ -137,7 +140,8 @@ object SettingsStore {
         return true
     }
 
-    private fun canEditProfiles() = !app.yuxino.mimi.android.capture.MimiService.isRunning &&
+    private fun canEditProfiles() = !app.yuxino.mimi.android.capture.MimiService.isStarting &&
+        !app.yuxino.mimi.android.capture.MimiService.isRunning &&
         !app.yuxino.mimi.android.capture.MimiService.isStopping
 
     @Synchronized fun saveProfile(context: Context, id: String?, name: String,
@@ -279,6 +283,34 @@ object SettingsStore {
         val limit = value.coerceIn(0, 6)
         writeAppearance(get(context).edit().putInt(KEY_HISTORY_LINES, limit))
         app.yuxino.mimi.android.provider.SubtitleBus.setHistoryLimit(limit)
+    }
+
+    fun captureInput(context: Context): CaptureInput = CaptureInput.entries.firstOrNull {
+        it.id == get(context).getString(KEY_CAPTURE_INPUT, null)
+    } ?: CaptureInput.SYSTEM
+
+    fun setCaptureInput(context: Context, input: CaptureInput) {
+        if (captureInput(context) == input) return
+        check(canEditProfiles()) { "capture_input_change_requires_stop" }
+        check(get(context).edit().putString(KEY_CAPTURE_INPUT, input.id).commit()) { "capture_input_save_failed" }
+    }
+
+    /** Durable caption saving is separate from the bounded in-memory overlay history. */
+    fun retainSessionHistory(context: Context): Boolean = get(context).getBoolean(KEY_RETAIN_SESSION_HISTORY, false)
+
+    fun setRetainSessionHistory(context: Context, enabled: Boolean) {
+        if (retainSessionHistory(context) == enabled) return
+        check(!enabled || canEditProfiles()) { "session_history_enable_requires_stop" }
+        check(get(context).edit().putBoolean(KEY_RETAIN_SESSION_HISTORY, enabled).commit()) { "session_history_save_failed" }
+    }
+
+    internal fun observeSessionStorage(context: Context, onChange: () -> Unit): () -> Unit {
+        val preferences = get(context)
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == KEY_RETAIN_SESSION_HISTORY) onChange()
+        }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+        return { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
     fun subtitleDividers(context: Context): Boolean = get(context).getBoolean(KEY_SUBTITLE_DIVIDERS, false)

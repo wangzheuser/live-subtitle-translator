@@ -222,7 +222,7 @@ internal class PlaybackCaptureChecks(private val instrumentation: Instrumentatio
     }
 
     /** Opt-in UI consent automation never supports physical devices or bypasses a fresh platform prompt. */
-    private fun verifyEmulatorConsentMode() {
+    internal fun verifyEmulatorConsentMode() {
         check(Build.HARDWARE in setOf("ranchu", "goldfish")) { "emulator_consent_requires_emulator_hardware" }
         status("init_automation_before")
         val automation = instrumentation.uiAutomation
@@ -249,7 +249,7 @@ internal class PlaybackCaptureChecks(private val instrumentation: Instrumentatio
         status("init_automation_ready")
     }
 
-    private fun respondToEmulatorConsent(accept: Boolean) {
+    internal fun respondToEmulatorConsent(accept: Boolean) {
         val automation = instrumentation.uiAutomation
         fun dialog(): AccessibilityNodeInfo? = automation.rootInActiveWindow?.takeIf { root ->
             root.packageName?.toString() == "com.android.systemui" &&

@@ -119,6 +119,21 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical">
+                <LinearLayout
+                    android:id="@+id/capture_input_heading"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+                <Spinner
+                    android:id="@+id/audio_input"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="56dp"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/settings_field"
+                    android:popupBackground="@color/mimi_bg"
+                    android:spinnerMode="dropdown"
+                    android:contentDescription="@string/capture_input_label" />
                 <TextView
                     android:id="@+id/status_hint"
                     android:layout_width="match_parent"

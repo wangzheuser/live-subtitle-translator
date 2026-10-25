@@ -10,7 +10,7 @@ translation requests or interpret live provider protocol events.
 
 `shared/mimi-core` remains the pure subtitle/reduction contract. Both renderers
 consume its current complete pair and replaceable realtime projection. Android
-adapts platform trust roots, system proxy selection, playback capture, lifecycle
+adapts platform trust roots, system proxy selection, playback/microphone capture, lifecycle
 and native UI. Historical Kotlin transport classes remain for offline protocol
 regressions; production capture and the text connection-check button use Rust.
 `shared/translation-contracts.json` and `shared/realtime-display-contracts.json`
@@ -75,6 +75,27 @@ All three desktop application/stream pickers use optional bounded embedded PNG
 icons. Linux resolves stream properties and installed desktop entries through
 GTK's local icon theme; missing artwork keeps a selectable neutral fallback.
 Android keeps its native capture UI and has no desktop stream/icon picker.
+
+## Android capture and saved sessions
+
+Android defaults to system playback and also exposes explicit Microphone and Both.
+Each selected source has its own AudioRecord, resampler, bounded PCM ingress and
+shared runtime handle. Microphone-only starts the microphone foreground-service
+type without a MediaProjection token; Both uses both service types. Android still
+requires RECORD_AUDIO for system playback, but system-only never opens a microphone.
+Input changes require a stopped session; failure or revocation stops selected lanes
+without mixing audio or silently falling back. Existing lock-screen stop behavior
+remains. Device capture quality requires native acceptance in addition to shared tests.
+
+Save captions is off by default and must be enabled before Start. Confirmed events
+feed the same private bounded JSONL journal and final JSON archive as desktop via
+`shared/mimi-runtime::session_history`; JNI serializes source ownership and sealing.
+Stop drains accepted work, then finalizes after both runtime leases release. Disabling
+saving discards the current journal; saved sessions require explicit deletion.
+Android reads one shared 30-entry page at a time and exports shared TXT/Markdown
+through the system document picker, streaming an app-private temporary file.
+No full transcript is retained in Kotlin. Storage failures and limits remain visible.
+Android does not offer PCM recording or audio export.
 
 ## Preventing maintenance forks
 
@@ -147,7 +168,7 @@ back over saved preferences.
   lanes while it remains available. Previous final lanes and different sentence owners
   cannot accompany a new draft. Older confirmed identities cannot overwrite newer complete owners.
   An Android idle-hide timer cannot hide this complete current pair while the
-  session runs; replacing it or ending the session retires its display.
+  session runs; Stop keeps bounded confirmed content readable until a new session begins.
 - Final work keeps its own immutable source identity, one active request, at most three
   waiting requests and a 45-second total budget including waiting and retries. Retry
   classification, attempt bounds and backoff come from shared Rust policy. Explicit stop
@@ -202,7 +223,7 @@ Android production route.
 | Subtitle font size | 14–48 px, default 16; bilingual reference uses a stable 90% size, and the minimum window height grows with the selected font | Native 12–24 sp range; desktop sizing does not change Android typography |
 | Floating subtitle controls | Shared settings/control-panel time preference; pause/resume is reachable in Immersive Mode. Keyboard-accessible collapse and native window drag/resize | One normal panel moves from its top handle and resizes width/height from its corner. Normal and immersive positions remain independently saved. Immersion uses lighter text, chosen alignment and a 24dp exit inside a 48dp target. Exit restores normal size/position. Floating views hide above Mimi pages; Captions previews current captions and leaving restores the same views. Services exposes the active service restriction with Stop, while styles remain editable. The main footer keeps Stop visible in every section |
 | Reading long current subtitles | Bounded live tail with explicit history reading and return-to-live behavior | Normal panel follows complete glyph lines from the bottom reading edge, so a growing reference does not push an unchanged translation downward. It scrolls the complete bounded current pair and optional history inside the selected height; immersive captions keep two source and three translation lines. Captions reuses the actual normal/immersive native frame, including chrome and bounded history, measured at real window dimensions and uniformly scaled into a stable viewport. Before speech or during silence, an active overlay shows desktop's listening message with the selected typography/color/alignment |
-| Audio capture | System audio by default; explicitly selected microphone or both sources with independent lanes. OS-specific desktop capture; selected-app audio on macOS and Windows build 20348+, Linux retains output-monitor capture | Android playback-capture consent and foreground service; only apps that allow playback sharing, no microphone input or selected-app picker. Android still requires RECORD_AUDIO for playback capture |
+| Audio capture | System audio by default; explicitly selected microphone or both sources with independent lanes. OS-specific desktop capture; selected-app audio on macOS and Windows build 20348+, Linux retains output-monitor capture | System playback by default, explicit microphone or both independent lanes with source labels and matching foreground-service types. Only apps that allow playback sharing; no selected-app picker. Android still requires RECORD_AUDIO for playback capture |
 | Caption reading metadata | Optional sentence dividers and local confirmation time, both off by default | Same optional appearance choices; time comes from the shared final, not Kotlin arrival time; dividers stay hidden in immersion |
 | Saved configurations | Multiple named profiles, including the same provider | Multiple named profiles with independent encrypted credentials and translators; Add, Settings, Duplicate and Delete, with tap-to-select. Legacy provider settings migrate once; saving an edit does not switch the active profile |
 | Saved service selection | Settings, tray and subtitle controls can switch during listening via reconnect; pause and confirmed subtitles persist. A recording cannot switch PCM sample rate | Tap a saved configuration in the list to select it; switching/editing requires Stop. Order remains stable; deleting the active profile selects the first remaining entry |
@@ -210,7 +231,7 @@ Android production route.
 | Gemini simultaneous connection rotation | Prepare one replacement after GoAway, bounded old-tail drain and up to two seconds of PCM staging; shorter Gemini live preview cadence | Same Rust Gemini client, replacement-socket handoff and preview cadence; ASR mode uses the shared transcription client and recovery policy |
 | Secret storage | Private local credential file; one-time OS-store migration | Private profile metadata file and separate Android Keystore-backed encrypted credential revisions; legacy settings migrate only after verified durable writes |
 | Local HTTP | Existing loopback endpoint validation | Explicit per-config opt-in and Android network allowlist; includes emulator host |
-| History/recording | Optional bounded local files and selected-input recordings; saved-session names and name/text/audio filters, original/translation/bilingual reading and passage copy, TXT/Markdown export with content and optional confirmation times, WAV export. Saved sessions can export during capture; inline playback with pause and seeking requires Stop, and includes current audio only while it remains available. Confirmed panel rows retain their existing bound across stop/start. The display-count choice defaults to All; recent 1–10 confirmed subtitles apply only while following live speech, and scrolling up opens the existing bounded history. This display projection does not truncate saved files or exports. | Bounded in-memory subtitle history defaults to three confirmed captions on fresh installs; existing settings and the legacy zero default are preserved. Capture starts clear its overlay. No matching library, recording or export UI; shared formatter and actual JNI checks verify compatibility, not Android export support |
+| History/recording | Optional bounded local files and selected-input recordings; saved-session names and name/text/audio filters, original/translation/bilingual reading and passage copy, TXT/Markdown export with content and optional confirmation times, WAV export. Saved sessions can export during capture; inline playback with pause and seeking requires Stop, and includes current audio only while it remains available. Confirmed panel rows retain their existing bound across stop/start. The display-count choice defaults to All; recent 1–10 confirmed subtitles apply only while following live speech, and scrolling up opens the existing bounded history. This display projection does not truncate saved files or exports. | Bounded in-memory subtitle history defaults to three confirmed captions on fresh installs; existing settings and the legacy zero default are preserved. Stop retains confirmed display; a new session clears it. Opt-in private saved sessions use the same Rust journal, paged reader and TXT/Markdown formatter, with native SAF export and explicit deletion. No PCM recording, session renaming or desktop audio playback UI |
 | Development evidence | Exact dev app only; opt-in sent audio, subtitle snapshots, causal traces, saved-case playback and bounded evidence workspaces | No matching debugger or sent-audio recording claimed |
 
 These differences are current scope, not proof of live-account acceptance. When expanding a
@@ -244,8 +265,8 @@ same time switch, which also takes effect immediately in system-only mode.
 System-only mode hides the system source icon and keeps retained microphone rows
 identifiable with a small icon (inline when time is off); the timestamp preference survives input
 changes. Single-source output keeps its own color and a neutral bilingual original.
-These are desktop presentation preferences; Android does not currently expose
-matching source-color or time controls, or desktop microphone selection.
+These are desktop presentation preferences; Android uses native source labels and
+its existing timestamp preference, without matching source-color controls.
 
 Android's normal panel has a bounded reading viewport, with complete current
 source and translation text inside its scroll area. Opening it locates the current

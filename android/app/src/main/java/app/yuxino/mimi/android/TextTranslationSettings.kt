@@ -17,22 +17,13 @@ import com.google.android.material.textfield.TextInputLayout
 /** A draft only. ServiceSettingsActivity commits this alongside the speech configuration. */
 internal class TextTranslationSettings(private val activity: AppCompatActivity, private val profileId: String? = null,
     editorDraft: TextTranslationEditorDraft? = null, private val speechProvider: ServiceProvider = ServiceProvider.DASHSCOPE) {
-    private class Draft(val saved: TranslationConfiguration) {
-        var endpoint = saved.endpoint.ifBlank {
-            if (saved.provider == TextTranslationProvider.CHAT_MOCK) "http://127.0.0.1:8000/v1" else ""
-        }
-        var model = saved.model.ifBlank { if (saved.provider == TextTranslationProvider.XAI) "grok-4.3" else "" }
-        var key = ""
-        var localHttp = saved.allowLocalHttp
-        var forgetKey = false
-    }
     private val providers = buildList {
         if (speechProvider == ServiceProvider.DASHSCOPE) add(TextTranslationProvider.BUILTIN)
         addAll(listOf(TextTranslationProvider.DEEPL, TextTranslationProvider.DEEPLX,
             TextTranslationProvider.CHAT_MOCK, TextTranslationProvider.OPENAI_COMPATIBLE, TextTranslationProvider.XAI, TextTranslationProvider.NONE))
     }
     private val drafts = providers.associateWith { route ->
-        Draft(if (profileId == null) TranslationConfiguration(provider = route) else SettingsStore.profileTranslationConfiguration(activity, profileId, route)).apply {
+        TextTranslationDraft(if (profileId == null) TranslationConfiguration(provider = route) else SettingsStore.profileTranslationConfiguration(activity, profileId, route)).apply {
             editorDraft?.routes?.get(route)?.let {
                 endpoint = it.endpoint; model = it.model; key = it.key
                 localHttp = it.localHttp; forgetKey = it.forgetKey
@@ -173,13 +164,7 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
         rememberDraft()
         if (!hasNetworkProvider()) return TranslationConfiguration(provider = selected)
         val state = drafts.getValue(selected)
-        val config = TranslationConfiguration(
-            endpoint = if (selected.hasCustomEndpoint) state.endpoint.trim() else "",
-            model = if (selected.usesOpenAIProtocol) state.model.trim() else "",
-            apiKey = state.key.trim().ifBlank { if (reusesSavedKey(state)) state.saved.apiKey else "" },
-            allowLocalHttp = selected.hasCustomEndpoint && state.localHttp,
-            provider = selected,
-        )
+        val config = state.configuration()
         if (!validate) return config
         if (selected in listOf(TextTranslationProvider.DEEPL, TextTranslationProvider.XAI) && config.apiKey.isBlank()) {
             showError(R.string.translation_key_required); return null
@@ -200,7 +185,7 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
 
     private fun updateKeyLabel() {
         val state = drafts.getValue(selected)
-        val hasSavedKey = reusesSavedKey(state)
+        val hasSavedKey = state.reusesSavedKey()
         val label = activity.getString(when (selected) {
             TextTranslationProvider.DEEPL -> R.string.translation_deepl_key
             TextTranslationProvider.DEEPLX -> R.string.translation_token
@@ -216,8 +201,6 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
     }
 
     private fun hasNetworkProvider() = selected !in listOf(TextTranslationProvider.BUILTIN, TextTranslationProvider.NONE)
-    private fun reusesSavedKey(state: Draft) = !state.forgetKey && state.saved.apiKey.isNotBlank() &&
-        (!selected.hasCustomEndpoint || state.endpoint.trim() == state.saved.endpoint.trim())
 
     private fun showHelp() {
         val body = when (selected) {

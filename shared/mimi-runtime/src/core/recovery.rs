@@ -193,6 +193,40 @@ mod schedule_tests {
     }
 
     #[test]
+    fn raw_independent_asr_errors_use_the_same_recovery_policy_as_normalized_events() {
+        for code in [
+            "custom_speech_unreachable",
+            "custom_speech_not_connected",
+            "custom_speech_health_timeout",
+            "gemini_transcribe_unreachable",
+            "gemini_transcribe_not_connected",
+            "gemini_transcribe_health_timeout",
+        ] {
+            assert!(provider_error_is_retryable(code), "{code}");
+            let normalized = normalize_provider_error_code(code);
+            assert!(provider_error_is_retryable(normalized), "{code}");
+            assert_eq!(normalize_provider_error_code(normalized), normalized);
+        }
+        for code in [
+            "custom_speech_authentication_failed",
+            "custom_speech_credentials_missing",
+            "custom_speech_endpoint_invalid",
+            "custom_speech_model_invalid",
+            "custom_speech_protocol_invalid",
+            "gemini_transcribe_authentication_failed",
+            "gemini_transcribe_credentials_missing",
+            "gemini_transcribe_language_unsupported",
+            "gemini_transcribe_protocol_invalid",
+            "unrecognized_provider_error",
+        ] {
+            assert!(!provider_error_is_retryable(code), "{code}");
+            let normalized = normalize_provider_error_code(code);
+            assert!(!provider_error_is_retryable(normalized), "{code}");
+            assert_eq!(normalize_provider_error_code(normalized), normalized);
+        }
+    }
+
+    #[test]
     fn provider_error_codes_share_authentication_aliases_and_never_expose_vendor_text() {
         for code in [
             "invalid_api_key",
@@ -492,8 +526,10 @@ pub fn recovery_delay(attempt: usize, generation: u64) -> Duration {
 }
 
 pub fn provider_error_is_retryable(code: &str) -> bool {
+    // Desktop receives provider labels directly while Android supplies their
+    // normalized form. Both adapters must make the same recovery decision.
     matches!(
-        code,
+        normalize_provider_error_code(code),
         "transport_error"
             | "provider_event_backlog_overflow"
             | "translation_backlog_overflow"

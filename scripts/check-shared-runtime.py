@@ -77,6 +77,7 @@ def check(root=ROOT):
         if path.name != "mod.rs" and (runtime / relative).is_file():
             candidates.add(relative)
     candidates.add(Path("audio/send_pipeline.rs"))
+    candidates.add(Path("session_history.rs"))
     require(bool(candidates - {Path("audio/send_pipeline.rs")}), "desktop shared facades are missing")
     core_modules = code(read("src-tauri/src/core/mod.rs"))
     core_rest = re.sub(r"#\[(?:cfg|allow)\([^\]]*\)\]|(?:pub\s+)?mod\s+\w+\s*;", "", core_modules)

@@ -353,9 +353,11 @@ export function ServiceProfiles({
       () => createProfile(provider, name),
       I18N.settings.profileCreated,
     );
-    if (!snapshot) return;
-    const created = snapshot.profiles.find((profile) => !previousIds.has(profile.id));
-    if (created) {
+    if (!snapshot || !mounted.current) return;
+    // Creation appends its own profile last in the command acknowledgment.
+    // Earlier additions may have arrived while this request was waiting.
+    const created = snapshot.profiles.at(-1);
+    if (created && !previousIds.has(created.id)) {
       setSelectedProfileId(created.id);
       setShowsEditor(true);
     }
@@ -973,7 +975,12 @@ function CredentialEditor({
   const saveFeedback = feedback && <div ref={feedbackRef} tabIndex={-1}><InlineFeedback tone={feedback.tone}>{feedback.message}</InlineFeedback></div>;
   const noteId = `${inputId}-storage-note`;
   const speechState = profile.speechCredentialState ?? profile.credentialState;
-  const credentials = speechState === "present" && (editorState.loading || editorState.error) ? null : buildProviderCredentials(profile.provider, displayedDraft, profile.speechTranslationMode);
+  // Azure saves share native endpoint-bound key resolution with checks. Only
+  // loaded saved-field flags may authorize an unchanged, write-only key.
+  const credentials = speechState === "present" && (editorState.loading || editorState.error) ? null
+    : profile.provider === "azureOpenAIRealtime" && !editorState.loading && !editorState.error
+      ? buildProviderProbeCredentials(profile.provider, displayedDraft, savedValues?.savedFields, profile.speechTranslationMode)
+      : buildProviderCredentials(profile.provider, displayedDraft, profile.speechTranslationMode);
 
   const hasCredentialChanges = credentialFieldsForProvider(profile.provider, profile.speechTranslationMode).some(field => {
     if (!changedFields[field]) return false;

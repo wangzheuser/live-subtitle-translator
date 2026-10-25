@@ -8,6 +8,8 @@ import kotlin.concurrent.thread
 internal class SharedRuntimeEngine(
     private val configuration: JSONObject,
     private val listener: EngineListener,
+    private val audioSource: String = "system",
+    private val historyHandle: Long? = null,
 ) : ProviderEngine {
     override val sampleRateHz: Int = NativeRuntimeConfiguration.capabilities(
         configuration.getString("provider"), configurationRoute(configuration), configuration.getString("targetLanguage"),
@@ -26,7 +28,8 @@ internal class SharedRuntimeEngine(
             check(handle == 0L) { "native_runtime_already_started" }
             val network = NativeRuntimeNetwork.snapshot(configuration)
             handle = NativeRuntimeConfiguration.exchange(JSONObject().put("operation", "create")
-                .put("configuration", configuration).put("network", network)).getLong("handle")
+                .put("configuration", configuration).put("network", network).put("audioSource", audioSource)
+                .apply { historyHandle?.let { put("historyHandle", it) } }).getLong("handle")
             try { NativeRuntimeConfiguration.command("start", handle) }
             catch (error: Exception) {NativeRuntimeConfiguration.command("stop", handle);handle=0;throw error}
             active.set(true)

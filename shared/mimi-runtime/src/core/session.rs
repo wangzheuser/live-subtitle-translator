@@ -11,8 +11,10 @@ use std::time::{Duration, Instant};
 /// Clear a provider's stuck waiting-for-final indicator without changing text.
 pub const TRANSLATION_PENDING_TIMEOUT: Duration = Duration::from_secs(6);
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct ProviderEventApplication {
+    /// The accepted durable pair from this event, independent of display retention.
+    pub confirmed_pair: Option<crate::core::models::SubtitlePair>,
     pub resolves_translation_timeout: bool,
     pub translation_pending_deadline: Option<Instant>,
 }
@@ -489,6 +491,7 @@ impl SourceSessionController {
             self.translation_pending_deadline = None;
         }
         Some(ProviderEventApplication {
+            confirmed_pair: None,
             resolves_translation_timeout,
             translation_pending_deadline: starts_translation
                 .then_some(self.translation_pending_deadline)
@@ -732,7 +735,7 @@ impl TranslationSessionController {
             .history
             .last()
             .map(|pair| pair.created_at_ms);
-        let application = lane
+        let mut application = lane
             .handle_ordered_at(event, now, source_ordinal, starts_translation_hint)
             .unwrap_or_default();
         if let Some(pair) = lane.state.subtitles.history.last_mut() {
@@ -747,6 +750,7 @@ impl TranslationSessionController {
                 if let Some(reduced) = lane.subtitle_reducer.snapshot.history.last_mut() {
                     reduced.created_at_ms = pair.created_at_ms;
                 }
+                application.confirmed_pair = Some(pair.clone());
                 self.archive.append(pair);
                 self.state.subtitles.history.push(pair.clone());
                 if self.state.subtitles.history.len() > 20 {
@@ -766,73 +770,251 @@ impl TranslationSessionController {
             .iter()
             .map(|source| (*source, &self.sources[source_index(*source)].state))
             .collect();
-        let primary = active[0].1;
-        self.state.atomic_preview = self.atomic_preview;
-        self.state.detected_language = primary.detected_language.clone();
-        // The aggregate history belongs to the session, not its first lane.
-        // Clone only the primary presentation; cloning the whole lane state
-        // would allocate its complete history just to discard it here.
-        self.state.subtitles = SubtitleSnapshot {
-            tracks: Vec::new(),
-            source: primary.subtitles.source.clone(),
-            translation: primary.subtitles.translation.clone(),
-            history,
-            preview_pair: primary.subtitles.preview_pair.clone(),
-            realtime_preview: primary.subtitles.realtime_preview.clone(),
-            display_pair: primary.subtitles.display_pair.clone(),
-            display_pair_final: primary.subtitles.display_pair_final,
-            display_pair_created_at_ms: primary.subtitles.display_pair_created_at_ms,
-        };
-        self.state.subtitles.tracks = active
-            .iter()
-            .map(|(source, state)| SourceSubtitleSnapshot {
-                audio_source: *source,
-                source: state.subtitles.source.clone(),
-                translation: state.subtitles.translation.clone(),
-                history: state.subtitles.history.clone(),
-                preview_pair: state.subtitles.preview_pair.clone(),
-                realtime_preview: state.subtitles.realtime_preview.clone(),
-                display_pair: state.subtitles.display_pair.clone(),
-                display_pair_final: state.subtitles.display_pair_final,
-                display_pair_created_at_ms: state.subtitles.display_pair_created_at_ms,
-                detected_language: state
-                    .detected_language
-                    .as_ref()
-                    .map(|language| language.code.clone()),
-                is_translation_pending: state.is_translation_pending,
-                is_translation_preview_pending: state.is_translation_preview_pending,
-                is_translation_timed_out: state.is_translation_timed_out,
-                translation_recovery: state.translation_recovery,
-            })
-            .collect();
-        self.state.status = active
-            .iter()
-            .max_by_key(|(_, state)| match &state.status {
-                SessionStatus::Error(_) => 4,
-                SessionStatus::Stopping => 3,
-                SessionStatus::Connecting => 2,
-                SessionStatus::Listening => 1,
-                SessionStatus::Idle => 0,
-            })
-            .map(|(_, state)| state.status.clone())
-            .unwrap_or(SessionStatus::Idle);
-        self.state.is_translation_pending =
-            active.iter().any(|(_, state)| state.is_translation_pending);
-        self.state.is_translation_preview_pending = active
-            .iter()
-            .any(|(_, state)| state.is_translation_preview_pending);
-        self.state.is_translation_timed_out = active
-            .iter()
-            .any(|(_, state)| state.is_translation_timed_out);
-        self.state.translation_recovery = active
-            .iter()
-            .find_map(|(_, state)| state.translation_recovery);
+        self.state = aggregate_source_states(&active, history, self.atomic_preview);
     }
+}
+
+/// Shared presentation aggregation for desktop lanes and independent native handles.
+/// The caller owns bounded history and source identity; provider text is never mixed.
+fn aggregate_source_states(
+    active: &[(AudioSource, &TranslationSessionState)],
+    history: Vec<crate::core::models::SubtitlePair>,
+    atomic_preview: Option<bool>,
+) -> TranslationSessionState {
+    if active.is_empty() {
+        return TranslationSessionState::default();
+    }
+    let mut state = TranslationSessionState::default();
+    let primary = active[0].1;
+    state.atomic_preview = atomic_preview;
+    state.detected_language = primary.detected_language.clone();
+    // The aggregate history belongs to the session, not its first lane.
+    // Clone only the primary presentation; cloning the whole lane state
+    // would allocate its complete history just to discard it here.
+    state.subtitles = SubtitleSnapshot {
+        tracks: Vec::new(),
+        source: primary.subtitles.source.clone(),
+        translation: primary.subtitles.translation.clone(),
+        history,
+        preview_pair: primary.subtitles.preview_pair.clone(),
+        realtime_preview: primary.subtitles.realtime_preview.clone(),
+        display_pair: primary.subtitles.display_pair.clone(),
+        display_pair_final: primary.subtitles.display_pair_final,
+        display_pair_created_at_ms: primary.subtitles.display_pair_created_at_ms,
+    };
+    state.subtitles.tracks = active
+        .iter()
+        .map(|(source, state)| SourceSubtitleSnapshot {
+            audio_source: *source,
+            source: state.subtitles.source.clone(),
+            translation: state.subtitles.translation.clone(),
+            history: state.subtitles.history.clone(),
+            preview_pair: state.subtitles.preview_pair.clone(),
+            realtime_preview: state.subtitles.realtime_preview.clone(),
+            display_pair: state.subtitles.display_pair.clone(),
+            display_pair_final: state.subtitles.display_pair_final,
+            display_pair_created_at_ms: state.subtitles.display_pair_created_at_ms,
+            detected_language: state
+                .detected_language
+                .as_ref()
+                .map(|language| language.code.clone()),
+            is_translation_pending: state.is_translation_pending,
+            is_translation_preview_pending: state.is_translation_preview_pending,
+            is_translation_timed_out: state.is_translation_timed_out,
+            translation_recovery: state.translation_recovery,
+        })
+        .collect();
+    state.status = active
+        .iter()
+        .max_by_key(|(_, state)| match &state.status {
+            SessionStatus::Error(_) => 4,
+            SessionStatus::Stopping => 3,
+            SessionStatus::Connecting => 2,
+            SessionStatus::Listening => 1,
+            SessionStatus::Idle => 0,
+        })
+        .map(|(_, state)| state.status.clone())
+        .unwrap_or(SessionStatus::Idle);
+    state.is_translation_pending = active.iter().any(|(_, state)| state.is_translation_pending);
+    state.is_translation_preview_pending = active
+        .iter()
+        .any(|(_, state)| state.is_translation_preview_pending);
+    state.is_translation_timed_out = active
+        .iter()
+        .any(|(_, state)| state.is_translation_timed_out);
+    state.translation_recovery = active
+        .iter()
+        .find_map(|(_, state)| state.translation_recovery);
+    state
+}
+
+/// Combine already-reduced independent lanes without reducing their events again.
+/// On Stop only accepted complete pairs remain; all transient activity is retired.
+pub fn merge_independent_states(
+    mut lanes: Vec<(AudioSource, TranslationSessionState)>,
+    history_limit: usize,
+    stopped: bool,
+) -> TranslationSessionState {
+    lanes.sort_by_key(|(source, _)| source_index(*source));
+    let limit = history_limit.min(6);
+    for (source, state) in &mut lanes {
+        state.subtitles.tracks.clear();
+        for pair in &mut state.subtitles.history {
+            pair.audio_source = *source;
+        }
+        if stopped {
+            let subtitles = &mut state.subtitles;
+            if !subtitles.display_pair_final {
+                subtitles.display_pair =
+                    subtitles
+                        .history
+                        .last()
+                        .map(|pair| mimi_core::PreviewSubtitlePair {
+                            utterance_id: None,
+                            source: pair.source.clone(),
+                            translation: pair.translation.clone(),
+                        });
+                subtitles.display_pair_created_at_ms =
+                    subtitles.history.last().map(|pair| pair.created_at_ms);
+                subtitles.display_pair_final = subtitles.display_pair.is_some();
+            }
+            let pair = subtitles.display_pair.as_ref();
+            subtitles.source = mimi_core::SubtitleLine::new(
+                pair.map_or("", |pair| pair.source.as_str()),
+                pair.is_some(),
+            );
+            subtitles.translation = mimi_core::SubtitleLine::new(
+                pair.map_or("", |pair| pair.translation.as_str()),
+                pair.is_some(),
+            );
+            if let Some(pair) = pair {
+                subtitles.source.utterance_id = pair.utterance_id.clone();
+                subtitles.translation.utterance_id = pair.utterance_id.clone();
+            }
+            subtitles.preview_pair = None;
+            subtitles.realtime_preview = None;
+            state.status = SessionStatus::Idle;
+            state.is_translation_pending = false;
+            state.is_translation_preview_pending = false;
+            state.is_translation_timed_out = false;
+            state.translation_recovery = None;
+        }
+        // Resolve the last accepted pair before applying a zero display limit.
+        if state.subtitles.history.len() > limit {
+            state
+                .subtitles
+                .history
+                .drain(..state.subtitles.history.len() - limit);
+        }
+    }
+    let mut history: Vec<_> = lanes
+        .iter()
+        .flat_map(|(_, state)| state.subtitles.history.iter().cloned())
+        .collect();
+    history.sort_by_key(|pair| pair.created_at_ms);
+    if history.len() > limit {
+        history.drain(..history.len() - limit);
+    }
+    let atomic = lanes.first().and_then(|(_, state)| state.atomic_preview);
+    let active: Vec<_> = lanes
+        .iter()
+        .map(|(source, state)| (*source, state))
+        .collect();
+    aggregate_source_states(&active, history, atomic)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn independent_source_projection_matches_desktop_and_bounds_combined_history() {
+        let mut desktop = TranslationSessionController::default();
+        desktop.set_audio_input(AudioInput::Both);
+        desktop.begin_session();
+        desktop.did_connect();
+        for source in [AudioSource::System, AudioSource::Microphone] {
+            desktop.handle_from(
+                source,
+                LiveTranslateServerEvent::SubtitleIdentifiedFinalPair {
+                    utterance_id: "same-provider-id".into(),
+                    source: format!("Synthetic {source:?}"),
+                    translation: format!("Translated {source:?}"),
+                    language: None,
+                },
+            );
+        }
+        let lanes: Vec<_> = [AudioSource::System, AudioSource::Microphone]
+            .into_iter()
+            .map(|source| (source, desktop.sources[source_index(source)].state.clone()))
+            .collect();
+        let merged = merge_independent_states(lanes.clone(), 6, false);
+        assert_eq!(merged.subtitles.tracks, desktop.state.subtitles.tracks);
+        assert_eq!(merged.subtitles.source, desktop.state.subtitles.source);
+        assert_eq!(merged.status, desktop.state.status);
+        let bounded = merge_independent_states(lanes, 1, false);
+        assert!(bounded.subtitles.history.len() <= 1);
+        assert_eq!(bounded.subtitles.tracks.len(), 2);
+        assert_eq!(
+            bounded.subtitles.tracks[1].audio_source,
+            AudioSource::Microphone
+        );
+        assert!(bounded.subtitles.tracks[0].source.text.contains("System"));
+        assert!(bounded.subtitles.tracks[1]
+            .source
+            .text
+            .contains("Microphone"));
+    }
+
+    #[test]
+    fn stopped_independent_projection_keeps_confirmed_pairs_and_retires_activity() {
+        let mut controller = TranslationSessionController::default();
+        controller.begin_session();
+        controller.did_connect();
+        controller.handle(LiveTranslateServerEvent::SubtitleFinalPair {
+            source: "Synthetic source".into(),
+            translation: "Synthetic translation".into(),
+            language: None,
+        });
+        controller.state.is_translation_pending = true;
+        controller.state.is_translation_timed_out = true;
+        let merged =
+            merge_independent_states(vec![(AudioSource::System, controller.state)], 0, true);
+        assert_eq!(merged.status, SessionStatus::Idle);
+        assert!(merged.subtitles.display_pair_final);
+        assert_eq!(merged.subtitles.source.text, "Synthetic source");
+        assert!(merged.subtitles.realtime_preview.is_none());
+        assert!(!merged.is_translation_pending);
+        assert!(!merged.is_translation_timed_out);
+        assert!(merged.subtitles.history.is_empty());
+    }
+
+    #[test]
+    fn stopping_zero_history_keeps_the_final_before_a_newer_preview() {
+        let mut controller = TranslationSessionController::default();
+        controller.begin_session();
+        controller.did_connect();
+        controller.handle(LiveTranslateServerEvent::SubtitleConfirmedPair {
+            utterance_id: 1,
+            source_utterance_id: None,
+            source: "Accepted source".into(),
+            translation: "Accepted translation".into(),
+            language: None,
+        });
+        controller.handle(LiveTranslateServerEvent::SubtitlePreviewPair {
+            source_utterance_id: Some(2),
+            source: "New preview".into(),
+            translation: "Preview translation".into(),
+            language: None,
+        });
+        assert!(!controller.state.subtitles.display_pair_final);
+        let stopped =
+            merge_independent_states(vec![(AudioSource::System, controller.state)], 0, true);
+        assert_eq!(stopped.subtitles.source.text, "Accepted source");
+        assert_eq!(stopped.subtitles.translation.text, "Accepted translation");
+        assert!(stopped.subtitles.display_pair_final);
+        assert!(stopped.subtitles.history.is_empty());
+    }
 
     fn identified_source(id: &str, is_final: bool) -> LiveTranslateServerEvent {
         LiveTranslateServerEvent::UtteranceText {

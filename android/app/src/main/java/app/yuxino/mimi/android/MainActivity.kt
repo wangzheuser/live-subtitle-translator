@@ -18,6 +18,8 @@ import android.widget.LinearLayout
 import android.widget.FrameLayout
 import android.widget.RadioGroup
 import android.widget.ScrollView
+import android.widget.Spinner
+import android.widget.ArrayAdapter
 import android.util.SparseIntArray
 import androidx.activity.OnBackPressedCallback
 import androidx.core.view.doOnNextLayout
@@ -26,6 +28,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import app.yuxino.mimi.android.capture.MimiService
 import app.yuxino.mimi.android.capture.CaptureHealth
+import app.yuxino.mimi.android.capture.CaptureInput
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.snackbar.Snackbar
@@ -34,13 +37,16 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var startStop: MaterialButton
     private var starting = false
+    private var pendingCaptureInput: CaptureInput? = null
+    private var pendingStartRequest: Long? = null
     private lateinit var guide: FirstRunGuide
     private val immersiveHelp = ImmersiveModeHelp(this)
     private val previewHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val previewUpdate = Runnable {
-        if (!isFinishing && MimiService.isRunning) refreshLivePreview()
+        if (!isFinishing && (MimiService.isRunning || app.yuxino.mimi.android.provider.SubtitleBus.hasRetainedContent)) refreshLivePreview()
     }
     private var stopObservingAppearance: (() -> Unit)? = null
+    private lateinit var sessionStorage: SessionStorageControls
     private lateinit var appearance: AppearanceControls
     private val sectionScroll = SparseIntArray()
     private var currentSection = R.id.tab_caption
@@ -48,7 +54,10 @@ class MainActivity : AppCompatActivity() {
     private val subtitleListener = object : app.yuxino.mimi.android.provider.SubtitleBus.Listener {
         override fun onSubtitleChanged() { previewHandler.removeCallbacks(previewUpdate); previewHandler.post(previewUpdate) }
     }
-    private val stateListener: () -> Unit = { runOnUiThread { refreshUi() } }
+    private val stateListener: () -> Unit = { runOnUiThread {
+        reconcileServiceStart()
+        refreshUi()
+    } }
 
     private val projectionManager: MediaProjectionManager by lazy {
         getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
@@ -57,6 +66,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         starting = savedInstanceState?.getBoolean("starting") ?: false
+        pendingCaptureInput = savedInstanceState?.getString("pending_capture_input")?.let(CaptureInput::request)
+        pendingStartRequest = savedInstanceState?.getLong("pending_start_request")?.takeIf { it != 0L }
+        reconcileServiceStart()
         permissionOnly = savedInstanceState?.getBoolean("permission_only") ?: false
         val firstRunPrefs = getSharedPreferences("first_run", 0)
         if (!firstRunPrefs.contains("seen") && java.io.File(applicationInfo.dataDir, "shared_prefs/mimi_secure.xml").exists()) {
@@ -72,6 +84,7 @@ class MainActivity : AppCompatActivity() {
                 }
             })
         bindSections(savedInstanceState)
+        bindCaptureInput()
 
         guide = FirstRunGuide(this) { beginStartFlow(permissionOnly = guide.step == 2) }
         startStop = findViewById(R.id.start_stop)
@@ -123,6 +136,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean("starting", starting)
+        outState.putString("pending_capture_input", pendingCaptureInput?.id)
+        outState.putLong("pending_start_request", pendingStartRequest ?: 0L)
         outState.putBoolean("permission_only", permissionOnly)
         outState.putBoolean("guide_open", guide.showing)
         outState.putInt("guide_step", guide.step)
@@ -165,6 +180,10 @@ class MainActivity : AppCompatActivity() {
         findViewById<LinearLayout>(R.id.home_panel).apply {
             addView(appearance, indexOfChild(findViewById(R.id.service_settings)), LinearLayout.LayoutParams(-1, -2))
         }
+        sessionStorage = SessionStorageControls(this)
+        findViewById<LinearLayout>(R.id.home_panel).apply {
+            addView(sessionStorage, indexOfChild(findViewById(R.id.service_settings)), LinearLayout.LayoutParams(-1, -2))
+        }
         val tabs = findViewById<RadioGroup>(R.id.settings_tabs)
         val scroll = findViewById<ScrollView>(R.id.settings_scroll)
         savedInstanceState?.getIntArray("section_scroll")?.forEachIndexed { index, value ->
@@ -206,10 +225,37 @@ class MainActivity : AppCompatActivity() {
         styles.requestLayout()
     }
 
+    private fun bindCaptureInput() {
+        findViewById<android.widget.LinearLayout>(R.id.capture_input_heading).addView(HelpUi.heading(this,
+            getString(R.string.capture_input_label), getString(R.string.capture_input_help), 17f, "capture-input-help"))
+        val picker = findViewById<Spinner>(R.id.audio_input)
+        picker.adapter = ArrayAdapter(this, R.layout.mimi_spinner_item, listOf(
+            getString(R.string.capture_input_system), getString(R.string.capture_input_microphone), getString(R.string.capture_input_both),
+        )).apply { setDropDownViewResource(R.layout.mimi_spinner_dropdown) }
+        picker.setSelection(SettingsStore.captureInput(this).ordinal)
+        picker.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val selected = CaptureInput.entries[position]
+                if (selected == SettingsStore.captureInput(this@MainActivity)) return
+                if (!starting && !MimiService.isStarting && !MimiService.isRunning && !MimiService.isStopping) {
+                    runCatching { SettingsStore.setCaptureInput(this@MainActivity, selected) }
+                        .onFailure { Toast.makeText(this@MainActivity, R.string.service_save_failed, Toast.LENGTH_LONG).show() }
+                }
+                picker.setSelection(SettingsStore.captureInput(this@MainActivity).ordinal)
+                refreshUi()
+            }
+        }
+    }
+
     private fun copyDiagnostics() {
         val observation = MimiService.captureObservation
-        val report = "Mimi Android capture diagnostics v1\n" +
-            "androidApi=${Build.VERSION.SDK_INT}\nsource=android_playback_capture\nusage=media,game,unknown\nmicrophone=false\n" +
+        val input = if (MimiService.isRunning) MimiService.captureInput else SettingsStore.captureInput(this)
+        val lanes = MimiService.captureObservations.entries.joinToString("\n") { (source, health) ->
+            "${source.id}.state=${health.state};pcmAgeMs=${health.pcmAgeMs ?: "unknown"};soundAgeMs=${health.soundAgeMs ?: "unknown"}"
+        }
+        val report = "Mimi Android capture diagnostics v2\n" +
+            "androidApi=${Build.VERSION.SDK_INT}\ninput=${input.id}\nmicrophone=${input.usesMicrophone}\n$lanes\n" +
             "running=${MimiService.isRunning}\nobservation=${observation?.state?.name ?: "STOPPED"}\n" +
             "pcmAgeMs=${observation?.pcmAgeMs ?: "unknown"}\nsoundAgeMs=${observation?.soundAgeMs ?: "unknown"}\n" +
             "captureError=${MimiService.lastCaptureError ?: "none"}"
@@ -237,8 +283,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshAvailableUi() {
+        reconcileServiceStart()
         guide.refresh()
+        sessionStorage.sync(MimiService.historySaveError, MimiService.historyLimited)
         val running = MimiService.isRunning
+        val input = if (running) MimiService.captureInput else pendingCaptureInput ?: SettingsStore.captureInput(this)
+        findViewById<Spinner>(R.id.audio_input).apply {
+            isEnabled = !starting && !MimiService.isStarting && !running && !MimiService.isStopping
+            val selected = SettingsStore.captureInput(this@MainActivity).ordinal
+            if (selectedItemPosition != selected) setSelection(selected)
+        }
         val sessionState = running to MimiService.isStopping
         if (lastSessionState != sessionState) {
             lastSessionState = sessionState
@@ -248,7 +302,7 @@ class MainActivity : AppCompatActivity() {
         val keyOk = SettingsStore.isConfigured(this)
         val overlayOk = Settings.canDrawOverlays(this)
         findViewById<View>(R.id.immersive_subtitles).isEnabled = true
-        startStop.isEnabled = !starting && !MimiService.isStopping
+        startStop.isEnabled = !starting && !MimiService.isStarting && !MimiService.isStopping
         startStop.setText(when {
             MimiService.isStopping -> R.string.stopping_capture
             running -> R.string.stop_capture
@@ -261,7 +315,7 @@ class MainActivity : AppCompatActivity() {
             else -> R.drawable.ic_play
         })
         findViewById<TextView>(R.id.status).setText(when {
-            starting -> R.string.home_starting_status
+            starting || MimiService.isStarting -> R.string.home_starting_status
             running && captureState == CaptureHealth.State.AUDIO -> R.string.capture_audio_detected
             running && captureState == CaptureHealth.State.NO_PCM -> R.string.capture_no_pcm
             running && captureState == CaptureHealth.State.SILENT -> R.string.capture_silent
@@ -270,11 +324,12 @@ class MainActivity : AppCompatActivity() {
             else -> R.string.home_ready_status
         })
         val hint = when {
-            running && (captureState == CaptureHealth.State.NO_PCM || captureState == CaptureHealth.State.SILENT) -> R.string.capture_no_sound_hint
-            running -> R.string.capture_source_hint
+            running && (captureState == CaptureHealth.State.NO_PCM || captureState == CaptureHealth.State.SILENT) ->
+                if (input == CaptureInput.MICROPHONE) R.string.microphone_no_sound_hint else if (input == CaptureInput.BOTH) R.string.capture_both_no_sound_hint else R.string.capture_no_sound_hint
+            running -> if (input == CaptureInput.MICROPHONE) R.string.microphone_source_hint else if (input == CaptureInput.BOTH) R.string.capture_both_source_hint else R.string.capture_source_hint
             !keyOk -> R.string.home_setup_hint
             !overlayOk -> R.string.home_overlay_hint
-            else -> R.string.home_ready_hint
+            else -> if (input == CaptureInput.MICROPHONE) R.string.microphone_ready_hint else if (input == CaptureInput.BOTH) R.string.capture_both_source_hint else R.string.home_ready_hint
         }
         val needsAction = !running && (!keyOk || !overlayOk) ||
             running && (captureState == CaptureHealth.State.NO_PCM || captureState == CaptureHealth.State.SILENT)
@@ -318,10 +373,10 @@ class MainActivity : AppCompatActivity() {
             SettingsStore.fontSize(this), SettingsStore.translationColor(this),
             SettingsStore.overlayOpacity(this), SettingsStore.overlayBgAlpha(this), effectiveTarget,
             SettingsStore.immersiveSubtitles(this), SettingsStore.originalTextOnly(this),
-            SettingsStore.displayMode(this), SettingsStore.overlayWidthPercent(this), live = running,
+            SettingsStore.displayMode(this), SettingsStore.overlayWidthPercent(this), live = running || app.yuxino.mimi.android.provider.SubtitleBus.hasRetainedContent,
             alignment = SettingsStore.captionAlignment(this), heightPercent = SettingsStore.overlayHeightPercent(this),
         )
-        if (running) {
+        if (running || app.yuxino.mimi.android.provider.SubtitleBus.hasRetainedContent) {
             refreshLivePreview()
         }
     }
@@ -425,8 +480,9 @@ class MainActivity : AppCompatActivity() {
     private var permissionOnly = false
 
     private fun beginStartFlow(permissionOnly: Boolean = false) {
-        if (starting || MimiService.isRunning) return
+        if (starting || MimiService.isStarting || MimiService.isRunning || MimiService.isStopping) return
         this.permissionOnly = permissionOnly
+        val input = pendingCaptureInput ?: SettingsStore.captureInput(this).also { pendingCaptureInput = it }
         if (!Settings.canDrawOverlays(this)) {
             Toast.makeText(this, R.string.need_overlay_permission, Toast.LENGTH_LONG).show()
             starting = true
@@ -440,6 +496,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (!SettingsStore.isConfigured(this)) {
+            pendingCaptureInput = null
             Toast.makeText(this, R.string.need_api_key, Toast.LENGTH_LONG).show()
             openSettings()
             return
@@ -449,11 +506,15 @@ class MainActivity : AppCompatActivity() {
         ) {
             starting = true
             refreshUi()
-            Toast.makeText(this, R.string.need_audio_permission, Toast.LENGTH_LONG).show()
+            Toast.makeText(this, if (input.usesMicrophone) R.string.microphone_permission_hint else R.string.need_audio_permission, Toast.LENGTH_LONG).show()
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), REQ_AUDIO)
             return
         }
-        if (permissionOnly) { refreshUi(); return }
+        if (permissionOnly) { pendingCaptureInput = null; refreshUi(); return }
+        if (!input.needsProjection) {
+            startSelectedCapture(MimiService.microphoneIntent(this))
+            return
+        }
         starting = true
         refreshUi()
         projectionManager.createScreenCaptureIntent().let {
@@ -467,6 +528,7 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == REQ_AUDIO && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
             beginStartFlow(permissionOnly)
         } else if (requestCode == REQ_AUDIO) {
+            pendingCaptureInput = null
             getSharedPreferences("first_run", 0).edit().putBoolean("audio-denied", true).apply()
             Toast.makeText(this, getString(R.string.guide_audio_denied), Toast.LENGTH_LONG).show()
             refreshUi()
@@ -479,23 +541,50 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == REQ_OVERLAY) {
             starting = false
             if (Settings.canDrawOverlays(this)) beginStartFlow(permissionOnly)
-            else getSharedPreferences("first_run", 0).edit().putBoolean("overlay-denied", true).apply()
+            else {
+                pendingCaptureInput = null
+                getSharedPreferences("first_run", 0).edit().putBoolean("overlay-denied", true).apply()
+            }
             refreshUi()
         }
         if (requestCode == REQ_PROJECTION) {
             starting = false
-            if (resultCode == Activity.RESULT_OK && data != null) {
+            val input = pendingCaptureInput
+            if (resultCode == Activity.RESULT_OK && data != null && input?.needsProjection == true) {
                 getSharedPreferences("first_run", 0).edit().remove("projection-denied").apply()
-                ContextCompat.startForegroundService(
-                    this, MimiService.startIntent(this, resultCode, data),
-                )
-                requestNotificationPermissionIfNeeded()
+                startSelectedCapture(MimiService.startIntent(this, resultCode, data, input))
             } else {
+                pendingCaptureInput = null
                 getSharedPreferences("first_run", 0).edit().putBoolean("projection-denied", true).apply()
                 Toast.makeText(this, getString(R.string.guide_projection_denied), Toast.LENGTH_LONG).show()
             }
             refreshUi()
         }
+    }
+
+    private fun reconcileServiceStart() {
+        val request = pendingStartRequest ?: return
+        if (!MimiService.startPending(request)) {
+            pendingStartRequest = null
+            starting = false
+        }
+    }
+
+    private fun startSelectedCapture(intent: Intent) {
+        pendingCaptureInput = null
+        starting = true
+        try {
+            val request = MimiService.prepareStart(this)
+            pendingStartRequest = request
+            ContextCompat.startForegroundService(this, intent.putExtra(MimiService.EXTRA_START_REQUEST, request))
+            requestNotificationPermissionIfNeeded()
+        } catch (_: RuntimeException) {
+            pendingStartRequest?.let(MimiService::cancelStartRequest)
+            pendingStartRequest = null
+            starting = false
+            Toast.makeText(this, R.string.capture_failed, Toast.LENGTH_LONG).show()
+        }
+        refreshUi()
     }
 
     private fun stopService() {

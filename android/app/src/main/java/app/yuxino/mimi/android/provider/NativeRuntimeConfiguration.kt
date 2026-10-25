@@ -18,6 +18,9 @@ internal object NativeRuntimeConfiguration {
         if (provider == "alibabaCloud" && mode == "liveTranslate") "liveTranslate" else "disabled"
     fun endpoints(configuration: JSONObject): JSONObject = exchange(
         JSONObject().put("operation", "endpoints").put("configuration", configuration))
+    fun textEndpointsEquivalent(provider: TextTranslationProvider, saved: String, draft: String): Boolean = exchange(
+        JSONObject().put("operation", "text_endpoints_equivalent").put("route", provider.runtimeRoute())
+            .put("savedEndpoint", saved).put("draftEndpoint", draft)).getBoolean("equivalent")
     val policy: JSONObject by lazy { exchange(JSONObject().put("operation", "policy")) }
     fun command(operation: String, handle: Long): JSONObject = exchange(JSONObject().put("operation", operation).put("handle", handle))
     fun poll(handle: Long, sinceVersion: Long? = null): JSONObject = exchange(runtimePollRequest(handle, sinceVersion))

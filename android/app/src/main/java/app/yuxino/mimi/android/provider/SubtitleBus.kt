@@ -1,10 +1,11 @@
 package app.yuxino.mimi.android.provider
 
 import org.json.JSONObject
+import org.json.JSONArray
 
 /** Native UI facade over the exact Rust reducer used by desktop. */
 object SubtitleBus {
-    data class Pair(val source: String, val translation: String)
+    data class Pair(val source: String, val translation: String, val audioSource: String = "system")
     data class TimedPair(val pair: Pair, val createdAt: Long?)
     data class RuntimeFeedback(val connectionStatus: String = "idle", val recoveryReason: String? = null,
         val retryScheduled: Boolean = false, val translationTimedOut: Boolean = false)
@@ -12,7 +13,8 @@ object SubtitleBus {
     data class DisplaySnapshot(val source: String, val translation: String, val hidden: Boolean,
         val confirmed: Boolean, val createdAt: Long?, val history: List<TimedPair>,
         val status: String, val feedback: RuntimeFeedback, val retainedConfirmed: TimedPair? = null,
-        val currentSource: SourceReading = SourceReading(source, confirmed, createdAt))
+        val currentSource: SourceReading = SourceReading(source, confirmed, createdAt),
+        val audioSource: String = "system")
     @Volatile var runtimeFeedback = RuntimeFeedback()
         private set
     private val lock = Any()
@@ -26,6 +28,8 @@ object SubtitleBus {
     private var originalOnly = false
     private var runtimeOwned = false
     private var atomicPreview = false
+    private val runtimeSnapshots = linkedMapOf<String, JSONObject>()
+    private var runtimeStopped = false
 
     val sourceDraft: String get() = line("source", false)
     val sourceFinal: String get() = line("source", true)
@@ -75,21 +79,67 @@ object SubtitleBus {
         }
         notifyListeners()
     }
-    /** The shared session controller has already reduced the provider event. */
-    fun onRuntimeSnapshot(value: JSONObject, sourceOnly: Boolean) {
+    /** Each native handle has already reduced its own source. Rust combines their bounded presentation. */
+    fun onRuntimeSnapshot(value: JSONObject, sourceOnly: Boolean, audioSource: String = "system") {
+        require(audioSource == "system" || audioSource == "microphone")
         synchronized(lock) {
+            val next = LinkedHashMap(runtimeSnapshots).apply { put(audioSource, value) }
+            val merged = mergeRuntime(false, next)
             runtimeOwned = true
-            atomicPreview = value.optBoolean("atomicPreview")
-            snapshot = value.getJSONObject("snapshot")
-            val recovery = value.optJSONObject("translationRecovery")
-            runtimeFeedback = RuntimeFeedback(value.optString("connectionStatus", "idle"),
-                recovery?.optString("reason"), recovery?.optBoolean("retryScheduled") ?: false,
-                value.optBoolean("isTranslationTimedOut"))
+            runtimeStopped = false
+            runtimeSnapshots.clear()
+            runtimeSnapshots.putAll(next)
             originalOnly = sourceOnly
-            detectedSourceLanguage = value.optString("detectedLanguage").takeUnless { it.isBlank() || it == "null" }
+            publishRuntime(merged)
             liveHidden = false
         }
         notifyListeners()
+    }
+    private fun mergeRuntime(stopped: Boolean, values: Map<String, JSONObject> = runtimeSnapshots): JSONObject = NativeRuntimeConfiguration.exchange(JSONObject()
+        .put("operation", "merge_snapshots")
+        .put("snapshots", JSONArray().apply { values.forEach { (source, value) ->
+            put(JSONObject().put("audioSource", source).put("state", value))
+        } }).put("historyLimit", historyLimit).put("stopped", stopped))
+    private fun publishRuntime(value: JSONObject) {
+        atomicPreview = value.optBoolean("atomicPreview")
+        snapshot = value.getJSONObject("snapshot")
+        runtimeFeedback = feedback(value)
+        detectedSourceLanguage = value.optString("detectedLanguage").takeUnless { it.isBlank() || it == "null" }
+    }
+    private fun feedback(value: JSONObject): RuntimeFeedback {
+        val recovery = value.optJSONObject("translationRecovery")
+        return RuntimeFeedback(value.optString("connectionStatus", "idle"),
+            recovery?.optString("reason"), recovery?.optBoolean("retryScheduled") ?: false,
+            value.optBoolean("isTranslationTimedOut"))
+    }
+    /** Stop retires drafts and activity through the same shared projection as desktop. */
+    fun finishSnapshot() {
+        synchronized(lock) {
+            if (runtimeSnapshots.isEmpty() && snapshot.has("source")) {
+                runtimeSnapshots["system"] = JSONObject().put("snapshot", snapshot).put("atomicPreview", atomicPreview)
+            }
+            if (runtimeSnapshots.isNotEmpty()) {
+                runtimeOwned = true
+                runtimeStopped = true
+                publishRuntime(mergeRuntime(true))
+                // Retain only shared stopped state: no stale live drafts or old
+                // full native snapshots remain behind the bounded UI projection.
+                runtimeSnapshots.clear()
+                val tracks = snapshot.optJSONArray("tracks")
+                if (tracks != null) for (index in 0 until tracks.length()) {
+                    val track = tracks.getJSONObject(index)
+                    runtimeSnapshots[track.getString("audioSource")] = JSONObject()
+                        .put("snapshot", track).put("atomicPreview", atomicPreview)
+                }
+            }
+            runtimeFeedback = RuntimeFeedback()
+            statusLine = ""
+            liveHidden = false
+        }
+        notifyListeners()
+    }
+    val hasRetainedContent: Boolean get() = synchronized(lock) {
+        displaySnapshots().any { it.source.isNotBlank() || it.translation.isNotBlank() } || historySnapshotWithTime().isNotEmpty()
     }
     private fun textEvent(type: String, text: String) = JSONObject().put("type", type).put("text", text)
     fun onSourceDraft(text: String, language: String? = null) = onCoreEvent(textEvent("source_draft", text), language)
@@ -130,36 +180,52 @@ object SubtitleBus {
             if (!runtimeOwned) {
                 ensureCreated()
                 exchange(JSONObject().put("type", "history_limit").put("limit", historyLimit))
-            }
+            } else publishRuntime(mergeRuntime(runtimeStopped))
         }
         notifyListeners()
     }
     fun historySnapshot(): List<Pair> = historySnapshotWithTime().map { it.pair }
     /** Read one published shared state; a provider thread can publish during UI rendering. */
-    fun displaySnapshot(): DisplaySnapshot = synchronized(lock) {
-        val pair = snapshot.optJSONObject("displayPair")?.takeIf { snapshot.optBoolean("displayPairFinal") }
-        val retained = pair?.let {
-            TimedPair(Pair(it.optString("source"), if (originalOnly) "" else it.optString("translation")),
-                snapshot.optLong("displayPairCreatedAt").takeIf { time -> time > 0 })
+    fun displaySnapshot(): DisplaySnapshot = synchronized(lock) { display(snapshot, snapshot.optJSONArray("tracks")?.optJSONObject(0)?.optString("audioSource") ?: "system", runtimeFeedback) }
+    fun displaySnapshots(): List<DisplaySnapshot> = synchronized(lock) {
+        val tracks = snapshot.optJSONArray("tracks")
+        if (tracks == null || tracks.length() == 0) return@synchronized listOf(display(snapshot, "system", runtimeFeedback))
+        List(tracks.length()) { index ->
+            val track = tracks.getJSONObject(index)
+            display(track, track.getString("audioSource"), feedback(track).copy(connectionStatus = runtimeFeedback.connectionStatus))
         }
-        val line = snapshot.optJSONObject("source")
+    }
+    private fun display(value: JSONObject, audioSource: String, activity: RuntimeFeedback): DisplaySnapshot {
+        val pair = value.optJSONObject("displayPair")?.takeIf { value.optBoolean("displayPairFinal") }
+        val retained = pair?.let {
+            TimedPair(Pair(it.optString("source"), if (originalOnly) "" else it.optString("translation"), audioSource),
+                value.optLong("displayPairCreatedAt").takeIf { time -> time > 0 })
+        }
+        val line = value.optJSONObject("source")
         val text = line?.optString("text").orEmpty()
         val sourceConfirmed = line?.optBoolean("isFinal") == true && pair != null &&
             text == pair.optString("source") && line.opt("utteranceId") == pair.opt("utteranceId")
-        DisplaySnapshot(displaySource, displayTranslation, liveHidden, displayPairFinal,
-            displayPairCreatedAt, historySnapshotWithTime(), statusLine, runtimeFeedback, retained,
-            SourceReading(text, sourceConfirmed, retained?.createdAt.takeIf { sourceConfirmed }))
+        val preview = value.optJSONObject("realtimePreview")?.takeUnless { atomicPreview }
+        val display = value.optJSONObject("displayPair")
+        val source = if (originalOnly) text else preview?.optJSONObject("source")?.optString("text")
+            ?: display?.optString("source") ?: text
+        val translation = if (originalOnly) "" else preview?.optJSONObject("translation")?.optString("text")
+            ?: display?.optString("translation") ?: value.optJSONObject("translation")?.optString("text").orEmpty()
+        val confirmed = preview == null && value.optBoolean("displayPairFinal")
+        return DisplaySnapshot(source, translation, liveHidden, confirmed,
+            retained?.createdAt.takeIf { confirmed }, history(value, audioSource), statusLine, activity, retained,
+            SourceReading(text, sourceConfirmed, retained?.createdAt.takeIf { sourceConfirmed }), audioSource)
     }
-    fun historySnapshotWithTime(): List<TimedPair> = synchronized(lock) {
-        val rows = snapshot.optJSONArray("history") ?: return@synchronized emptyList()
+    fun historySnapshotWithTime(): List<TimedPair> = synchronized(lock) { history(snapshot, "system") }
+    private fun history(value: JSONObject, audioSource: String): List<TimedPair> {
+        val rows = value.optJSONArray("history") ?: return emptyList()
         val count = minOf(rows.length(), historyLimit)
-        List(count) { offset ->
-            val index = rows.length() - count + offset
-            val row = rows.getJSONObject(index)
+        return List(count) { offset ->
+            val row = rows.getJSONObject(rows.length() - count + offset)
             val source = row.getString("source")
             val translation = row.getString("translation")
-            TimedPair(Pair(source, if (originalOnly && source == translation) "" else translation),
-                row.optLong("createdAt").takeIf { it > 0 })
+            TimedPair(Pair(source, if (originalOnly && source == translation) "" else translation,
+                row.optString("audioSource", audioSource)), row.optLong("createdAt").takeIf { it > 0 })
         }
     }
     fun onStatus(line: String) { statusLine = line; notifyListeners() }
@@ -168,6 +234,8 @@ object SubtitleBus {
             // The shared current complete pair stays readable until replaced
             // or the session ends, even when saved history is disabled.
             if (snapshot.optJSONObject("displayPair") != null) return
+            val tracks = snapshot.optJSONArray("tracks")
+            if (tracks != null && (0 until tracks.length()).any { tracks.getJSONObject(it).optJSONObject("displayPair") != null }) return
             liveHidden = true
         }
         notifyListeners()
@@ -176,6 +244,8 @@ object SubtitleBus {
         synchronized(lock) {
             state = null
             runtimeOwned = false
+            runtimeSnapshots.clear()
+            runtimeStopped = false
             atomicPreview = false
             runtimeFeedback = RuntimeFeedback()
             snapshot = JSONObject()

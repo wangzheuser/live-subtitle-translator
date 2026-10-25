@@ -6867,6 +6867,14 @@ mod lifecycle_tests {
     fn only_transient_transport_and_bounded_queue_errors_recover() {
         for code in [
             "transport_error",
+            // The desktop event pump receives recognizer error labels before
+            // the adapter has normalized their code.
+            "custom_speech_unreachable",
+            "custom_speech_not_connected",
+            "custom_speech_health_timeout",
+            "gemini_transcribe_unreachable",
+            "gemini_transcribe_not_connected",
+            "gemini_transcribe_health_timeout",
             "provider_event_backlog_overflow",
             "translation_backlog_overflow",
             "translation_rate_limited",
@@ -6880,6 +6888,17 @@ mod lifecycle_tests {
             "translation_authentication_failed"
         ));
         assert!(!provider_error_is_retryable("translation_failed"));
+        for code in [
+            "custom_speech_authentication_failed",
+            "gemini_transcribe_authentication_failed",
+            "custom_speech_endpoint_invalid",
+            "gemini_transcribe_language_unsupported",
+            "custom_speech_protocol_invalid",
+            "gemini_transcribe_protocol_invalid",
+            "unrecognized_provider_error",
+        ] {
+            assert!(!provider_error_is_retryable(code), "{code}");
+        }
     }
 
     #[test]

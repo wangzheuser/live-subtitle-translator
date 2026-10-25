@@ -33,7 +33,7 @@ const XAI_TRANSLATION_HELP = {
 
 /** Shared speech/text editor. Independent text destinations own their credentials and drafts. */
 export function SpeechAndTextCredentialEditor({ profile, inputId, disabled, busy, visible = true, feedback, onSave, onRequestDelete, onConfirmDelete, confirmingDelete, onCancelDelete, connectionCheck, textConnectionCheck, textOnly = false, storageNoteId, onSaveTranslationName, sourceLanguage = "auto", targetLanguage = "original", requiresStop = false, onNativeTranslationBusyChange, onNativeTranslationPrepared, translationLanguageControls }: {
-  xaiModeSettings?: ReactNode;
+  speechModeSettings?: ReactNode;
   onSaveTranslationName?: (route: TextTranslationNameDraft["route"], name: string) => Promise<unknown>;
   connectionCheck?: ReactNode | ((draft?: ProviderCredentialsInput | null, sourceLanguage?: SourceLanguage) => ReactNode);
   textConnectionCheck?: (draft?: ProviderCredentialsInput | null) => ReactNode;

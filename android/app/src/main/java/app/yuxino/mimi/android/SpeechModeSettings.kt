@@ -11,42 +11,52 @@ import com.google.android.material.button.MaterialButton
 import org.json.JSONObject
 
 /** Native recognition editor and diagnostic lifecycle. Text translation has its own editor and key. */
-internal class XaiSpeechSettings(
+internal class SpeechModeSettings(
     private val activity: AppCompatActivity,
     saved: ServiceConfiguration,
     draft: ServiceEditorDraft?,
     private val configuration: () -> JSONObject?,
     private val modeChanged: () -> Unit,
 ) {
+    private val xai = saved.provider == ServiceProvider.XAI
+    private val modeLabel = if (xai) R.string.xai_mode else R.string.speech_translation_mode
     private val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
     private val mode = Spinner(activity).apply {
-        tag = "xai-mode"; background = null
+        tag = if (xai) "xai-mode" else "speech-translation-mode"; background = null
         adapter = ArrayAdapter(activity, R.layout.mimi_spinner_item,
-            listOf(activity.getString(R.string.xai_asr_mt), activity.getString(R.string.xai_voice))).apply {
+            if (xai) listOf(activity.getString(R.string.xai_asr_mt), activity.getString(R.string.xai_voice))
+            else listOf(activity.getString(R.string.speech_translation_simultaneous), activity.getString(R.string.speech_translation_asr_mt))).apply {
             setDropDownViewResource(R.layout.mimi_spinner_dropdown)
         }
-        contentDescription = activity.getString(R.string.xai_mode)
-        setSelection(draft?.xaiMode ?: if (saved.xaiSpeechMode == "asrMt") 0 else 1)
+        contentDescription = activity.getString(modeLabel)
+        setSelection(if (xai) {
+            draft?.xaiMode ?: if (saved.xaiSpeechMode == "asrMt") 0 else 1
+        } else {
+            draft?.speechTranslationMode ?: if (saved.speechTranslationMode == "asrMt") 1 else 0
+        })
     }
     private val checks = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
     private var request: TranslationCall? = null
     private var generation = 0
     private val button = MaterialButton(activity, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-        tag = "xai-speech-check"; setText(R.string.xai_check_speech)
+        tag = if (xai) "xai-speech-check" else "speech-check"; setText(R.string.xai_check_speech)
         setIconResource(R.drawable.ic_check); isAllCaps = false; textSize = 16f
         setOnClickListener { check() }
     }
     private val result = ServiceSettingsUi.label(activity, "", 16f).apply {
-        tag = "xai-speech-status"; visibility = View.GONE
+        tag = if (xai) "xai-speech-status" else "speech-status"; visibility = View.GONE
         accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
     }
     val view: View get() = root
     val selectedPosition: Int get() = mode.selectedItemPosition
-    val speechMode: String get() = if (selectedPosition == 0) "asrMt" else "voice"
+    val speechMode: String get() = if (xai) {
+        if (selectedPosition == 0) "asrMt" else "voice"
+    } else if (selectedPosition == 0) "simultaneous" else "asrMt"
 
     init {
-        root.addView(HelpUi.heading(activity, activity.getString(R.string.xai_mode),
-            activity.getString(R.string.xai_help), 18f, "xai-mode-help"))
+        root.addView(HelpUi.heading(activity, activity.getString(modeLabel),
+            activity.getString(if (xai) R.string.xai_help else R.string.speech_translation_help), 18f,
+            if (xai) "xai-mode-help" else "speech-translation-mode-help"))
         root.addView(mode, LinearLayout.LayoutParams(-1, dp(56)))
         checks.addView(button, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.END })
         checks.addView(result, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.END; bottomMargin = dp(8) })

@@ -28,8 +28,32 @@ one verified same-profile migration; later deletion never borrows the speech key
 Original-only captions skip text credentials and requests. Grok Voice retains its
 integrated route and hides, without deleting, the independent selection.
 
-Android currently exposes independent recognition through Alibaba ASR and xAI
-ASR. This does not add desktop-only Apple/custom recognizer entry points there.
+Android also exposes independent recognition through Alibaba ASR and the
+OpenAI, Gemini and Azure ASR modes described below. Desktop-only Apple/custom
+recognizer entry points remain unavailable there.
+
+## OpenAI, Gemini and Azure speech modes
+
+Both platforms offer simultaneous translation and ASR + MT for OpenAI, Gemini
+and Azure OpenAI. New profiles and profiles without `speechTranslationMode`
+default to simultaneous translation. Mode changes require a stopped session.
+Switching hides, without deleting, the saved independent text destination, its
+credentials and proxy. Simultaneous sessions never use that hidden destination.
+
+ASR + MT uses the existing shared recognition/MT pipeline and independent text
+editor. OpenAI uses dedicated realtime transcription; Azure uses the configured
+transcription deployment and resource API key; Gemini uses dedicated Live
+transcription. Azure ASR does not require a translation deployment. Switching
+back preserves editable saved fields while refusing to start simultaneous
+translation until that deployment is supplied. Recognition and text checks
+resolve only their own credentials; original-only captions require no MT setup.
+
+Recognition hints and exact wire spellings come from
+`shared/provider-language-catalogs.json`. Gemini uses its published BCP-47
+catalog. The OpenAI/Azure explicit hint picker currently exposes the examples
+documented by the realtime transcription guide, not a claimed full model
+language catalog; automatic detection remains available. Selected text services
+further restrict language choices according to their own capability contract.
 
 ## Native audio target differences
 
@@ -159,14 +183,14 @@ Android production route.
 
 | Area | Desktop | Android |
 | --- | --- | --- |
-| Independent text services | DeepL, DeepLX, ChatMock, OpenAI compatible; original-only with custom ASR | Same shared text clients after Audio3 ASR; original-only supported |
+| Independent text services | DeepL, DeepLX, ChatMock, OpenAI compatible; original-only with independent recognition | Same shared text clients with Alibaba, xAI, OpenAI, Gemini and Azure ASR; original-only supported |
 | Text service display names | Optional names per profile and independent route; shown in settings and subtitle service label | Existing provider labels |
-| Recognition selection | Eight built-in services plus custom DashScope/OpenAI ASR and Apple Speech on supported Apple silicon Macs running macOS 26+; optional per-profile user declaration narrows custom recognition languages | Eight built-in adapters; independent text currently pairs with Alibaba ASR; no custom speech profile/declaration editor |
+| Recognition selection | Eight built-in services plus custom DashScope/OpenAI ASR and Apple Speech on supported Apple silicon Macs running macOS 26+; optional per-profile user declaration narrows custom recognition languages | Eight built-in adapters; independent text pairs with Alibaba, xAI, OpenAI, Gemini and Azure ASR; no custom speech profile/declaration editor |
 | Profile activation languages | Optional saved source/target pair per configuration; defaults to keeping current languages. Temporary session changes do not rewrite the pair | No saved profile-language pair editor |
 | Active configuration/model changes | Saved profiles can switch through reconnect; editing a model requires Stop | Service/model editors require Stop and reject stale Save actions; Captions and expanded controls show the session's actual shared-factory model list |
 | Runtime recovery feedback | Shared connection/retry/timeout state in native UI | Same shared state, localized in floating subtitles; capture-no-audio guidance takes priority |
 | Apple local recognition | One language selector with runtime resource status; explicit Download and use prepares and applies a missing language, while ready languages can be applied directly; no speech API key; independent text translation keeps its own service and credentials | Not available; no Apple API or asset-management dependency |
-| Apple local text translation | Apple silicon with macOS 26+: runtime language-pair availability, explicit in-app model preparation, installed-only translation without API keys or a text proxy; pairs with Apple/custom/Alibaba recognition | Not available; Apple Translation is a native macOS adapter, not a shared HTTP provider |
+| Apple local text translation | Apple silicon with macOS 26+: runtime language-pair availability, explicit in-app model preparation, installed-only translation without API keys or a text proxy; pairs with independent recognition | Not available; Apple Translation is a native macOS adapter, not a shared HTTP provider |
 | Alibaba modes | New profiles default to simultaneous translation (LiveTranslate), with automatic source detection and 60 represented text-translation targets. ASR + MT remains selectable; existing and copied profiles retain their mode | Same two modes and shared capabilities; new configurations default to simultaneous translation. Existing profiles migrate as ASR + MT; each profile keeps its mode, workspace and independent translator |
 | Alibaba ASR + MT pipeline | Audio 3.0: 30 explicit recognition hints plus automatic detection; Qwen-MT retains its model-specific target catalog | Same Audio3 + Qwen-MT factory, models and capability normalization |
 | Translation scheduling | Speculative drafts plus serial prioritized finals and provider recovery | Same Rust speculative preview, final priority, queues, retry/cooldown and MT budget continuity |
@@ -183,7 +207,7 @@ Android production route.
 | Saved configurations | Multiple named profiles, including the same provider | Multiple named profiles with independent encrypted credentials and translators; Add, Settings, Duplicate and Delete, with tap-to-select. Legacy provider settings migrate once; saving an edit does not switch the active profile |
 | Saved service selection | Settings, tray and subtitle controls can switch during listening via reconnect; pause and confirmed subtitles persist. A recording cannot switch PCM sample rate | Tap a saved configuration in the list to select it; switching/editing requires Stop. Order remains stable; deleting the active profile selects the first remaining entry |
 | Proxy preferences | Per-profile independent recognition/text routes; integrated realtime uses one route | Shared network transport with immutable Android platform proxy/trust snapshots; no per-stage proxy UI |
-| Gemini planned connection rotation | Prepare one replacement after GoAway, bounded old-tail drain and up to two seconds of PCM staging; shorter Gemini live preview cadence | Same Rust Gemini client, replacement-socket handoff and preview cadence |
+| Gemini simultaneous connection rotation | Prepare one replacement after GoAway, bounded old-tail drain and up to two seconds of PCM staging; shorter Gemini live preview cadence | Same Rust Gemini client, replacement-socket handoff and preview cadence; ASR mode uses the shared transcription client and recovery policy |
 | Secret storage | Private local credential file; one-time OS-store migration | Private profile metadata file and separate Android Keystore-backed encrypted credential revisions; legacy settings migrate only after verified durable writes |
 | Local HTTP | Existing loopback endpoint validation | Explicit per-config opt-in and Android network allowlist; includes emulator host |
 | History/recording | Optional bounded local files and selected-input recordings; saved-session names and name/text/audio filters, original/translation/bilingual reading and passage copy, TXT/Markdown export with content and optional confirmation times, WAV export. Saved sessions can export during capture; inline playback with pause and seeking requires Stop, and includes current audio only while it remains available. Confirmed panel rows retain their existing bound across stop/start. The display-count choice defaults to All; recent 1–10 confirmed subtitles apply only while following live speech, and scrolling up opens the existing bounded history. This display projection does not truncate saved files or exports. | Bounded in-memory subtitle history defaults to three confirmed captions on fresh installs; existing settings and the legacy zero default are preserved. Capture starts clear its overlay. No matching library, recording or export UI; shared formatter and actual JNI checks verify compatibility, not Android export support |

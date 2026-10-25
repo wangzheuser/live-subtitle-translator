@@ -344,8 +344,8 @@ class MainActivity : AppCompatActivity() {
         val translation = SettingsStore.textTranslationProvider(this)
         val speech = SettingsStore.configuration(this)
         val mode = speech.alibabaRealtimeMode
-        val choices = if (source) provider.sourcesForTranslation(translation, mode, speech.xaiSpeechMode)
-            else provider.targetsForTranslation(translation, mode, speech.xaiSpeechMode).filter { provider.supportsPair(effectiveSource, it, translation, mode, speech.xaiSpeechMode) }
+        val choices = if (source) provider.sourcesForTranslation(translation, mode, speech.xaiSpeechMode, speech.speechTranslationMode)
+            else provider.targetsForTranslation(translation, mode, speech.xaiSpeechMode, speech.speechTranslationMode).filter { provider.supportsPair(effectiveSource, it, translation, mode, speech.xaiSpeechMode, speech.speechTranslationMode) }
         val dialog = BottomSheetDialog(this)
         val content = layoutInflater.inflate(R.layout.language_sheet, FrameLayout(this), false)
         content.findViewById<LinearLayout>(R.id.language_help_heading).addView(HelpUi.heading(this,
@@ -397,14 +397,14 @@ class MainActivity : AppCompatActivity() {
     private fun effectiveLanguages(): Pair<String, String> {
         val config = SettingsStore.configuration(this)
         return config.provider.normalize(SettingsStore.sourceLang(this), SettingsStore.targetLang(this),
-            SettingsStore.textTranslationProvider(this), config.alibabaRealtimeMode, config.xaiSpeechMode)
+            SettingsStore.textTranslationProvider(this), config.alibabaRealtimeMode, config.xaiSpeechMode, config.speechTranslationMode)
     }
 
     private fun saveLanguage(source: Boolean, code: String) {
         if (source) SettingsStore.setSourceLang(this, code) else SettingsStore.setTargetLang(this, code)
         val provider = app.yuxino.mimi.android.provider.ServiceProvider.fromId(SettingsStore.provider(this))
         val speech = SettingsStore.configuration(this)
-        val (from, to) = provider.normalize(SettingsStore.sourceLang(this), SettingsStore.targetLang(this), SettingsStore.textTranslationProvider(this), speech.alibabaRealtimeMode, speech.xaiSpeechMode)
+        val (from, to) = provider.normalize(SettingsStore.sourceLang(this), SettingsStore.targetLang(this), SettingsStore.textTranslationProvider(this), speech.alibabaRealtimeMode, speech.xaiSpeechMode, speech.speechTranslationMode)
         SettingsStore.setSourceLang(this, from)
         SettingsStore.setTargetLang(this, to)
     }

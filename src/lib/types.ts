@@ -259,6 +259,7 @@ export type CredentialState = "present" | "missing" | "unavailable";
 
 export type ProfileNetworkProxyDraft = Partial<Pick<ServiceProfile, "speechNetworkProxy" | "textNetworkProxy">>;
 export type XAISpeechMode = "voice" | "asrMt";
+export type SpeechTranslationMode = "simultaneous" | "asrMt";
 export type AlibabaRealtimeMode = "disabled" | "liveTranslate";
 export type QwenMTModel = "lite" | "flash" | "plus";
 export type TextTranslationNameDraft = { route: Exclude<TextTranslation, "followService">; name: string };
@@ -267,6 +268,8 @@ export type ProfileOptionsDraft = ProfileNetworkProxyDraft & {
   qwenMtModel?: QwenMTModel;
   /** Historical profiles keep Grok Voice; new profiles explicitly select ASR + text translation. */
   xaiSpeechMode?: XAISpeechMode;
+  /** OpenAI, Gemini and Azure use simultaneous translation when absent. */
+  speechTranslationMode?: SpeechTranslationMode;
   /** Opt-in integrated audio route; historical profiles keep ASR + MT. */
   alibabaRealtimeMode?: AlibabaRealtimeMode;
   /** Non-secret Beijing workspace identifier; required by experimental realtime models. */
@@ -287,6 +290,8 @@ export interface ServiceProfile {
   qwenMtModel?: QwenMTModel;
   /** Historical profiles keep Grok Voice; new profiles explicitly select ASR + text translation. */
   xaiSpeechMode?: XAISpeechMode;
+  /** OpenAI, Gemini and Azure use simultaneous translation when absent. */
+  speechTranslationMode?: SpeechTranslationMode;
   /** Read compatibility only; text models belong to the independent translation configuration. */
   xaiTextModel?: string;
   /** Opt-in integrated audio route; historical profiles keep ASR + MT. */
@@ -337,6 +342,8 @@ export type AppleTranslationStatus = "installed" | "supported" | "unsupported" |
 
 export interface LanguageCapabilitiesSnapshot {
   xaiSpeechMode?: XAISpeechMode;
+  /** OpenAI, Gemini and Azure use simultaneous translation when absent. */
+  speechTranslationMode?: SpeechTranslationMode;
   /** Selected model used to derive this native catalog. */
   qwenMtModel?: QwenMTModel;
   profileId: string;

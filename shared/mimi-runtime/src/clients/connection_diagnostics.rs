@@ -169,13 +169,13 @@ pub async fn check_speech_service(
     let started = Instant::now();
     initialize_probe_tls();
     let result = match configuration.provider {
-        ProviderKind::XAIRealtime if configuration.uses_xai_asr() => {
+        _ if configuration.uses_independent_asr() => {
             match (
                 ProviderNetwork::resolve(&configuration.network_proxy),
                 ProviderNetwork::resolve(&configuration.text_network_proxy),
             ) {
                 (Ok(speech), Ok(text)) => {
-                    probe_xai_speech(configuration, include_translation, speech, text).await
+                    probe_independent_speech(configuration, include_translation, speech, text).await
                 }
                 _ => Err(ConnectionCheckReason::InvalidConfiguration),
             }
@@ -211,7 +211,7 @@ pub async fn check_xai_speech_with_network(
     text_network: ProviderNetwork,
 ) -> ConnectionDiagnostic {
     let started = Instant::now();
-    let result = probe_xai_speech(
+    let result = probe_independent_speech(
         configuration,
         include_translation,
         speech_network,
@@ -221,21 +221,34 @@ pub async fn check_xai_speech_with_network(
     timed_diagnostic(result, started)
 }
 
-async fn probe_xai_speech(
+pub async fn check_independent_speech_with_network(
+    configuration: &LiveTranslationConfiguration,
+    include_translation: bool,
+    speech_network: ProviderNetwork,
+    text_network: ProviderNetwork,
+) -> ConnectionDiagnostic {
+    let started = Instant::now();
+    let result = probe_independent_speech(
+        configuration,
+        include_translation,
+        speech_network,
+        text_network,
+    )
+    .await;
+    timed_diagnostic(result, started)
+}
+
+async fn probe_independent_speech(
     configuration: &LiveTranslationConfiguration,
     include_translation: bool,
     speech_network: ProviderNetwork,
     text_network: ProviderNetwork,
 ) -> Result<(), ConnectionCheckReason> {
-    if !configuration.uses_xai_asr() {
+    if !configuration.uses_independent_asr() {
         return Err(ConnectionCheckReason::InvalidConfiguration);
     }
-    let key = configuration
-        .credentials
-        .direct_api_key()
-        .ok_or(ConnectionCheckReason::InvalidConfiguration)?;
-    let mut asr = RecognitionClient::xai(key, configuration.source_language)
-        .map_err(|error| recognition_reason(&error))?;
+    let mut asr =
+        RecognitionClient::standalone(configuration).map_err(|error| recognition_reason(&error))?;
     asr.set_network(speech_network)
         .map_err(|_| ConnectionCheckReason::InvalidConfiguration)?;
     let (events, _receiver) = provider_event_channel();

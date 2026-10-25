@@ -14,12 +14,16 @@ data class ServiceProfile(val id: String, val name: String, val provider: Servic
 internal class ProfileContents(
     val speech: ServiceConfiguration,
     val selectedTranslation: TextTranslationProvider = if (speech.provider == ServiceProvider.XAI && speech.usesIndependentTextTranslation)
-        TextTranslationProvider.XAI else TextTranslationProvider.BUILTIN,
+        TextTranslationProvider.XAI else if (speech.provider.supportsSpeechTranslationMode) TextTranslationProvider.OPENAI_COMPATIBLE
+        else TextTranslationProvider.BUILTIN,
     val translations: Map<TextTranslationProvider, TranslationConfiguration> = emptyMap(),
     val qwenMtModel: String = "lite",
     val xaiIndependentTranslationMigrated: Boolean = true,
 ) {
     override fun toString() = "ProfileContents(redacted)"
+    val effectiveTranslation: TextTranslationProvider get() =
+        if (speech.provider.supportsSpeechTranslationMode && selectedTranslation == TextTranslationProvider.BUILTIN)
+            TextTranslationProvider.OPENAI_COMPATIBLE else selectedTranslation
 
     /** One-time, same-profile compatibility projection. Ordinary route reads never borrow a speech key. */
     fun withIndependentXaiTranslation(): ProfileContents {
@@ -71,7 +75,7 @@ internal class ServiceProfileRepository(private val disk: ProfilePersistence) {
             return ProfileContents(ServiceConfiguration(entry.profile.provider, credentials,
                 speech.getString("endpoint"), speech.getString("model"), speech.optString("alibabaRealtimeMode", "asrMt"),
                 speech.optString("alibabaWorkspaceId"), speech.optString("xaiSpeechMode", "voice"),
-                speech.optString("xaiTextModel", "grok-4.3")),
+                speech.optString("xaiTextModel", "grok-4.3"), speech.optString("speechTranslationMode", "simultaneous")),
                 TextTranslationProvider.fromStorageId(entry.details.getString("selectedTranslation")), translations,
                 entry.details.getString("qwenMtModel"), entry.details.optBoolean("xaiIndependentTranslationMigrated", false))
         } catch (_: Exception) {
@@ -155,7 +159,7 @@ internal class ServiceProfileRepository(private val disk: ProfilePersistence) {
         val speech = contents.speech
         val details = JSONObject().put("speech", JSONObject().put("endpoint", speech.endpoint).put("model", speech.model)
             .put("alibabaRealtimeMode", speech.alibabaRealtimeMode).put("alibabaWorkspaceId", speech.alibabaWorkspaceId)
-            .put("xaiSpeechMode", speech.xaiSpeechMode).put("xaiTextModel", speech.xaiTextModel))
+            .put("xaiSpeechMode", speech.xaiSpeechMode).put("xaiTextModel", speech.xaiTextModel).put("speechTranslationMode", speech.speechTranslationMode))
             .put("selectedTranslation", contents.selectedTranslation.storageId).put("qwenMtModel", contents.qwenMtModel)
             .put("xaiIndependentTranslationMigrated", contents.xaiIndependentTranslationMigrated)
             .put("translations", JSONObject().apply { contents.translations.forEach { (provider, value) ->

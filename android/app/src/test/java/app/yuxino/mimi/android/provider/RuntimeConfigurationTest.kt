@@ -7,6 +7,46 @@ class RuntimeConfigurationTest {
     private val alibaba = ServiceConfiguration(ServiceProvider.DASHSCOPE, mapOf("apiKey" to "synthetic-speech-key"),
         "wss://legacy.example.invalid/realtime", "qwen3.5-livetranslate-flash-realtime")
 
+    @Test fun realtimeModesDefaultToSimultaneousAndKeepTextKeysIndependent() {
+        for (provider in listOf(ServiceProvider.OPENAI, ServiceProvider.GEMINI, ServiceProvider.AZURE)) {
+            val values = provider.fields.associate { it.id to "synthetic-${it.id}" }
+            val simultaneous = ServiceConfiguration(provider, values)
+            val asr = ServiceConfiguration(provider, values, speechTranslationMode = "asrMt")
+            val translator = TranslationConfiguration(provider = TextTranslationProvider.XAI,
+                model = "grok-independent", apiKey = "synthetic-text-key")
+            assertEquals("simultaneous", simultaneous.speechTranslationMode)
+            assertFalse(simultaneous.usesIndependentTextTranslation)
+            assertTrue(asr.usesIndependentTextTranslation)
+            val integrated = buildRuntimeConfiguration(simultaneous, translator, "auto", "zh", "lite")
+            assertEquals("simultaneous", integrated.getString("speechTranslationMode"))
+            assertTrue(integrated.isNull("textCredentials"))
+            val independent = buildRuntimeConfiguration(asr, translator, "en", "zh", "lite")
+            assertEquals("asrMt", independent.getString("speechTranslationMode"))
+            assertEquals("synthetic-apiKey", independent.getJSONObject("credentials").getString("apiKey"))
+            assertEquals("synthetic-text-key", independent.getJSONObject("textCredentials").getString("apiKey"))
+            val probe = buildSpeechProbeConfiguration(asr, "en")
+            assertEquals("original", probe.getString("targetLanguage"))
+            assertTrue(probe.isNull("textCredentials"))
+            val original = buildRuntimeConfiguration(asr, TranslationConfiguration(provider = TextTranslationProvider.NONE), "en", "zh", "lite")
+            assertEquals("original", original.getString("targetLanguage"))
+            assertTrue(original.isNull("textCredentials"))
+        }
+    }
+
+    @Test fun azureRecognitionNeedsNoTranslationDeploymentButRestoredSimultaneousDoes() {
+        val values = mapOf("endpoint" to "https://synthetic.openai.azure.com", "transcriptionDeployment" to "synthetic-asr", "apiKey" to "synthetic-key")
+        val asr = ServiceConfiguration(ServiceProvider.AZURE, values, speechTranslationMode = "asrMt")
+        assertTrue(ServiceProvider.AZURE.configured(values, "asrMt"))
+        assertFalse(ServiceProvider.AZURE.configured(values))
+        assertEquals("", buildSpeechProbeConfiguration(asr, "en").getJSONObject("credentials").getString("deployment"))
+        assertThrows(IllegalArgumentException::class.java) {
+            buildRuntimeConfiguration(ServiceConfiguration(ServiceProvider.AZURE, values), TranslationConfiguration(), "en", "zh", "lite")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            buildSpeechProbeConfiguration(ServiceConfiguration(ServiceProvider.AZURE, values - "transcriptionDeployment", speechTranslationMode = "asrMt"), "en")
+        }
+    }
+
     @Test fun xaiSpeechAndGrokTextKeepIndependentKeysAndModelsWhileVoiceIgnoresTheTranslator() {
         val voice = ServiceConfiguration(ServiceProvider.XAI, mapOf("apiKey" to "synthetic-xai-key"))
         val streaming = ServiceConfiguration(ServiceProvider.XAI, voice.credentials, xaiSpeechMode = "asrMt")
@@ -33,7 +73,7 @@ class RuntimeConfigurationTest {
 
     @Test fun recognitionProbeOwnsOnlySpeechFieldsAndTextProbeOwnsOnlyTextFields() {
         val speech = ServiceConfiguration(ServiceProvider.XAI, mapOf("apiKey" to "synthetic-current-key"), xaiSpeechMode = "asrMt")
-        val recognition = buildXaiProbeConfiguration(speech, "en")
+        val recognition = buildSpeechProbeConfiguration(speech, "en")
         assertEquals("original", recognition.getString("targetLanguage"))
         assertEquals("synthetic-current-key", recognition.getJSONObject("credentials").getString("apiKey"))
         assertEquals("en", recognition.getString("sourceLanguage"))

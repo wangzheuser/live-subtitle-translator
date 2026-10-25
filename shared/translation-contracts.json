@@ -16583,5 +16583,101 @@
         }
       ]
     }
+  ],
+  "geminiStreamingTranscripts": [
+    {
+      "id": "interims-are-replaceable-finals-authoritative",
+      "frames": [
+        {
+          "serverContent": {
+            "interimInputTranscription": {
+              "text": "A draft"
+            }
+          }
+        },
+        {
+          "serverContent": {
+            "interimInputTranscription": {
+              "text": "A corrected draft"
+            }
+          }
+        },
+        {
+          "serverContent": {
+            "inputTranscription": {
+              "text": "A final."
+            }
+          }
+        },
+        {
+          "serverContent": {
+            "inputTranscription": {
+              "text": "Next final."
+            },
+            "turnComplete": true
+          }
+        }
+      ],
+      "expectedOutputs": [
+        [
+          {
+            "sequence": 0,
+            "text": "A draft",
+            "isFinal": false
+          }
+        ],
+        [
+          {
+            "sequence": 0,
+            "text": "A corrected draft",
+            "isFinal": false
+          }
+        ],
+        [
+          {
+            "sequence": 0,
+            "text": "A final.",
+            "isFinal": true
+          }
+        ],
+        [
+          {
+            "sequence": 1,
+            "text": "Next final.",
+            "isFinal": true
+          }
+        ]
+      ]
+    },
+    {
+      "id": "final-in-same-frame-supersedes-interim",
+      "frames": [
+        {
+          "serverContent": {
+            "interimInputTranscription": {
+              "text": "superseded"
+            },
+            "inputTranscription": {
+              "text": "Authoritative."
+            }
+          }
+        },
+        {
+          "serverContent": {
+            "turnComplete": true
+          }
+        }
+      ],
+      "expectedOutputs": [
+        [
+          {
+            "sequence": 0,
+            "text": "Authoritative.",
+            "isFinal": true
+          }
+        ],
+        []
+      ]
+    }
   ]
 }

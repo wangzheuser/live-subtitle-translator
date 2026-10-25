@@ -37,6 +37,8 @@ val sharedCoreNativeInputs = files(
     fileTree(repositoryRoot.resolve("shared/mimi-android-jni")) { include("Cargo.toml", "Cargo.lock", "build.rs", "src/**", ".cargo/**") },
     fileTree(repositoryRoot.resolve(".cargo")) { include("config", "config.toml") },
     fileTree(repositoryRoot.resolve("shared/.cargo")) { include("config", "config.toml") },
+    repositoryRoot.resolve("shared/provider-language-catalogs.json"),
+    repositoryRoot.resolve("shared/translation-contracts.json"),
     repositoryRoot.resolve("scripts/build-shared-core.py"),
     repositoryRoot.resolve("scripts/verify-shared-core.py"),
     repositoryRoot.resolve("scripts/check-shared-runtime.py"),

@@ -14,6 +14,7 @@ import android.widget.Spinner
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatDelegate
 import app.yuxino.mimi.android.capture.MimiService
+import app.yuxino.mimi.android.provider.ServiceProvider
 import app.yuxino.mimi.android.provider.TextTranslationProvider
 import com.google.android.material.textfield.TextInputEditText
 import java.io.File
@@ -30,6 +31,7 @@ internal class ServiceProfileChecks(private val test: Instrumentation) {
     private lateinit var home: MainActivity
 
     fun run(arguments: Bundle?) {
+        if (arguments?.getString("realtime_modes") == "true") { runRealtimeModes(); return }
         var failure: String? = null
         var failureClass: String? = null
         var failureLocation: String? = null
@@ -234,6 +236,7 @@ internal class ServiceProfileChecks(private val test: Instrumentation) {
             check(SettingsStore.profiles(context).isEmpty() && SettingsStore.activeProfileId(context) == null)
             awaitHomeTag("add-dashscope")
             check(field<View>(home, "add-dashscope").isShown)
+            checkRealtimeModes()
             stage = "unreadable_catalog_is_not_empty_setup"
             val persistence = AndroidProfilePersistence(context)
             val originalCatalog = checkNotNull(persistence.readCatalog())
@@ -310,10 +313,126 @@ internal class ServiceProfileChecks(private val test: Instrumentation) {
         })
     }
 
+    /** Scope only new synthetic profiles; existing metadata, active choice and secrets are untouched. */
+    private fun runRealtimeModes() {
+        var failure: String? = null
+        var failureClass: String? = null
+        var failureLocation: String? = null
+        var ownsFixture = false
+        val before = SettingsStore.profiles(context)
+        val activeBefore = SettingsStore.activeProfileId(context)
+        try {
+            stage = "debug_build"
+            check(context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0)
+            stage = "session_stopped"
+            check(!MimiService.isRunning && !MimiService.isStopping)
+            check(before.size < 20)
+            ownsFixture = true
+            checkRealtimeModes()
+            stage = "existing_profiles_preserved"
+            check(SettingsStore.profiles(context) == before)
+            check(SettingsStore.activeProfileId(context) == activeBefore)
+        } catch (error: Throwable) {
+            failure = stage; failureClass = error.javaClass.simpleName
+            failureLocation = error.stackTrace.filter { it.className.startsWith("app.yuxino.mimi.android") }
+                .take(3).joinToString(">") { "${it.fileName}:${it.lineNumber}" }
+        } finally {
+            if (ownsFixture) {
+                onUi {
+                    runningFixture(false); stoppingFixture(false)
+                    activities.forEach { if (!it.isFinishing) it.finish() }
+                }
+                SettingsStore.profiles(context).filter { it.id in created }.forEach {
+                    if (!SettingsStore.deleteProfile(context, it.id)) failure = "fixture_cleanup"
+                }
+                if (SettingsStore.profiles(context) != before || SettingsStore.activeProfileId(context) != activeBefore)
+                    failure = "existing_profiles_changed"
+            }
+        }
+        test.finish(if (failure == null) Activity.RESULT_OK else Activity.RESULT_CANCELED, Bundle().apply {
+            putString("stream", "Realtime modes UI passed=${failure == null}; failureStage=${failure ?: "none"}; errorClass=${failureClass ?: "none"}; location=${failureLocation ?: "none"}; providers=3; originalProfiles=${before.size}; synthetic credentials only, no activation, provider requests or capture.\n")
+        })
+    }
+
+    private fun checkRealtimeModes() {
+        for (provider in listOf(ServiceProvider.OPENAI, ServiceProvider.GEMINI, ServiceProvider.AZURE)) {
+            stage = "${provider.id}_mode_defaults"
+            val beforeIds = SettingsStore.profiles(context).map { it.id }.toSet()
+            val editor = test.startActivitySync(Intent(context, ServiceSettingsActivity::class.java)
+                .putExtra("provider", provider.id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ServiceSettingsActivity
+            activities += editor; test.waitForIdleSync()
+            onUi {
+                check(field<Spinner>(editor, "speech-translation-mode").selectedItemPosition == 0)
+                check(!field<Spinner>(editor, "translation-mode").isShown)
+                field<TextInputEditText>(editor, "profile-name").setText("Synthetic ${provider.id}")
+                field<TextInputEditText>(editor, "credential-apiKey").setText("synthetic-speech-key")
+                if (provider == ServiceProvider.AZURE) {
+                    field<TextInputEditText>(editor, "credential-endpoint").setText("https://synthetic.openai.azure.com")
+                    field<TextInputEditText>(editor, "credential-transcriptionDeployment").setText("synthetic-asr")
+                }
+                field<Spinner>(editor, "speech-translation-mode").setSelection(1)
+            }
+            test.waitForIdleSync()
+            stage = "${provider.id}_independent_draft"
+            onUi {
+                check(field<Spinner>(editor, "translation-mode").isShown)
+                check(field<View>(editor, "speech-check").isShown)
+                if (provider == ServiceProvider.AZURE) check(!field<View>(editor, "credential-deployment").isShown)
+                field<TextInputEditText>(editor, "translation-endpoint").setText("https://synthetic.example.invalid/v1")
+                field<TextInputEditText>(editor, "translation-model").setText("synthetic-text-model")
+                field<TextInputEditText>(editor, "translation-key").setText("synthetic-text-key")
+                field<Spinner>(editor, "speech-translation-mode").setSelection(0)
+            }
+            test.waitForIdleSync()
+            onUi {
+                check(!field<Spinner>(editor, "translation-mode").isShown)
+                if (provider == ServiceProvider.AZURE) check(field<View>(editor, "credential-deployment").isShown)
+                field<Spinner>(editor, "speech-translation-mode").setSelection(1)
+            }
+            test.waitForIdleSync()
+            onUi {
+                check(field<TextInputEditText>(editor, "translation-key").text.toString() == "synthetic-text-key")
+                runningFixture(true)
+                ServiceSettingsActivity::class.java.getDeclaredMethod("refreshSessionUi").apply { isAccessible = true; invoke(editor) }
+                check(!field<Spinner>(editor, "speech-translation-mode").isEnabled)
+                check(!field<View>(editor, "speech-check").isEnabled)
+                runningFixture(false)
+                ServiceSettingsActivity::class.java.getDeclaredMethod("refreshSessionUi").apply { isAccessible = true; invoke(editor) }
+            }
+            save(editor)
+            val id = SettingsStore.profiles(context).single { it.id !in beforeIds }.id.also(created::add)
+            check(SettingsStore.profileConfiguration(context, id).speechTranslationMode == "asrMt")
+            check(SettingsStore.profileTranslationConfiguration(context, id).apiKey == "synthetic-text-key")
+            stage = "${provider.id}_simultaneous_restore"
+            val restore = test.startActivitySync(Intent(context, ServiceSettingsActivity::class.java)
+                .putExtra("profileId", id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ServiceSettingsActivity
+            activities += restore; test.waitForIdleSync()
+            onUi {
+                check(field<Spinner>(restore, "speech-translation-mode").selectedItemPosition == 1)
+                check(field<TextInputEditText>(restore, "translation-model").text.toString() == "synthetic-text-model")
+                field<Spinner>(restore, "speech-translation-mode").setSelection(0)
+            }
+            test.waitForIdleSync()
+            if (provider == ServiceProvider.AZURE) onUi {
+                check(field<TextInputEditText>(restore, "credential-endpoint").text.toString() == "https://synthetic.openai.azure.com")
+                check(field<TextInputEditText>(restore, "credential-transcriptionDeployment").text.toString() == "synthetic-asr")
+                check(field<TextInputEditText>(restore, "credential-deployment").text.isNullOrBlank())
+                field<TextInputEditText>(restore, "credential-deployment").setText("synthetic-translate")
+            }
+            save(restore)
+            check(SettingsStore.profileConfiguration(context, id).speechTranslationMode == "simultaneous")
+            check(SettingsStore.profileConfiguration(context, id).value("apiKey") == "synthetic-speech-key")
+            check(SettingsStore.profileTranslationConfiguration(context, id).apiKey == "synthetic-text-key")
+            check(SettingsStore.deleteProfile(context, id))
+            if (::home.isInitialized) showList()
+        }
+    }
+
     private fun save(editor: ServiceSettingsActivity) {
+        val beforeIds = SettingsStore.profiles(context).map { it.id }.toSet()
         onUi { check(editor.findViewById<View>(R.id.save).performClick()) }
         test.waitForIdleSync()
-        SettingsStore.profiles(context).forEach { created += it.id }
+        SettingsStore.profiles(context).filter { it.id !in beforeIds }.forEach { created += it.id }
         check(editor.isFinishing)
     }
     private fun showList() {

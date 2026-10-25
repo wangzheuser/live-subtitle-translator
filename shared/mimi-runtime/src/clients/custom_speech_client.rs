@@ -18,7 +18,7 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio::sync::{watch, Mutex, Notify};
-use tokio::task::JoinHandle;
+use tokio::task::AbortHandle;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::Message;
@@ -74,8 +74,9 @@ struct ContentState {
 }
 
 struct Inner {
+    lifecycle: Mutex<()>,
     sink: Mutex<Option<Sink>>,
-    receive_task: Mutex<Option<JoinHandle<()>>>,
+    receive_task: std::sync::Mutex<Option<AbortHandle>>,
     audio_operation: Mutex<()>,
     content: std::sync::Mutex<ContentState>,
     generation: AtomicU64,
@@ -99,7 +100,47 @@ pub struct CustomSpeechClient {
     model: String,
     api_key: String,
     source: SourceLanguage,
+    azure_api_key: bool,
+    builtin_asr: bool,
     inner: Arc<Inner>,
+}
+
+/// Dropping an in-flight connection must close its socket even when the
+/// caller keeps the client for a later retry (for example a cancelled probe).
+struct ConnectAttempt {
+    inner: Arc<Inner>,
+    generation: u64,
+    complete: bool,
+}
+impl Drop for ConnectAttempt {
+    fn drop(&mut self) {
+        let retired = self.generation.wrapping_add(1);
+        if self.complete
+            || self
+                .inner
+                .generation
+                .compare_exchange(self.generation, retired, Ordering::SeqCst, Ordering::SeqCst)
+                .is_err()
+        {
+            return;
+        }
+        self.inner.ready.store(false, Ordering::SeqCst);
+        self.inner.closing.store(true, Ordering::SeqCst);
+        if let Some(receiver) = self.inner.receive_task.lock().unwrap().take() {
+            receiver.abort();
+        }
+        if let Ok(mut sink) = self.inner.sink.try_lock() {
+            sink.take();
+        } else if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            let inner = self.inner.clone();
+            runtime.spawn(async move {
+                let mut sink = inner.sink.lock().await;
+                if inner.generation.load(Ordering::SeqCst) == retired {
+                    sink.take();
+                }
+            });
+        }
+    }
 }
 
 impl CustomSpeechClient {
@@ -130,9 +171,12 @@ impl CustomSpeechClient {
             model,
             api_key: api_key.to_owned(),
             source,
+            azure_api_key: false,
+            builtin_asr: false,
             inner: Arc::new(Inner {
+                lifecycle: Mutex::new(()),
                 sink: Mutex::new(None),
-                receive_task: Mutex::new(None),
+                receive_task: std::sync::Mutex::new(None),
                 audio_operation: Mutex::new(()),
                 content: Default::default(),
                 generation: AtomicU64::new(0),
@@ -149,6 +193,55 @@ impl CustomSpeechClient {
                 before_final_publication: Default::default(),
             }),
         })
+    }
+
+    /// First-party OpenAI uses the same bounded transcription transport.
+    pub fn openai(api_key: &str, source: SourceLanguage) -> Result<Self, CustomSpeechClientError> {
+        if !crate::core::protocols::realtime_asr::supports_language(
+            ProviderKind::OpenAIRealtime,
+            source,
+        ) {
+            return Err(CustomSpeechClientError::InvalidModel);
+        }
+        let mut client = Self::new(
+            "wss://api.openai.com/v1/realtime",
+            "gpt-live-transcribe",
+            api_key,
+            source,
+        )?;
+        client.builtin_asr = true;
+        Ok(client)
+    }
+
+    /// Azure uses a resource-local transcription deployment and API-key header.
+    pub fn azure(
+        resource: &str,
+        deployment: &str,
+        api_key: &str,
+        source: SourceLanguage,
+    ) -> Result<Self, CustomSpeechClientError> {
+        let mut endpoint =
+            crate::core::protocols::azure_openai_realtime::AzureOpenAIRealtimeEndpoint::new(
+                resource, deployment,
+            )
+            .map_err(|_| CustomSpeechClientError::InvalidEndpoint)?
+            .url()
+            .clone();
+        endpoint.set_path("/openai/v1/realtime");
+        endpoint.set_query(None);
+        endpoint
+            .query_pairs_mut()
+            .append_pair("intent", "transcription");
+        let mut client = Self::new(
+            "wss://api.openai.com/v1/realtime",
+            deployment,
+            api_key,
+            source,
+        )?;
+        client.endpoint = endpoint;
+        client.azure_api_key = true;
+        client.builtin_asr = true;
+        Ok(client)
     }
 
     pub fn set_network(&mut self, network: ProviderNetwork) -> Result<(), ProviderNetworkError> {
@@ -178,8 +271,14 @@ impl CustomSpeechClient {
         &self,
         setup_timeout: Duration,
     ) -> Result<(), CustomSpeechClientError> {
-        self.disconnect().await;
+        let _lifecycle = self.inner.lifecycle.lock().await;
+        self.disconnect_locked().await;
         let generation = self.inner.generation.load(Ordering::SeqCst);
+        let mut attempt = ConnectAttempt {
+            inner: self.inner.clone(),
+            generation,
+            complete: false,
+        };
         let events = self
             .inner
             .events
@@ -194,9 +293,17 @@ impl CustomSpeechClient {
             .into_client_request()
             .map_err(|_| CustomSpeechClientError::InvalidEndpoint)?;
         request.headers_mut().insert(
-            "Authorization",
-            HeaderValue::from_str(&format!("Bearer {}", self.api_key))
-                .map_err(|_| CustomSpeechClientError::MissingAPIKey)?,
+            if self.azure_api_key {
+                "api-key"
+            } else {
+                "Authorization"
+            },
+            HeaderValue::from_str(&if self.azure_api_key {
+                self.api_key.clone()
+            } else {
+                format!("Bearer {}", self.api_key)
+            })
+            .map_err(|_| CustomSpeechClientError::MissingAPIKey)?,
         );
         let (socket, _) = tokio::time::timeout(
             Duration::from_secs(15),
@@ -228,12 +335,28 @@ impl CustomSpeechClient {
                 client.receive(stream, events, setup, generation).await;
             },
         ));
-        *self.inner.receive_task.lock().await = Some(task);
-        let update = custom_speech::session_update(
+        *self.inner.receive_task.lock().unwrap() = Some(task.abort_handle());
+        let mut update = custom_speech::session_update(
             &self.model,
             self.source,
             &format!("mimi-asr-setup-{generation}"),
         );
+        if self.builtin_asr && self.source != SourceLanguage::Automatic {
+            let transcription = update
+                .pointer_mut("/session/audio/input/transcription")
+                .unwrap()
+                .as_object_mut()
+                .unwrap();
+            transcription.remove("language");
+            transcription.insert(
+                "languages".into(),
+                serde_json::json!([crate::core::protocols::realtime_asr::language_hint(
+                    ProviderKind::OpenAIRealtime,
+                    self.source
+                )
+                .ok_or(CustomSpeechClientError::InvalidModel)?]),
+            );
+        }
         let setup = async {
             self.send_message(Message::Text(update.to_string().into()))
                 .await?;
@@ -261,8 +384,9 @@ impl CustomSpeechClient {
             .await
             .unwrap_or(Err(CustomSpeechClientError::SetupTimeout));
         if result.is_err() {
-            self.disconnect().await;
+            self.disconnect_locked().await;
         }
+        attempt.complete = true;
         result
     }
 
@@ -350,6 +474,7 @@ impl CustomSpeechClient {
     }
 
     pub async fn clear_content(&self) -> u64 {
+        let _lifecycle = self.inner.lifecycle.lock().await;
         let _audio = self.inner.audio_operation.lock().await;
         let revision = self.inner.events.lock().unwrap().as_ref().map_or_else(
             || self.content_revision().wrapping_add(1),
@@ -387,8 +512,9 @@ impl CustomSpeechClient {
     }
 
     pub async fn finish(&self, timeout: Duration) {
+        let _lifecycle = self.inner.lifecycle.lock().await;
         if !self.inner.ready.load(Ordering::SeqCst) {
-            self.disconnect().await;
+            self.disconnect_locked().await;
             return;
         }
         self.inner.closing.store(true, Ordering::SeqCst);
@@ -413,17 +539,22 @@ impl CustomSpeechClient {
         let _ = tokio::time::timeout(timeout, operation).await;
         let generation = self.inner.generation.load(Ordering::SeqCst);
         self.emit(LiveTranslateServerEvent::SessionFinished, None, generation);
-        self.disconnect().await;
+        self.disconnect_locked().await;
     }
 
     pub async fn disconnect(&self) {
+        let _lifecycle = self.inner.lifecycle.lock().await;
+        self.disconnect_locked().await;
+    }
+
+    async fn disconnect_locked(&self) {
         // Invalidate and cancel the receiver before waiting for audio work:
         // its idle timer may itself be holding audio_operation during a send.
         self.inner.generation.fetch_add(1, Ordering::SeqCst);
         self.inner.ready.store(false, Ordering::SeqCst);
         self.inner.closing.store(true, Ordering::SeqCst);
         self.inner.clearing.store(false, Ordering::SeqCst);
-        if let Some(task) = self.inner.receive_task.lock().await.take() {
+        if let Some(task) = self.inner.receive_task.lock().unwrap().take() {
             task.abort();
         }
         let _audio = self.inner.audio_operation.lock().await;
@@ -546,6 +677,9 @@ impl CustomSpeechClient {
                     }
                     {
                         let mut content = self.inner.content.lock().unwrap();
+                        if !self.is_current(generation) {
+                            return;
+                        }
                         let revision = content.revision;
                         let output = match event {
                             ServerEvent::Committed { item_id } => {
@@ -666,11 +800,13 @@ impl CustomSpeechClient {
     }
 
     fn fail(&self, error: CustomSpeechClientError, generation: u64) {
+        let content = self.inner.content.lock().unwrap();
         if !self.is_current(generation) || self.inner.failed.swap(true, Ordering::SeqCst) {
             return;
         }
         self.inner.ready.store(false, Ordering::SeqCst);
         *self.inner.failure_reason.lock().unwrap() = Some(error.clone());
+        drop(content);
         self.emit(
             LiveTranslateServerEvent::Error {
                 code: error.to_string(),
@@ -715,6 +851,162 @@ mod tests {
 
     type ServerSocket = WebSocketStream<TcpStream>;
     const MODEL: &str = "gpt-4o-mini-transcribe";
+
+    #[tokio::test]
+    #[allow(clippy::result_large_err)]
+    async fn builtin_openai_and_azure_use_transcription_intent_and_separate_authentication() {
+        for azure in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let mut client = if azure {
+                CustomSpeechClient::azure(
+                    "https://synthetic.openai.azure.com",
+                    "speech-deployment",
+                    "synthetic-key",
+                    SourceLanguage::Chinese,
+                )
+                .unwrap()
+            } else {
+                CustomSpeechClient::openai("synthetic-key", SourceLanguage::Chinese).unwrap()
+            };
+            let expected_path = if azure {
+                "/openai/v1/realtime"
+            } else {
+                "/v1/realtime"
+            };
+            assert_eq!(client.endpoint.path(), expected_path);
+            client.endpoint.set_scheme("ws").unwrap();
+            client.endpoint.set_host(Some("127.0.0.1")).unwrap();
+            client
+                .endpoint
+                .set_port(Some(listener.local_addr().unwrap().port()))
+                .unwrap();
+            client
+                .set_network(
+                    ProviderNetwork::resolve(&ProxyConfig {
+                        mode: ProxyMode::Direct,
+                        url: None,
+                    })
+                    .unwrap(),
+                )
+                .unwrap();
+            let (events, _receiver) = provider_event_channel();
+            client.set_event_sender(events).await;
+            let server = tokio::spawn(async move {
+                let mut socket = accept_hdr_async(
+                    listener.accept().await.unwrap().0,
+                    move |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+                          response| {
+                        assert_eq!(request.uri().path(), expected_path);
+                        assert_eq!(request.uri().query(), Some("intent=transcription"));
+                        assert_eq!(
+                            request
+                                .headers()
+                                .get(if azure { "api-key" } else { "Authorization" })
+                                .unwrap(),
+                            if azure {
+                                "synthetic-key"
+                            } else {
+                                "Bearer synthetic-key"
+                            }
+                        );
+                        assert!(request
+                            .headers()
+                            .get(if azure { "Authorization" } else { "api-key" })
+                            .is_none());
+                        Ok(response)
+                    },
+                )
+                .await
+                .unwrap();
+                let update = wire(&mut socket).await;
+                let model = if azure {
+                    "speech-deployment"
+                } else {
+                    "gpt-live-transcribe"
+                };
+                assert_eq!(update["session"]["type"], "transcription");
+                assert_eq!(
+                    update["session"]["audio"]["input"]["transcription"]["model"],
+                    model
+                );
+                assert_eq!(
+                    update["session"]["audio"]["input"]["transcription"]["languages"],
+                    json!(["zh-cn"])
+                );
+                assert!(update["session"]["audio"]["input"]["turn_detection"].is_null());
+                send(
+                    &mut socket,
+                    json!({"type":"session.updated", "session":update["session"]}),
+                )
+                .await;
+                while socket.next().await.is_some() {}
+            });
+            client.connect("test").await.unwrap();
+            client.disconnect().await;
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_builtin_probe_setup_closes_socket_without_dropping_the_client() {
+        for azure in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let mut client = if azure {
+                CustomSpeechClient::azure(
+                    "https://synthetic.openai.azure.com",
+                    "speech-deployment",
+                    "synthetic-key",
+                    SourceLanguage::English,
+                )
+                .unwrap()
+            } else {
+                CustomSpeechClient::openai("synthetic-key", SourceLanguage::English).unwrap()
+            };
+            client.endpoint.set_scheme("ws").unwrap();
+            client.endpoint.set_host(Some("127.0.0.1")).unwrap();
+            client
+                .endpoint
+                .set_port(Some(listener.local_addr().unwrap().port()))
+                .unwrap();
+            client
+                .set_network(
+                    ProviderNetwork::resolve(&ProxyConfig {
+                        mode: ProxyMode::Direct,
+                        url: None,
+                    })
+                    .unwrap(),
+                )
+                .unwrap();
+            let (events, _receiver) = provider_event_channel();
+            client.set_event_sender(events).await;
+            let (setup_seen, wait_setup) = tokio::sync::oneshot::channel();
+            let server = tokio::spawn(async move {
+                let mut socket = accept_async(listener.accept().await.unwrap().0)
+                    .await
+                    .unwrap();
+                assert_eq!(wire(&mut socket).await["session"]["type"], "transcription");
+                setup_seen.send(()).unwrap();
+                let closed = tokio::time::timeout(Duration::from_secs(2), socket.next())
+                    .await
+                    .expect("cancelled probe retained its WebSocket");
+                assert!(matches!(
+                    closed,
+                    None | Some(Err(_)) | Some(Ok(Message::Close(_)))
+                ));
+            });
+            let mut pending = Box::pin(client.connect_for_probe("cancelled-probe"));
+            tokio::select! {
+                result = &mut pending => panic!("setup unexpectedly completed: {result:?}"),
+                _ = wait_setup => {},
+            }
+            drop(pending);
+            server.await.unwrap();
+            assert!(!client.inner.ready.load(Ordering::SeqCst));
+            assert!(client.inner.receive_task.lock().unwrap().is_none());
+            assert!(client.inner.sink.lock().await.is_none());
+            client.disconnect().await;
+        }
+    }
 
     async fn fixture() -> (CustomSpeechClient, ProviderEventReceiver, TcpListener) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -900,14 +1192,14 @@ mod tests {
             entered_tx.send(()).unwrap();
             std::future::pending::<()>().await;
         });
-        *client.inner.receive_task.lock().await = Some(task);
+        *client.inner.receive_task.lock().unwrap() = Some(task.abort_handle());
         entered_rx.await.unwrap();
         tokio::time::timeout(Duration::from_millis(100), client.disconnect())
             .await
             .unwrap();
         assert!(!client.is_current(old_generation));
         assert!(!client.inner.ready.load(Ordering::SeqCst));
-        assert!(client.inner.receive_task.lock().await.is_none());
+        assert!(client.inner.receive_task.lock().unwrap().is_none());
     }
 
     #[tokio::test]

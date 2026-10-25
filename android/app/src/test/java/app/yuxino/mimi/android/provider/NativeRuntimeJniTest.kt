@@ -26,6 +26,82 @@ import kotlin.concurrent.thread
 
 /** Actual JNI checks use synthetic credentials; live transport fixtures stay on loopback. */
 class NativeRuntimeJniTest {
+    @Test fun realtimeIndependentModesUseSharedFactoriesAndSeparateTextCredentialsAcrossActualJni() {
+        val translator = TranslationConfiguration(provider = TextTranslationProvider.XAI,
+            apiKey = "synthetic-independent-key", model = "grok-independent")
+        for (provider in listOf(ServiceProvider.OPENAI, ServiceProvider.GEMINI, ServiceProvider.AZURE)) {
+            val simultaneous = configuration(provider)
+            assertEquals("simultaneous", simultaneous.getString("speechTranslationMode"))
+            val originalIntegratedEndpoint = NativeRuntimeConfiguration.endpoints(simultaneous).getString("speechEndpoint")
+            val legacy = JSONObject(simultaneous.toString()).apply { remove("speechTranslationMode") }
+            assertEquals(originalIntegratedEndpoint, NativeRuntimeConfiguration.endpoints(legacy).getString("speechEndpoint"))
+            assertTrue(NativeRuntimeConfiguration.endpoints(legacy).isNull("textEndpoint"))
+            val asr = JSONObject(simultaneous.toString()).put("speechTranslationMode", "asrMt")
+                .put("sourceLanguage", "en").put("textCredentials", translator.runtimeCredentials())
+            if (provider == ServiceProvider.AZURE) asr.getJSONObject("credentials").put("deployment", "")
+            val endpoints = NativeRuntimeConfiguration.endpoints(asr)
+            assertEquals("https://api.x.ai/v1/chat/completions", endpoints.getString("textEndpoint"))
+            assertTrue(endpoints.getJSONArray("modelNames").toString().contains("grok-independent"))
+            assertFalse(endpoints.toString().contains("synthetic-independent-key"))
+            val handle = create(asr)
+            try { assertEquals("connecting", NativeRuntimeConfiguration.poll(handle).getString("connectionStatus")) }
+            finally { NativeRuntimeConfiguration.command("stop", handle) }
+            val missingText = JSONObject(asr.toString()).put("textCredentials", JSONObject.NULL)
+            assertThrows(IllegalArgumentException::class.java) { create(missingText) }
+            val original = JSONObject(missingText.toString()).put("targetLanguage", "original")
+            assertTrue(NativeRuntimeConfiguration.endpoints(original).isNull("textEndpoint"))
+            assertEquals(1, NativeRuntimeConfiguration.endpoints(original).getJSONArray("modelNames").length())
+            if (provider == ServiceProvider.AZURE) {
+                assertThrows(IllegalArgumentException::class.java) {
+                    NativeRuntimeConfiguration.endpoints(JSONObject(asr.toString()).put("speechTranslationMode", "simultaneous"))
+                }
+            }
+        }
+    }
+
+    @Test fun realtimeModeCapabilitiesAndInvalidModesStayInSharedRustAcrossActualJni() {
+        for (provider in listOf(ServiceProvider.OPENAI, ServiceProvider.GEMINI, ServiceProvider.AZURE)) {
+            val independent = NativeRuntimeConfiguration.capabilities(provider.wireProvider, "openAICompatible", "zh",
+                speechTranslationMode = "asrMt")
+            assertEquals(if (provider == ServiceProvider.GEMINI) 16_000 else 24_000, independent.getInt("sampleRateHz"))
+            assertTrue(independent.getJSONArray("sourceLanguages").toString().contains("auto"))
+            assertTrue(independent.getJSONArray("targetLanguages").toString().contains("original"))
+            val original = NativeRuntimeConfiguration.normalize(provider.wireProvider, "openAICompatible", "en", "original",
+                speechTranslationMode = "asrMt")
+            assertEquals("en", original.getString("sourceLanguage"))
+            assertEquals("original", original.getString("targetLanguage"))
+            for (invalid in listOf("", "voice", "unknown")) {
+                assertThrows(IllegalArgumentException::class.java) {
+                    NativeRuntimeConfiguration.capabilities(provider.wireProvider, "openAICompatible", "zh", speechTranslationMode = invalid)
+                }
+            }
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            NativeRuntimeConfiguration.capabilities("volcanoEngine", "openAICompatible", "zh", speechTranslationMode = "asrMt")
+        }
+    }
+
+    @Test fun geminiStreamingTranscriptContractsUseTheSharedAssemblerAcrossActualJni() {
+        val cases = JSONObject(requireNotNull(javaClass.getResourceAsStream("/translation-contracts.json"))
+            .bufferedReader().use { it.readText() }).getJSONArray("geminiStreamingTranscripts")
+        for (index in 0 until cases.length()) {
+            val case = cases.getJSONObject(index)
+            val outputs = NativeRuntimeConfiguration.exchange(JSONObject().put("operation", "gemini_streaming_transcripts")
+                .put("frames", case.getJSONArray("frames"))).getJSONArray("outputs")
+            val expected = case.getJSONArray("expectedOutputs")
+            assertEquals(case.getString("id"), expected.length(), outputs.length())
+            for (frame in 0 until expected.length()) {
+                val wanted = expected.getJSONArray(frame); val actual = outputs.getJSONArray(frame)
+                assertEquals(case.getString("id"), wanted.length(), actual.length())
+                for (item in 0 until wanted.length()) {
+                    assertEquals(case.getString("id"), wanted.getJSONObject(item).getLong("sequence"), actual.getJSONObject(item).getLong("sequence"))
+                    assertEquals(case.getString("id"), wanted.getJSONObject(item).getString("text"), actual.getJSONObject(item).getString("text"))
+                    assertEquals(case.getString("id"), wanted.getJSONObject(item).getBoolean("isFinal"), actual.getJSONObject(item).getBoolean("isFinal"))
+                }
+            }
+        }
+    }
+
     @Test fun xaiStreamingTranscriptContractsUseTheSharedAssemblerAcrossActualJni() {
         val cases = JSONObject(requireNotNull(javaClass.getResourceAsStream("/translation-contracts.json"))
             .bufferedReader().use { it.readText() }).getJSONArray("xaiStreamingTranscripts")

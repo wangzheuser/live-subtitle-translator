@@ -36,6 +36,7 @@ internal class ServiceEditorDraft(
     val alibabaMode: Int?,
     val translation: TextTranslationEditorDraft?,
     val xaiMode: Int? = null,
+    val speechTranslationMode: Int? = null,
 )
 
 internal class TextTranslationEditorDraft(

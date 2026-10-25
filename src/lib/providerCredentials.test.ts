@@ -249,3 +249,18 @@ it.each(["xAIRealtime", "customOpenAIASR", "appleSpeech"] as const)("builds inde
   expect(buildAlibabaTranslationCredentials(profile, { ...emptyCredentialDraft(), apiKey: "never-speech-key", model: "grok-4.3" }, "xAI")).toBeNull();
   expect(buildAlibabaTranslationCredentials(profile, { ...emptyCredentialDraft(), token: "synthetic-text-key" }, "xAI")).toBeNull();
 });
+
+it("requires Azure translation deployment only for simultaneous mode and preserves a saved value", () => {
+  const draft = { ...emptyCredentialDraft(), endpoint: "https://synthetic.openai.azure.com", transcriptionDeployment: "transcribe", apiKey: "synthetic-key" };
+  expect(buildProviderCredentials("azureOpenAIRealtime", draft)).toBeNull();
+  expect(buildProviderCredentials("azureOpenAIRealtime", draft, "simultaneous")).toBeNull();
+  expect(buildProviderCredentials("azureOpenAIRealtime", draft, "asrMt")).toMatchObject({ kind: "azureOpenAI", deployment: "", transcriptionDeployment: "transcribe" });
+  expect(buildProviderCredentials("azureOpenAIRealtime", { ...draft, deployment: "saved-translate" }, "asrMt")).toMatchObject({ deployment: "saved-translate" });
+});
+
+it.each(["openAIRealtime", "googleGeminiLive", "azureOpenAIRealtime"] as const)("keeps %s speech keys out of independent text saves", provider => {
+  const profile = { id: provider, name: provider, provider, speechTranslationMode: "asrMt", credentialState: "missing", speechCredentialState: "present", textCredentialState: "missing" } as const;
+  const draft = { ...emptyCredentialDraft(), apiKey: "never-send-speech-key", endpoint: "https://synthetic.example/v1", model: "synthetic-model", token: "synthetic-text-key" };
+  expect(buildAlibabaTranslationCredentials(profile, draft, "openAICompatible")).toMatchObject({ kind: "alibabaTranslation", apiKey: "", token: "synthetic-text-key" });
+  expect(buildAlibabaTranslationCredentials({ ...profile, speechTranslationMode: "simultaneous" }, draft, "openAICompatible")).toBeNull();
+});

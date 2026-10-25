@@ -2,6 +2,7 @@ import { isSystemAudioPermissionDenied } from "../../lib/systemAudioPermissions"
 import { useEffect, useMemo, useRef, useState } from "react";
 import { subtitleBackgroundColor } from "../../lib/subtitleColor";
 import { effectiveUiLanguage, I18N } from "../../lib/i18n";
+import { isIndependentAsrProfile } from "../../lib/providerCapabilities";
 import { limitRecentSubtitles } from "../../lib/subtitleDisplay";
 import { AudioInputIndicator } from "../../components/AudioInputIndicator";
 import { RecordingIndicator } from "../../components/RecordingIndicator";
@@ -155,9 +156,9 @@ export function OverlayWindow() {
   }, [motionOn, pulseOn]);
   const presentationCollapsed = collapsed && !blendsWithBackground && !hasSessionError;
   const phase = computeActivityPhase(session, settings);
-  const activeProvider = settings.profiles.find(profile => profile.id === settings.activeProfileId)?.provider;
-  const atomicProvider = session.atomicPreview ?? usesAtomicSubtitlePreview(activeProvider);
-  const streamingProvider = usesStreamingSubtitlePreview(activeProvider);
+  const activeProfile = settings.profiles.find(profile => profile.id === settings.activeProfileId);
+  const atomicProvider = session.atomicPreview ?? ((activeProfile !== undefined && isIndependentAsrProfile(activeProfile)) || usesAtomicSubtitlePreview(activeProfile?.provider));
+  const streamingProvider = !atomicProvider && usesStreamingSubtitlePreview(activeProfile?.provider);
   // Disabling an input keeps its confirmed captions and source identity.
   const dual = new Set([
     ...(session.subtitles.tracks ?? []).map(track => track.audioSource),

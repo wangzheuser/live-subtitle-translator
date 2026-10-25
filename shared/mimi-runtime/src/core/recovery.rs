@@ -17,7 +17,13 @@ pub const RECOVERY_ATTEMPTS: usize = 4;
 /// drivers use the same authentication aliases and finite recovery codes.
 pub fn normalize_provider_error_code(code: &str) -> &'static str {
     match code {
-        "transport_error" => "transport_error",
+        "transport_error"
+        | "custom_speech_unreachable"
+        | "custom_speech_not_connected"
+        | "custom_speech_health_timeout"
+        | "gemini_transcribe_unreachable"
+        | "gemini_transcribe_not_connected"
+        | "gemini_transcribe_health_timeout" => "transport_error",
         "provider_event_backlog_overflow" => "provider_event_backlog_overflow",
         "translation_backlog_overflow" => "translation_backlog_overflow",
         "translation_rate_limited" => "translation_rate_limited",
@@ -31,7 +37,8 @@ pub fn normalize_provider_error_code(code: &str) -> &'static str {
         | "unauthorized"
         | "translation_authentication_failed"
         | "credential_authentication_failed"
-        | "custom_speech_authentication_failed" => "credential_authentication_failed",
+        | "custom_speech_authentication_failed"
+        | "gemini_transcribe_authentication_failed" => "credential_authentication_failed",
         "invalid_configuration" => "invalid_configuration",
         code if provider_error_requires_user_action(code) => "invalid_configuration",
         _ => "provider_error",
@@ -53,6 +60,9 @@ pub fn provider_error_requires_user_action(error: &str) -> bool {
                 | "custom_speech_credentials_missing"
                 | "custom_speech_endpoint_invalid"
                 | "custom_speech_model_invalid"
+                | "gemini_transcribe_authentication_failed"
+                | "gemini_transcribe_credentials_missing"
+                | "gemini_transcribe_language_unsupported"
                 | "text_translation_credentials_missing"
                 | "invalid_configuration"
         )
@@ -152,6 +162,35 @@ impl RecoverySchedule {
 #[cfg(test)]
 mod schedule_tests {
     use super::*;
+
+    #[test]
+    fn independent_asr_transport_expiry_recovers_but_bad_credentials_do_not() {
+        for code in [
+            "custom_speech_unreachable",
+            "custom_speech_health_timeout",
+            "gemini_transcribe_unreachable",
+            "gemini_transcribe_health_timeout",
+        ] {
+            assert_eq!(normalize_provider_error_code(code), "transport_error");
+            assert!(provider_error_is_retryable(normalize_provider_error_code(
+                code
+            )));
+        }
+        assert_eq!(
+            normalize_provider_error_code("gemini_transcribe_authentication_failed"),
+            "credential_authentication_failed"
+        );
+        for code in [
+            "gemini_transcribe_authentication_failed",
+            "gemini_transcribe_credentials_missing",
+            "gemini_transcribe_language_unsupported",
+        ] {
+            assert!(provider_error_requires_user_action(code));
+            assert!(!provider_error_is_retryable(normalize_provider_error_code(
+                code
+            )));
+        }
+    }
 
     #[test]
     fn provider_error_codes_share_authentication_aliases_and_never_expose_vendor_text() {

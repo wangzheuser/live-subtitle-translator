@@ -102,3 +102,12 @@ it("keeps independent xAI combinations distinct and followService recognition-on
   expect(host.querySelectorAll('.overlay-service__stage')).toHaveLength(1);
   expect(host.querySelector('[data-stage="recognition"]')).not.toBeNull();
 });
+
+it.each(["openAIRealtime", "googleGeminiLive", "azureOpenAIRealtime"] as const)("shows %s independent translator identity only in ASR mode", async provider => {
+  await render({ provider, speechTranslationMode: "asrMt", textTranslation: "deepL" });
+  expect([...host.querySelectorAll('[data-provider]')].map(node => node.getAttribute('data-provider'))).toEqual([provider, "deepL"]);
+  await render({ provider, speechTranslationMode: "simultaneous", textTranslation: "deepL" });
+  expect([...host.querySelectorAll('[data-provider]')].map(node => node.getAttribute('data-provider'))).toEqual([provider]);
+  await render({ provider, speechTranslationMode: "asrMt", textTranslation: "deepL" }, "original");
+  expect([...host.querySelectorAll('[data-provider]')].map(node => node.getAttribute('data-provider'))).toEqual([provider]);
+});

@@ -3,8 +3,9 @@ import type {
   ServiceProfile,
   TextTranslation,
   ServiceProvider,
+  SpeechTranslationMode,
 } from "./types";
-import { isChatCompletionsTranslation, isCustomSpeechProvider, isIndependentAsrProfile } from "./providerCapabilities";
+import { isChatCompletionsTranslation, isCustomSpeechProvider, isIndependentAsrProfile, textTranslationForProfile } from "./providerCapabilities";
 
 export type CredentialFieldName =
   | "asrApiKey"
@@ -56,6 +57,7 @@ export function credentialEditorStateAfterDeleteRequest(
 
 export function credentialFieldsForProvider(
   provider: ServiceProvider,
+  speechTranslationMode?: SpeechTranslationMode,
 ): readonly CredentialFieldName[] {
   switch (provider) {
     case "appleSpeech":
@@ -68,7 +70,7 @@ export function credentialFieldsForProvider(
     case "azureOpenAIRealtime":
       return [
         "endpoint",
-        "deployment",
+        ...(speechTranslationMode === "asrMt" ? [] : ["deployment" as const]),
         "transcriptionDeployment",
         "apiKey",
       ];
@@ -84,8 +86,9 @@ export function credentialFieldsForProvider(
 export function buildProviderCredentials(
   provider: ServiceProvider,
   draft: CredentialDraft,
+  speechTranslationMode?: SpeechTranslationMode,
 ): ProviderCredentialsInput | null {
-  return buildProviderInput(provider, draft, []);
+  return buildProviderInput(provider, draft, [], speechTranslationMode);
 }
 
 /** Empty saved secret slots are resolved natively for a temporary check. */
@@ -93,17 +96,18 @@ export function buildProviderProbeCredentials(
   provider: ServiceProvider,
   draft: CredentialDraft,
   savedFields: readonly string[] = [],
+  speechTranslationMode?: SpeechTranslationMode,
 ): ProviderCredentialsInput | null {
-  return buildProviderInput(provider, draft, savedFields);
+  return buildProviderInput(provider, draft, savedFields, speechTranslationMode);
 }
 
-function buildProviderInput(provider: ServiceProvider, draft: CredentialDraft, savedFields: readonly string[]): ProviderCredentialsInput | null {
+function buildProviderInput(provider: ServiceProvider, draft: CredentialDraft, savedFields: readonly string[], speechTranslationMode?: SpeechTranslationMode): ProviderCredentialsInput | null {
   if (provider === "appleSpeech") return null;
   const values = Object.fromEntries(
     Object.entries(draft).map(([key, value]) => [key, value.trim()]),
   ) as CredentialDraft;
   if (
-    credentialFieldsForProvider(provider).some((field) => field !== "token" && !values[field] && !savedFields.includes(field))
+    credentialFieldsForProvider(provider, speechTranslationMode).some((field) => field !== "token" && !values[field] && !savedFields.includes(field))
   ) {
     return null;
   }
@@ -147,7 +151,7 @@ export function buildTextTranslationCredentials(profile: ServiceProfile, draft: 
   const custom = isIndependentAsrProfile(profile);
   if (!custom && profile.provider !== "alibabaCloud" && profile.provider !== "deepLX") return null;
   if (!custom && !draft.apiKey.trim() && (profile.speechCredentialState ?? profile.credentialState) !== "present") return null;
-  const savedTranslation = profile.textTranslation ?? (profile.provider === "deepLX" ? "deepLX" : "followService");
+  const savedTranslation = textTranslationForProfile(profile);
   const keepsSavedDestination = hasSavedDestination ?? ((custom ? profile.textCredentialState : profile.credentialState) === "present" && translation === savedTranslation);
   if (translation === "deepLX" && !draft.endpoint.trim() && !keepsSavedDestination) return null;
   if (translation === "deepL" && !draft.token.trim() && !keepsSavedDestination) return null;

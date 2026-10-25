@@ -58,6 +58,7 @@ pub struct ServiceProfilePayload {
     pub alibaba_realtime_mode: crate::core::provider::AlibabaRealtimeMode,
     pub alibaba_workspace_id: String,
     pub xai_speech_mode: crate::core::provider::XAISpeechMode,
+    pub speech_translation_mode: crate::core::provider::SpeechTranslationMode,
     pub xai_text_model: String,
     pub language_preset: Option<crate::core::provider::ProfileLanguagePreset>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -95,6 +96,7 @@ impl ServiceProfilePayload {
             alibaba_realtime_mode: profile.alibaba_realtime_mode,
             alibaba_workspace_id: profile.alibaba_workspace_id,
             xai_speech_mode: profile.xai_speech_mode,
+            speech_translation_mode: profile.speech_translation_mode,
             xai_text_model: profile.xai_text_model,
             language_preset: profile.language_preset,
             speech_recognition_name: profile.speech_recognition_name,
@@ -122,6 +124,7 @@ impl ServiceProfilePayload {
             alibaba_realtime_mode: profile.alibaba_realtime_mode,
             alibaba_workspace_id: profile.alibaba_workspace_id,
             xai_speech_mode: profile.xai_speech_mode,
+            speech_translation_mode: profile.speech_translation_mode,
             xai_text_model: profile.xai_text_model,
             language_preset: profile.language_preset,
             speech_recognition_name: profile.speech_recognition_name,
@@ -141,6 +144,8 @@ pub struct LanguageCapabilitiesPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub qwen_mt_model: Option<crate::core::protocols::qwen_mt::QwenMTModel>,
     pub xai_speech_mode: Option<crate::core::provider::XAISpeechMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speech_translation_mode: Option<crate::core::provider::SpeechTranslationMode>,
     pub profile_id: String,
     pub provider: ProviderKind,
     pub text_translation: TextTranslation,
@@ -199,6 +204,10 @@ impl LanguageCapabilitiesPayload {
                 .then_some(profile.qwen_mt_model),
             xai_speech_mode: (profile.provider == ProviderKind::XAIRealtime)
                 .then_some(profile.xai_speech_mode),
+            speech_translation_mode: profile
+                .provider
+                .supports_speech_translation_mode()
+                .then_some(profile.speech_translation_mode),
             profile_id: profile.id.clone(),
             provider: profile.provider,
             text_translation: profile.text_translation(),
@@ -1220,6 +1229,7 @@ mod tests {
                 alibaba_realtime_mode: Default::default(),
                 alibaba_workspace_id: String::new(),
                 xai_speech_mode: Default::default(),
+                speech_translation_mode: Default::default(),
                 xai_text_model: "grok-4.3".into(),
                 language_preset: None,
                 speech_network_proxy: None,
@@ -2420,6 +2430,7 @@ pub async fn profile_update(
     alibaba_workspace_id: Option<String>,
     xai_speech_mode: Option<crate::core::provider::XAISpeechMode>,
     xai_text_model: Option<String>,
+    speech_translation_mode: Option<crate::core::provider::SpeechTranslationMode>,
 ) -> Result<SettingsSnapshotPayload, String> {
     let _lifecycle = state.session.settings_mutation_guard(true).await?;
     ensure_profile_mutation_allowed(state.session.has_active_session())?;
@@ -2433,9 +2444,11 @@ pub async fn profile_update(
             || alibaba_workspace_id.as_ref().is_some_and(|workspace| {
                 previous_profile.alibaba_workspace_id != workspace.trim()
             })
-            || xai_speech_mode.is_some_and(|mode| previous_profile.xai_speech_mode != mode));
+            || xai_speech_mode.is_some_and(|mode| previous_profile.xai_speech_mode != mode)
+            || speech_translation_mode
+                .is_some_and(|mode| previous_profile.speech_translation_mode != mode));
     let configuration_failure = state.session.configuration_failure_snapshot();
-    state.settings.update_profile_options_with_xai(
+    state.settings.update_profile_options_with_speech_mode(
         &profile_id,
         name.as_deref(),
         speech_network_proxy,
@@ -2449,6 +2462,7 @@ pub async fn profile_update(
         alibaba_workspace_id.as_deref(),
         xai_speech_mode,
         xai_text_model.as_deref(),
+        speech_translation_mode,
     )?;
     state
         .session

@@ -137,9 +137,15 @@ impl TranslationClient {
         configuration: &LiveTranslationConfiguration,
         events: ProviderEventSender,
     ) -> Result<Self, TranslationClientError> {
-        let credentials = configuration
-            .credentials
-            .validated_for(configuration.provider)?;
+        let credentials = configuration.credentials.validated_for_speech_mode(
+            configuration.provider,
+            configuration.speech_translation_mode,
+        )?;
+        if configuration.uses_realtime_asr() {
+            return HighQualityTranslationClient::new_custom(configuration, events)
+                .map(Self::HighQuality)
+                .map_err(TranslationClientError::MT);
+        }
         if configuration.provider == ProviderKind::AlibabaCloud
             && configuration.alibaba_realtime_mode != AlibabaRealtimeMode::Disabled
         {

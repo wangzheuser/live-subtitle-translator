@@ -1383,6 +1383,29 @@ async function renderPresetEditor(endpoint = "https://api.openai.com/v1") {
   await act(async () => host.querySelector<HTMLButtonElement>(".service-row__edit")?.click());
 }
 
+it("shows each text preset's brand in the menu and selected value without saving", async () => {
+  await renderPresetEditor();
+  const picker = () => host.querySelector<HTMLButtonElement>(`.translation-preset-field [aria-label="${PROVIDER_COPY.en.compatiblePresetLabel}"]`)!;
+  expect(picker().querySelector("[data-preset]")?.getAttribute("data-preset")).toBe("openai");
+  await act(async () => picker().click());
+  const options = [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+  expect(options).toHaveLength(OPENAI_COMPATIBLE_PRESETS.length + 1);
+  expect(options[0].querySelector(".provider-icon__generic")).not.toBeNull();
+  for (const preset of OPENAI_COMPATIBLE_PRESETS) {
+    const option = options.find(node => node.textContent === preset.label)!;
+    expect(option.querySelector("[data-preset]")?.getAttribute("data-preset")).toBe(preset.id);
+    expect(option.querySelector("img")?.getAttribute("alt")).toBe("");
+  }
+  expect(options.find(node => node.textContent === "Baidu Qianfan")!.querySelector('[data-provider="baiduTranslate"]')).toBeNull();
+  await act(async () => options.find(node => node.textContent === "Kimi")!.click());
+  expect(picker().querySelector("[data-preset]")?.getAttribute("data-preset")).toBe("kimi");
+  await chooseTranslationPreset("custom");
+  expect(picker().querySelector("[data-preset]")).toBeNull();
+  expect(picker().querySelector(".provider-icon__generic")).not.toBeNull();
+  expect(actions.saveProfileCredentials).not.toHaveBeenCalled();
+  expect(openTextTranslationSetupPage).not.toHaveBeenCalled();
+});
+
 it("keeps preset selection local and preserves unsaved model/key when opening its setup pages", async () => {
   await renderPresetEditor();
   await chooseTranslationPreset("kimi");

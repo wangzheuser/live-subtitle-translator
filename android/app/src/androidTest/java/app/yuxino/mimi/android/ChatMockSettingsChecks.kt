@@ -5,6 +5,7 @@ import android.app.Instrumentation
 import android.app.LocaleManager
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Rect
 import android.os.Bundle
 import android.os.Build
@@ -608,6 +609,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
         val key = field<TextInputEditText>(editor, "translation-key")
         val localHttp = field<CheckBox>(editor, "translation-local-http")
         checkSetupLinks(editor, picker, endpoint, model, key)
+        checkPresetIcons(editor, picker)
         onUi {
             check(picker.isShown && picker.count == TextTranslationPresets.entries.size + 1)
             localHttp.isChecked = false
@@ -651,6 +653,64 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
         }
         instrumentation.waitForIdleSync()
         check(!field<View>(editor, "translation-preset").isShown)
+    }
+
+    private fun checkPresetIcons(editor: ServiceSettingsActivity, picker: Spinner) {
+        onUi {
+            val adapter = picker.adapter
+            val size = (24 * picker.resources.displayMetrics.density + 0.5f).toInt()
+            val pictures = mutableListOf<IntArray>()
+            fun picture(row: TextView, arrow: Boolean): Bitmap {
+                val icon = checkNotNull(row.compoundDrawablesRelative[0]) { "A quick-setup choice has no provider icon" }
+                check(icon.bounds.width() == size && icon.bounds.height() == size) { "Quick-setup icon dimensions differ" }
+                check((row.compoundDrawablesRelative[2] != null) == arrow) { "A recycled quick-setup row kept the wrong arrow" }
+                return Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).also { icon.draw(Canvas(it)) }
+            }
+            var selected: View? = null
+            var dropdown: View? = null
+            for (position in 0 until picker.count) {
+                val fresh = adapter.getView(position, null, picker) as TextView
+                val expected = picture(fresh, arrow = true)
+                selected = adapter.getView(position, selected, picker)
+                dropdown = adapter.getDropDownView(position, dropdown, picker)
+                for ((view, arrow) in listOf(selected to true, dropdown to false)) {
+                    val row = view as TextView
+                    check(row.text.toString() == adapter.getItem(position).toString()) { "A recycled quick-setup row kept another label" }
+                    val actual = picture(row, arrow)
+                    check(expected.sameAs(actual)) { "A recycled quick-setup row kept another provider icon" }
+                    actual.recycle()
+                }
+                val pixels = IntArray(size * size).also { expected.getPixels(it, 0, size, 0, 0, size, size) }
+                check(pixels.any { it ushr 24 != 0 }) { "A quick-setup icon is empty" }
+                check(pictures.none { it.contentEquals(pixels) }) { "Different quick-setup providers share the same fallback icon" }
+                pictures += pixels
+                expected.recycle()
+            }
+
+            // Both the field and menu must wrap a real long provider label at
+            // narrow widths, rather than clipping it behind a new icon slot.
+            val longest = (0 until picker.count).maxBy { adapter.getItem(it).toString().length }
+            val width = (180 * picker.resources.displayMetrics.density + 0.5f).toInt()
+            for (row in listOf(adapter.getView(longest, null, picker), adapter.getDropDownView(longest, null, picker))) {
+                row.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+                row.layout(0, 0, row.measuredWidth, row.measuredHeight)
+                val label = row as TextView
+                val layout = checkNotNull(label.layout)
+                check(layout.lineCount > 1) { "A long quick-setup provider label did not wrap" }
+                check(layout.getLineEnd(layout.lineCount - 1) == label.text.length &&
+                    (0 until layout.lineCount).all { layout.getEllipsisCount(it) == 0 }) { "A quick-setup provider label was truncated" }
+                check(row.measuredHeight >= layout.getLineBottom(layout.lineCount - 1) + label.compoundPaddingTop + label.compoundPaddingBottom) {
+                    "A wrapped quick-setup provider label was vertically clipped"
+                }
+            }
+        }
+        show(editor, "translation-preset")
+        onUi { check(picker.performClick()) }
+        instrumentation.waitForIdleSync()
+        capture("translation-preset-icons-$theme")
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        instrumentation.waitForIdleSync()
     }
 
     private fun checkSetupLinks(editor: ServiceSettingsActivity, picker: Spinner,

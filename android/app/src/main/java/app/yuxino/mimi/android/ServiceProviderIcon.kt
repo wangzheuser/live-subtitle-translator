@@ -22,3 +22,20 @@ internal fun translationProviderIcon(provider: app.yuxino.mimi.android.provider.
     app.yuxino.mimi.android.provider.TextTranslationProvider.XAI -> R.drawable.ic_provider_xai
     else -> R.drawable.ic_service_languages
 }
+
+internal fun translationPresetIcon(presetId: String?): Int = when (presetId) {
+    "openai" -> R.drawable.ic_provider_openai
+    "deepseek" -> R.drawable.ic_provider_deepseek
+    "qwen" -> R.drawable.ic_translation_alibaba
+    "gemini" -> R.drawable.ic_provider_gemini
+    "kimi" -> R.drawable.ic_provider_kimi
+    "siliconflow" -> R.drawable.ic_provider_siliconflow
+    "openrouter" -> R.drawable.ic_provider_openrouter
+    "indexTranslate" -> R.drawable.ic_provider_index_translate
+    "tencentTokenHub" -> R.drawable.ic_provider_tencent
+    "baiduQianfan" -> R.drawable.ic_provider_baidu_qianfan
+    "volcanoArk" -> R.drawable.ic_provider_volcano
+    "ollama" -> R.drawable.ic_provider_ollama
+    "lmStudio" -> R.drawable.ic_provider_lm_studio
+    else -> R.drawable.ic_service_languages
+}

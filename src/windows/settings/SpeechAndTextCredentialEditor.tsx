@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ComponentProps, type FormEvent, type ReactNode } from "react";
 import { AlibabaSetupLink } from "./AlibabaSetupLink";
 import { ProviderIcon } from "../../components/ProviderIcon";
+import { TextTranslationPresetIcon } from "../../components/TextTranslationPresetIcon";
 import { ConfigInput, type ConfigInputElement } from "./ConfigInput";
 import { SettingsHelp } from "./SettingsHelp";
 import { CredentialStorageHelp } from "./CredentialStorageHelp";
@@ -277,7 +278,7 @@ export function SpeechAndTextCredentialEditor({ profile, inputId, disabled, busy
         {translation === "openAICompatible" && <div className="settings-field service-stage__selector translation-preset-field">
           <span className="service-stage__name-help">{presetCopy.compatiblePresetLabel}<SettingsHelp text={setupPreset ? presetCopy[setupPreset.setupHelpKey] : presetCopy.compatiblePresetHelp} label={I18N.settings.helpLabel} /></span>
           <SettingsSelect label={presetCopy.compatiblePresetLabel} disabled={disabled || awaitingSavedDestination} value={customPreset ? "custom" : preset?.id ?? "custom"}
-            options={[{ value: "custom", label: presetCopy.compatiblePresetCustom }, ...OPENAI_COMPATIBLE_PRESETS.map(item => ({ value: item.id, label: item.label }))]}
+            options={[{ value: "custom", label: presetCopy.compatiblePresetCustom, icon: <ProviderIcon provider="openAICompatible" size={32} /> }, ...OPENAI_COMPATIBLE_PRESETS.map(item => ({ value: item.id, label: item.label, icon: <TextTranslationPresetIcon presetId={item.id} /> }))]}
             onChange={choosePreset} />
         </div>}
         {(translation === "deepLX" || compatible) && <label className="settings-field" htmlFor={endpointId}>

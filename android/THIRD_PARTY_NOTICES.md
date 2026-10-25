@@ -13,6 +13,19 @@ The service cloud, language, caption and wave icons are adapted from Lucide 1.31
 Provider brand marks reuse the existing desktop assets documented in
 [provider-brand-assets.md](../docs/development/provider-brand-assets.md). SVG exports preserve the original artwork and colors; transparent padding is normalized for consistent Android display sizes.
 
+The DeepSeek, Kimi, SiliconFlow, Index Team, Ollama and Baidu AI Cloud preset marks are derived
+from the matching monochrome [Lobe Icons source assets](../src/assets/providers/NOTICE.md)
+at commit `cc639da879a3f404f5ded8ec41cdfdc63abd8317`, under the MIT license.
+Their path geometry is unchanged and their monochrome fills follow the interface
+text color. The full notice is in [native-licenses/lobe-icons.txt](native-licenses/lobe-icons.txt),
+packaged in every APK as `assets/lobe-icons.txt`.
+
+OpenRouter and LM Studio preset marks use the official vendor SVGs documented
+in that source notice. Native vectors preserve their geometry, supplied colors
+and theme variants, including LM Studio's original gradient. The Lobe Icons MIT
+license does not apply to these official vendor assets. All service names and
+marks remain the property of their respective owners and imply no endorsement.
+
 ISC License
 
 Copyright (c) 2026 Lucide Icons and Contributors

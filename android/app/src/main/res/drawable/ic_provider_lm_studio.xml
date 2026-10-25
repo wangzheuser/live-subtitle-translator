@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Same geometry as src/assets/providers/lm-studio.svg; see android/THIRD_PARTY_NOTICES.md. -->
+<vector xmlns:aapt="http://schemas.android.com/aapt" xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="512" android:viewportHeight="512">
+    <path android:pathData="M0 179.2C0 116.474 0 85.1112 12.2073 61.1531C22.9451 40.0789 40.0789 22.9451 61.1531 12.2073C85.1112 0 116.474 0 179.2 0H332.8C395.526 0 426.889 0 450.847 12.2073C471.921 22.9451 489.055 40.0789 499.793 61.1531C512 85.1112 512 116.474 512 179.2V332.8C512 395.526 512 426.889 499.793 450.847C489.055 471.921 471.921 489.055 450.847 499.793C426.889 512 395.526 512 332.8 512H179.2C116.474 512 85.1112 512 61.1531 499.793C40.0789 489.055 22.9451 471.921 12.2073 450.847C0 426.889 0 395.526 0 332.8V179.2Z" android:fillType="nonZero">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="-219.792" android:startY="229.426" android:endX="239.06" android:endY="702.601" android:startColor="#6E7EF3" android:endColor="#4F13BE" />
+        </aapt:attr>
+    </path>
+    <path android:pathData="M150,84 H330 A22,22 0,0,1 352,106 V106 A22,22 0,0,1 330,128 H150 A22,22 0,0,1 128,106 V106 A22,22 0,0,1 150,84 Z" android:fillType="nonZero" android:fillAlpha="0.25" android:fillColor="#FFFFFF" />
+    <path android:pathData="M86,84 H266 A22,22 0,0,1 288,106 V106 A22,22 0,0,1 266,128 H86 A22,22 0,0,1 64,106 V106 A22,22 0,0,1 86,84 Z" android:fillType="nonZero" android:fillColor="#FFFFFF" />
+    <path android:pathData="M246,144 H426 A22,22 0,0,1 448,166 V166 A22,22 0,0,1 426,188 H246 A22,22 0,0,1 224,166 V166 A22,22 0,0,1 246,144 Z" android:fillType="nonZero" android:fillAlpha="0.25" android:fillColor="#FFFFFF" />
+    <path android:pathData="M182,144 H362 A22,22 0,0,1 384,166 V166 A22,22 0,0,1 362,188 H182 A22,22 0,0,1 160,166 V166 A22,22 0,0,1 182,144 Z" android:fillType="nonZero" android:fillColor="#FFFFFF" />
+    <path android:pathData="M190,204 H370 A22,22 0,0,1 392,226 V226 A22,22 0,0,1 370,248 H190 A22,22 0,0,1 168,226 V226 A22,22 0,0,1 190,204 Z" android:fillType="nonZero" android:fillAlpha="0.25" android:fillColor="#FFFFFF" />
+    <path android:pathData="M126,204 H306 A22,22 0,0,1 328,226 V226 A22,22 0,0,1 306,248 H126 A22,22 0,0,1 104,226 V226 A22,22 0,0,1 126,204 Z" android:fillType="nonZero" android:fillColor="#FFFFFF" />
+    <path android:pathData="M134,264 H314 A22,22 0,0,1 336,286 V286 A22,22 0,0,1 314,308 H134 A22,22 0,0,1 112,286 V286 A22,22 0,0,1 134,264 Z" android:fillType="nonZero" android:fillAlpha="0.25" android:fillColor="#FFFFFF" />
+    <path android:pathData="M70,264 H250 A22,22 0,0,1 272,286 V286 A22,22 0,0,1 250,308 H70 A22,22 0,0,1 48,286 V286 A22,22 0,0,1 70,264 Z" android:fillType="nonZero" android:fillColor="#FFFFFF" />
+    <path android:pathData="M198,324 H378 A22,22 0,0,1 400,346 V346 A22,22 0,0,1 378,368 H198 A22,22 0,0,1 176,346 V346 A22,22 0,0,1 198,324 Z" android:fillType="nonZero" android:fillAlpha="0.25" android:fillColor="#FFFFFF" />
+    <path android:pathData="M134,324 H314 A22,22 0,0,1 336,346 V346 A22,22 0,0,1 314,368 H134 A22,22 0,0,1 112,346 V346 A22,22 0,0,1 134,324 Z" android:fillType="nonZero" android:fillColor="#FFFFFF" />
+    <path android:pathData="M326,384 H434 A22,22 0,0,1 456,406 V406 A22,22 0,0,1 434,428 H326 A22,22 0,0,1 304,406 V406 A22,22 0,0,1 326,384 Z" android:fillType="nonZero" android:fillAlpha="0.25" android:fillColor="#FFFFFF" />
+    <path android:pathData="M262,384 H370 A22,22 0,0,1 392,406 V406 A22,22 0,0,1 370,428 H262 A22,22 0,0,1 240,406 V406 A22,22 0,0,1 262,384 Z" android:fillType="nonZero" android:fillColor="#FFFFFF" />
+</vector>

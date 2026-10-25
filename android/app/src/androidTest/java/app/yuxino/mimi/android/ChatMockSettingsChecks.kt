@@ -607,6 +607,7 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
         val model = field<TextInputEditText>(editor, "translation-model")
         val key = field<TextInputEditText>(editor, "translation-key")
         val localHttp = field<CheckBox>(editor, "translation-local-http")
+        checkSetupLinks(editor, picker, endpoint, model, key)
         onUi {
             check(picker.isShown && picker.count == TextTranslationPresets.entries.size + 1)
             localHttp.isChecked = false
@@ -650,6 +651,89 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
         }
         instrumentation.waitForIdleSync()
         check(!field<View>(editor, "translation-preset").isShown)
+    }
+
+    private fun checkSetupLinks(editor: ServiceSettingsActivity, picker: Spinner,
+        endpoint: TextInputEditText, model: TextInputEditText, key: TextInputEditText) {
+        fun keyBox() = generateSequence(key.parent) { it.parent }.filterIsInstance<TextInputLayout>().first()
+        val optionalHint = editor.getString(R.string.translation_key_optional)
+        val opened = java.util.concurrent.CopyOnWriteArrayList<Intent>()
+        val monitor = object : Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: Intent): Instrumentation.ActivityResult? {
+                if (intent.action != Intent.ACTION_VIEW) return null
+                opened += Intent(intent)
+                return Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null)
+            }
+        }
+        instrumentation.addMonitor(monitor)
+        try {
+            val openai = TextTranslationPresets.entries.first { it.id == "openai" }
+            val kimi = TextTranslationPresets.entries.first { it.id == "kimi" }
+            val index = TextTranslationPresets.entries.first { it.id == "indexTranslate" }
+            val local = TextTranslationPresets.entries.first { it.id == "ollama" }
+            onUi { picker.setSelection(TextTranslationPresets.entries.indexOf(openai) + 1) }
+            instrumentation.waitForIdleSync()
+            check(opened.isEmpty()) { "Selecting a preset opened an external page" }
+            onUi {
+                check(field<View>(editor, "translation-setup-key").isShown)
+                check(field<View>(editor, "translation-setup-guide").isShown)
+                check(!field<View>(editor, "translation-setup-no-key").isShown)
+                check(keyBox().placeholderText?.toString() != optionalHint) { "A cloud preset described its API key as optional" }
+                check(field<View>(editor, "translation-setup-key").contentDescription.toString().contains(openai.label))
+                // The action must resolve a pending Spinner choice before opening.
+                picker.setSelection(TextTranslationPresets.entries.indexOf(kimi) + 1)
+                check(field<View>(editor, "translation-setup-key").performClick())
+            }
+            instrumentation.waitForIdleSync()
+            check(opened.single().dataString == kimi.apiKeyUrl) { "A setup action opened the previously selected service" }
+            onUi {
+                model.setText("synthetic-setup-model")
+                key.setText("synthetic-setup-key")
+                check(field<View>(editor, "translation-setup-guide").performClick())
+            }
+            instrumentation.waitForIdleSync()
+            check(opened.last().dataString == kimi.guideUrl)
+            onUi {
+                check(endpoint.text.toString() == kimi.endpoint && model.text.toString() == "synthetic-setup-model")
+                check(key.text.toString() == "synthetic-setup-key") { "Opening setup changed an unsaved key" }
+                picker.setSelection(TextTranslationPresets.entries.indexOf(index) + 1)
+            }
+            instrumentation.waitForIdleSync()
+            check(opened.size == 2) { "Selecting a keyless preset opened a page" }
+            onUi {
+                check(!field<View>(editor, "translation-setup-key").isShown)
+                check(field<View>(editor, "translation-setup-no-key").isShown)
+                check(key.isEnabled) { "Keyless guidance disabled the optional credential field" }
+                picker.setSelection(TextTranslationPresets.entries.indexOf(local) + 1)
+            }
+            instrumentation.waitForIdleSync()
+            onUi {
+                check(!field<View>(editor, "translation-setup-key").isShown)
+                check(field<TextView>(editor, "translation-setup-guide").text.toString() == editor.getString(R.string.translation_setup_local_guide))
+                check(keyBox().placeholderText?.toString() == optionalHint) { "A local preset lost its optional-key hint" }
+                check(field<View>(editor, "translation-setup-guide").performClick())
+            }
+            instrumentation.waitForIdleSync()
+            check(opened.last().dataString == local.guideUrl)
+            check(opened.size == 3)
+            onUi {
+                selectMode(editor, TextTranslationProvider.CHAT_MOCK)
+                field<View>(editor, "translation-setup-guide").performClick()
+            }
+            instrumentation.waitForIdleSync()
+            check(opened.size == 3) { "A stale setup action opened after the translation route changed" }
+            onUi { selectMode(editor, TextTranslationProvider.OPENAI_COMPATIBLE) }
+            instrumentation.waitForIdleSync()
+            onUi { picker.setSelection(0) }
+            instrumentation.waitForIdleSync()
+            onUi {
+                check(!field<View>(editor, "translation-setup-actions").isShown)
+                check(!field<View>(editor, "translation-setup-no-key").isShown)
+                check(keyBox().placeholderText?.toString() == optionalHint) { "Custom did not restore its optional-key hint" }
+            }
+        } finally {
+            instrumentation.removeMonitor(monitor)
+        }
     }
 
     private fun selectMode(activity: Activity, provider: TextTranslationProvider) {

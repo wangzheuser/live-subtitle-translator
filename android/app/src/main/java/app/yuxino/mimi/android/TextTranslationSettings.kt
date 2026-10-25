@@ -46,6 +46,28 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
     private val mode = Spinner(activity).apply { tag = "translation-mode"; background = null; setPadding(0, 0, 0, 0) }
     private val preset = Spinner(activity).apply { tag = "translation-preset"; background = null; setPadding(0, 0, 0, 0); isSaveEnabled = false }
     private val presetRow = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; tag = "translation-preset-row" }
+    private val presetHelp: ImageButton
+    private val setupNoKey = ServiceSettingsUi.label(activity, activity.getString(R.string.translation_setup_no_key), 16f).apply {
+        tag = "translation-setup-no-key"; visibility = View.GONE
+    }
+    private val setupKey = setupButton(R.string.translation_setup_get_key, "translation-setup-key") {
+        openSetup(TextTranslationSetupPage.API_KEY)
+    }
+    private val setupGuide = setupButton(R.string.translation_setup_guide, "translation-setup-guide") {
+        openSetup(TextTranslationSetupPage.GUIDE)
+    }
+    private val setupActions = object : LinearLayout(activity) {
+        init { gravity = Gravity.END or Gravity.CENTER_VERTICAL; tag = "translation-setup-actions" }
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            val available = View.MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight
+            val children = listOf(setupKey, setupGuide).filter { it.visibility != View.GONE }
+            children.forEach { it.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)) }
+            orientation = if (View.MeasureSpec.getMode(widthMeasureSpec) != View.MeasureSpec.UNSPECIFIED &&
+                children.sumOf { it.measuredWidth } > available) VERTICAL else HORIZONTAL
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        }
+    }
     private var presetSelection = -1
     private var customPreset = false
     private val qwenModels = listOf("lite", "flash", "plus")
@@ -86,13 +108,19 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
         mode.contentDescription = activity.getString(R.string.translation_title)
         mode.setSelection(providers.indexOf(selected))
         root.addView(mode, LinearLayout.LayoutParams(-1, dp(56)).apply { bottomMargin = dp(16) })
-        presetRow.addView(HelpUi.heading(activity, activity.getString(R.string.translation_preset),
-            activity.getString(R.string.translation_preset_help), 16f, "translation-preset-help"))
+        val presetHeading = HelpUi.heading(activity, activity.getString(R.string.translation_preset),
+            activity.getString(R.string.translation_preset_help), 16f, "translation-preset-help")
+        presetHelp = presetHeading.findViewWithTag("translation-preset-help")
+        presetRow.addView(presetHeading)
         preset.adapter = ArrayAdapter(activity, R.layout.mimi_spinner_item,
             listOf(activity.getString(R.string.translation_preset_custom)) + TextTranslationPresets.entries.map { it.label })
             .apply { setDropDownViewResource(R.layout.mimi_spinner_dropdown) }
         preset.contentDescription = activity.getString(R.string.translation_preset)
         presetRow.addView(preset, LinearLayout.LayoutParams(-1, dp(56)))
+        presetRow.addView(setupNoKey, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        setupActions.addView(setupKey, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.END })
+        setupActions.addView(setupGuide, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.END })
+        presetRow.addView(setupActions, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
         root.addView(presetRow, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(16) })
         qwenModel.adapter = ArrayAdapter(activity, R.layout.mimi_spinner_item,
             listOf("Qwen-MT Lite", "Qwen-MT Flash", "Qwen-MT Plus")).apply { setDropDownViewResource(R.layout.mimi_spinner_dropdown) }
@@ -186,6 +214,28 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
         val id = if (selected == TextTranslationProvider.OPENAI_COMPATIBLE && !customPreset) drafts.getValue(selected).presetId() else null
         presetSelection = TextTranslationPresets.entries.indexOfFirst { it.id == id } + 1
         if (preset.selectedItemPosition != presetSelection) preset.setSelection(presetSelection)
+        val setup = TextTranslationPresets.entries.firstOrNull { it.id == id }
+        HelpUi.setMessage(presetHelp, activity.getString(setup?.setupHelpResource ?: R.string.translation_preset_help))
+        setupKey.visibility = if (setup?.let { it.setupKind == "cloud" && it.apiKeyUrl.isNotBlank() } == true) View.VISIBLE else View.GONE
+        setupGuide.visibility = if (setup?.guideUrl?.isNotBlank() == true) View.VISIBLE else View.GONE
+        setupGuide.setText(if (setup?.setupKind == "local") R.string.translation_setup_local_guide else R.string.translation_setup_guide)
+        setupKey.contentDescription = setup?.let { "${it.label}: ${setupKey.text}" }
+        setupGuide.contentDescription = setup?.let { "${it.label}: ${setupGuide.text}" }
+        setupNoKey.visibility = if (setup?.setupKind == "keyless") View.VISIBLE else View.GONE
+        setupActions.visibility = if (setup == null) View.GONE else View.VISIBLE
+    }
+
+    private fun openSetup(page: TextTranslationSetupPage) {
+        // A browser action can arrive before Spinner's queued selection callback.
+        // Resolve that selection before choosing a trusted destination or snapshotting.
+        val action = if (page == TextTranslationSetupPage.API_KEY) setupKey else setupGuide
+        if (!action.isEnabled ||
+            providers.getOrNull(mode.selectedItemPosition) != selected) return
+        applyPendingPreset()
+        rememberDraft()
+        if (selected != TextTranslationProvider.OPENAI_COMPATIBLE || customPreset) return
+        val presetId = drafts.getValue(selected).presetId() ?: return
+        openTextTranslationSetup(activity, presetId, page)
     }
 
     private fun applyPendingPreset() {
@@ -196,7 +246,7 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
         // Explicit Custom stays selected while this editor's fields are edited.
         val choice = TextTranslationPresets.entries.getOrNull(position - 1)
         customPreset = choice == null
-        if (choice == null) return
+        if (choice == null) { syncPresetSelection(); updateKeyLabel(); return }
         rememberDraft()
         drafts.getValue(selected).applyPreset(choice)
         renderDraft()
@@ -229,6 +279,8 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
     private fun updateKeyLabel() {
         val state = drafts.getValue(selected)
         val hasSavedKey = state.reusesSavedKey()
+        val cloudPreset = selected == TextTranslationProvider.OPENAI_COMPATIBLE && !customPreset &&
+            TextTranslationPresets.entries.getOrNull(presetSelection - 1)?.setupKind == "cloud"
         val label = activity.getString(when (selected) {
             TextTranslationProvider.DEEPL -> R.string.translation_deepl_key
             TextTranslationProvider.DEEPLX -> R.string.translation_token
@@ -237,7 +289,7 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
         ServiceSettingsUi.fieldLabel(inputLayouts.getValue(key), if (hasSavedKey && state.key.isBlank()) activity.getString(R.string.translation_saved_field, label) else label)
         inputLayouts.getValue(key).placeholderText = when {
             hasSavedKey && state.key.isBlank() -> activity.getString(R.string.service_secret_saved)
-            selected in listOf(TextTranslationProvider.DEEPL, TextTranslationProvider.XAI) -> null
+            selected in listOf(TextTranslationProvider.DEEPL, TextTranslationProvider.XAI) || cloudPreset -> null
             else -> activity.getString(R.string.translation_key_optional)
         }
         removeKey.visibility = if (hasSavedKey && selected !in listOf(TextTranslationProvider.DEEPL, TextTranslationProvider.XAI)) View.VISIBLE else View.GONE
@@ -326,9 +378,16 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
     }
     fun setEditingEnabled(enabled: Boolean) {
         if (!enabled) invalidateCheck()
-        listOf(mode, preset, qwenModel, endpoint, model, key, localHttp, removeKey, check).forEach { it.isEnabled = enabled }
+        listOf(mode, preset, setupKey, setupGuide, qwenModel, endpoint, model, key, localHttp, removeKey, check).forEach { it.isEnabled = enabled }
     }
     private fun dp(value: Int) = ServiceSettingsUi.dp(activity, value)
+    private fun setupButton(label: Int, tag: String, action: () -> Unit) =
+        MaterialButton(activity, null, com.google.android.material.R.attr.borderlessButtonStyle).apply {
+            this.tag = tag; setText(label); textSize = 16f; isAllCaps = false; isSingleLine = false
+            minimumHeight = dp(48)
+            setTextColor(ContextCompat.getColor(activity, R.color.mimi_text))
+            setOnClickListener { action() }
+        }
     private fun field(title: Int, tag: String, secret: Boolean = false): TextInputEditText {
         val box = TextInputLayout(activity).apply {
             hint = activity.getString(title); isSaveEnabled = false

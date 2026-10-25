@@ -32,7 +32,25 @@ export const PROVIDER_COPY = {
     "speechTranslationModeSaveFailed": "翻译模式保存失败，请重试。",
     "compatiblePresetLabel": "快速填写",
     "compatiblePresetCustom": "自定义",
-    "compatiblePresetHelp": "快速填入服务地址，部分模型 ID 需自行填写，字段仍可修改。请选择已开通或本机已下载的模型；地址须与账号的地域、产品及 API Key 对应。文字翻译凭据与语音识别分别配置。"
+    "compatiblePresetHelp": "快速填入服务地址，部分模型 ID 需自行填写，字段仍可修改。请选择已开通或本机已下载的模型；地址须与账号的地域、产品及 API Key 对应。文字翻译凭据与语音识别分别配置。",
+    "compatibleSetupGetKey": "获取 API Key",
+    "compatibleSetupGuide": "配置指南",
+    "compatibleSetupLocalGuide": "安装与设置",
+    "compatibleSetupNoKey": "无需 API Key",
+    "compatibleSetupOpenFailed": "无法打开官方设置页面，请重试。",
+    "compatibleSetupOpenAIHelp": "在 OpenAI API 平台选择项目并创建 API Key，粘贴到此处。模型名称填写该项目可调用的模型 ID；ChatGPT 会员不能代替 API Key。",
+    "compatibleSetupDeepSeekHelp": "在 DeepSeek 开放平台的「API keys」中创建密钥并粘贴到此处。从官方模型列表或调用示例复制可用的模型名称，再保存并检查翻译。",
+    "compatibleSetupQwenHelp": "在百炼选择地域和业务空间，创建 API Key 并粘贴到此处。模型填写该空间已开通的模型 ID；预设地址使用北京地域，其他地域需同步修改地址。",
+    "compatibleSetupGeminiHelp": "在 Google AI Studio 选择项目并创建 Gemini API Key，粘贴到此处。模型名称填写该 Key 可调用的模型 ID；Gemini 订阅不能代替 API Key。",
+    "compatibleSetupKimiHelp": "在 Kimi 开放平台的「API Key 管理」中新建密钥并粘贴到此处，模型填写该账号可用的模型 ID。不要使用 Kimi Code 的 Key；国际站账号需要修改地址，并在对应国际站获取 Key。",
+    "compatibleSetupSiliconFlowHelp": "在硅基流动控制台的「API 密钥」中新建密钥并粘贴到此处。在模型广场复制完整模型 ID，包括提供商前缀；地址和 Key 需属于同一站点。",
+    "compatibleSetupOpenRouterHelp": "在 OpenRouter 的密钥设置页创建 API Key 并粘贴到此处。从模型页复制完整的「提供商/模型」名称，确认该账号可以调用。",
+    "compatibleSetupIndexHelp": "官方公共接口无需 API Key，保留预填的服务地址和模型名称即可，不要填入其他服务的 Key。保存后检查翻译；公共服务的可用性以上游为准。",
+    "compatibleSetupTencentHelp": "在腾讯 TokenHub 的 API Key 页面创建密钥并粘贴到此处，从模型列表复制已开通的模型 ID。默认地址使用广州地域；地域、产品和 Key 需一致，不能使用腾讯语音的 SecretID/SecretKey。",
+    "compatibleSetupBaiduHelp": "在百度智能云「安全认证 → API Key」中创建可调用千帆的 Key，粘贴到此处。模型填写千帆已开通的模型 ID；不能使用百度语音翻译的 AppID/AppKey。",
+    "compatibleSetupVolcanoHelp": "在火山方舟选择项目并创建 API Key，粘贴到此处。模型填写已开通的模型或推理接入点 ID；默认使用北京普通 API，不能混用 Coding 套餐或豆包语音的 Key。",
+    "compatibleSetupOllamaHelp": "先安装 Ollama 并下载、运行要使用的本机模型，模型名称填写完整的本地模型名。默认本机服务无需 API Key；无需创建 Ollama 云端 Key。",
+    "compatibleSetupLMStudioHelp": "先在 LM Studio 下载并加载模型，在 Developer 页面启动服务器，复制模型标识到此处。默认无需 API Key；如果服务器启用了认证，则填写该服务器的 Token。"
   },
   "zh-TW": {
     "providerAlibabaDescription": "支援同聲傳譯。\n也可先辨識再翻譯，並自行選擇翻譯服務。",
@@ -66,7 +84,25 @@ export const PROVIDER_COPY = {
     "speechTranslationModeSaveFailed": "翻譯模式儲存失敗，請重試。",
     "compatiblePresetLabel": "快速填入",
     "compatiblePresetCustom": "自訂",
-    "compatiblePresetHelp": "快速填入服務位址，部分模型 ID 需自行填寫，欄位仍可修改。請選擇已開通或本機已下載的模型；位址須與帳號的地域、產品及 API Key 對應。文字翻譯憑據與語音辨識分別設定。"
+    "compatiblePresetHelp": "快速填入服務位址，部分模型 ID 需自行填寫，欄位仍可修改。請選擇已開通或本機已下載的模型；位址須與帳號的地域、產品及 API Key 對應。文字翻譯憑據與語音辨識分別設定。",
+    "compatibleSetupGetKey": "取得 API Key",
+    "compatibleSetupGuide": "設定指南",
+    "compatibleSetupLocalGuide": "安裝與設定",
+    "compatibleSetupNoKey": "不需要 API Key",
+    "compatibleSetupOpenFailed": "無法開啟官方設定頁面，請重試。",
+    "compatibleSetupOpenAIHelp": "在 OpenAI API 平台選擇專案並建立 API Key，貼到此處。模型名稱填寫該專案可呼叫的模型 ID；ChatGPT 會員不能代替 API Key。",
+    "compatibleSetupDeepSeekHelp": "在 DeepSeek 開放平台的「API keys」建立金鑰並貼到此處。從官方模型清單或呼叫範例複製可用的模型名稱，再儲存並檢查翻譯。",
+    "compatibleSetupQwenHelp": "在百煉選擇地域和業務空間，建立 API Key 並貼到此處。模型填寫該空間已開通的模型 ID；預設位址使用北京地域，其他地域需同步修改位址。",
+    "compatibleSetupGeminiHelp": "在 Google AI Studio 選擇專案並建立 Gemini API Key，貼到此處。模型名稱填寫該 Key 可呼叫的模型 ID；Gemini 訂閱不能代替 API Key。",
+    "compatibleSetupKimiHelp": "在 Kimi 開放平台的「API Key 管理」新建金鑰並貼到此處，模型填寫該帳號可用的模型 ID。請勿使用 Kimi Code 的 Key；國際站帳號需修改位址，並在對應國際站取得 Key。",
+    "compatibleSetupSiliconFlowHelp": "在矽基流動控制台的「API 金鑰」新建金鑰並貼到此處。在模型廣場複製完整模型 ID，包括提供商前綴；位址和 Key 須屬於同一站點。",
+    "compatibleSetupOpenRouterHelp": "在 OpenRouter 的金鑰設定頁建立 API Key 並貼到此處。從模型頁複製完整的「提供商/模型」名稱，確認該帳號可以呼叫。",
+    "compatibleSetupIndexHelp": "官方公共介面不需要 API Key，保留預填的服務位址和模型名稱即可，請勿填入其他服務的 Key。儲存後檢查翻譯；公共服務的可用性以上游為準。",
+    "compatibleSetupTencentHelp": "在騰訊 TokenHub 的 API Key 頁面建立金鑰並貼到此處，從模型清單複製已開通的模型 ID。預設位址使用廣州地域；地域、產品和 Key 須一致，請勿使用騰訊語音的 SecretID/SecretKey。",
+    "compatibleSetupBaiduHelp": "在百度智慧雲「安全認證 → API Key」建立可呼叫千帆的 Key，貼到此處。模型填寫千帆已開通的模型 ID；請勿使用百度語音翻譯的 AppID/AppKey。",
+    "compatibleSetupVolcanoHelp": "在火山方舟選擇專案並建立 API Key，貼到此處。模型填寫已開通的模型或推論接入點 ID；預設使用北京一般 API，請勿混用 Coding 套餐或豆包語音的 Key。",
+    "compatibleSetupOllamaHelp": "先安裝 Ollama 並下載、執行要使用的本機模型，模型名稱填寫完整的本機模型名稱。預設本機服務不需要 API Key；無須建立 Ollama 雲端 Key。",
+    "compatibleSetupLMStudioHelp": "先在 LM Studio 下載並載入模型，在 Developer 頁面啟動伺服器，複製模型識別碼到此處。預設不需要 API Key；若伺服器啟用驗證，則填寫該伺服器的 Token。"
   },
   "en": {
     "providerAlibabaDescription": "Supports simultaneous translation,\nor speech recognition followed by translation with a service of your choice.",
@@ -100,7 +136,25 @@ export const PROVIDER_COPY = {
     "speechTranslationModeSaveFailed": "Could not save the translation mode. Try again.",
     "compatiblePresetLabel": "Quick setup",
     "compatiblePresetCustom": "Custom",
-    "compatiblePresetHelp": "Prefills an editable service address; some model IDs must be entered. Choose an enabled or locally downloaded model. Match the address to your account region, product and API key. Text translation and speech recognition use separate credentials."
+    "compatiblePresetHelp": "Prefills an editable service address; some model IDs must be entered. Choose an enabled or locally downloaded model. Match the address to your account region, product and API key. Text translation and speech recognition use separate credentials.",
+    "compatibleSetupGetKey": "Get API key",
+    "compatibleSetupGuide": "Setup guide",
+    "compatibleSetupLocalGuide": "Install and set up",
+    "compatibleSetupNoKey": "No API key needed",
+    "compatibleSetupOpenFailed": "Could not open the official setup page. Try again.",
+    "compatibleSetupOpenAIHelp": "Choose a project on the OpenAI API platform, create an API key and paste it here. Enter a model ID available to that project; a ChatGPT subscription is not an API key.",
+    "compatibleSetupDeepSeekHelp": "Create a key under API keys on the DeepSeek platform and paste it here. Copy an available model name from the official model list or API example, then save and check translation.",
+    "compatibleSetupQwenHelp": "Choose a region and workspace in Model Studio, create an API key and paste it here. Enter a model ID enabled in that workspace. The preset uses Beijing; change the address if your key belongs to another region.",
+    "compatibleSetupGeminiHelp": "Choose a project in Google AI Studio, create a Gemini API key and paste it here. Enter a model ID available to that key; a Gemini subscription is not an API key.",
+    "compatibleSetupKimiHelp": "Create a key in API Key management on the Kimi API platform and enter a model ID available to that account. Do not use a Kimi Code key. International accounts need the matching international address and key console.",
+    "compatibleSetupSiliconFlowHelp": "Create a key under API keys in the SiliconFlow console and paste it here. Copy the full model ID from the model catalog, including its provider prefix. Use an address and key from the same regional site.",
+    "compatibleSetupOpenRouterHelp": "Create an API key in OpenRouter key settings and paste it here. Copy the complete provider/model slug from the model page and confirm your account can call it.",
+    "compatibleSetupIndexHelp": "The official public endpoint needs no API key. Keep the prefilled address and model; do not enter a key from another service. Save and check translation. Availability depends on the upstream public service.",
+    "compatibleSetupTencentHelp": "Create a key on the Tencent TokenHub API Key page and copy an enabled model ID from its model list. The preset uses Guangzhou. Match the region, product and key; Tencent speech SecretID/SecretKey credentials cannot be used here.",
+    "compatibleSetupBaiduHelp": "In Baidu AI Cloud, open Security authentication → API Key and create a key with Qianfan access. Paste it here and enter an enabled Qianfan model ID. Baidu speech-translation AppID/AppKey credentials cannot be used here.",
+    "compatibleSetupVolcanoHelp": "Choose a project in Volcano Ark, create an API key and paste it here. Enter an enabled model or inference endpoint ID. The preset uses the ordinary Beijing API; Coding-plan or Doubao Speech keys are not substitutes.",
+    "compatibleSetupOllamaHelp": "Install Ollama, download a local model and run it first. Enter its complete local model name here. The default local server needs no API key; you do not need to create an Ollama cloud key.",
+    "compatibleSetupLMStudioHelp": "Download and load a model in LM Studio, start the server on its Developer page and copy the model identifier here. No API key is needed by default. If server authentication is enabled, enter that server’s token."
   },
   "ja": {
     "providerAlibabaDescription": "同時通訳に対応。\n音声認識後に、お好みの翻訳サービスで翻訳することもできます。",
@@ -134,7 +188,25 @@ export const PROVIDER_COPY = {
     "speechTranslationModeSaveFailed": "翻訳モードを保存できませんでした。再試行してください。",
     "compatiblePresetLabel": "簡単入力",
     "compatiblePresetCustom": "カスタム",
-    "compatiblePresetHelp": "サービスのアドレスを入力し、後から変更できます。一部のモデル ID は手入力が必要です。利用可能またはダウンロード済みのモデルを選び、アカウントの地域・製品・API Key に合うアドレスを使用してください。テキスト翻訳と音声認識の認証情報は別々に設定します。"
+    "compatiblePresetHelp": "サービスのアドレスを入力し、後から変更できます。一部のモデル ID は手入力が必要です。利用可能またはダウンロード済みのモデルを選び、アカウントの地域・製品・API Key に合うアドレスを使用してください。テキスト翻訳と音声認識の認証情報は別々に設定します。",
+    "compatibleSetupGetKey": "API キーを取得",
+    "compatibleSetupGuide": "設定ガイド",
+    "compatibleSetupLocalGuide": "インストールと設定",
+    "compatibleSetupNoKey": "API キーは不要",
+    "compatibleSetupOpenFailed": "公式の設定ページを開けませんでした。再試行してください。",
+    "compatibleSetupOpenAIHelp": "OpenAI API プラットフォームでプロジェクトを選び、API キーを作成してここに貼り付けます。そのプロジェクトで利用できるモデル ID を入力してください。ChatGPT の有料プランは API キーの代わりにはなりません。",
+    "compatibleSetupDeepSeekHelp": "DeepSeek プラットフォームの「API keys」でキーを作成し、ここに貼り付けます。公式のモデル一覧や API の例から利用可能なモデル名をコピーし、保存して翻訳を確認してください。",
+    "compatibleSetupQwenHelp": "Model Studio でリージョンとワークスペースを選び、API キーを作成してここに貼り付けます。そのワークスペースで有効なモデル ID を入力してください。初期 URL は北京用です。他のリージョンでは URL も変更します。",
+    "compatibleSetupGeminiHelp": "Google AI Studio でプロジェクトを選び、Gemini API キーを作成してここに貼り付けます。そのキーで利用できるモデル ID を入力してください。Gemini の有料プランは API キーの代わりにはなりません。",
+    "compatibleSetupKimiHelp": "Kimi API プラットフォームの「API Key 管理」でキーを作成し、そのアカウントで利用できるモデル ID を入力します。Kimi Code のキーは使用しないでください。国際版のアカウントでは、URL とキーの管理画面も国際版に合わせます。",
+    "compatibleSetupSiliconFlowHelp": "SiliconFlow コンソールの「API keys」でキーを作成し、ここに貼り付けます。モデル一覧から提供元の接頭辞を含む完全なモデル ID をコピーしてください。URL とキーは同じ地域のサイトに合わせます。",
+    "compatibleSetupOpenRouterHelp": "OpenRouter のキー設定画面で API キーを作成し、ここに貼り付けます。モデルのページから「提供元/モデル」の完全な名前をコピーし、アカウントで利用できることを確認してください。",
+    "compatibleSetupIndexHelp": "公式の公開 API に API キーは不要です。入力済みの URL とモデル名を使い、他のサービスのキーは入力しないでください。保存後に翻訳を確認します。公開サービスの提供状況は運営元によります。",
+    "compatibleSetupTencentHelp": "Tencent TokenHub の API Key 画面でキーを作成し、モデル一覧から利用可能なモデル ID をコピーします。初期 URL は広州用です。リージョン・製品・キーを揃えてください。Tencent 音声サービスの SecretID/SecretKey は使えません。",
+    "compatibleSetupBaiduHelp": "Baidu AI Cloud の「セキュリティ認証 → API Key」で Qianfan を利用できるキーを作成し、ここに貼り付けます。利用可能な Qianfan モデル ID を入力してください。音声翻訳の AppID/AppKey は使えません。",
+    "compatibleSetupVolcanoHelp": "Volcano Ark でプロジェクトを選び、API キーを作成してここに貼り付けます。利用可能なモデルまたは推論エンドポイント ID を入力してください。初期設定は北京の通常 API 用で、Coding プランや Doubao 音声サービスのキーは使えません。",
+    "compatibleSetupOllamaHelp": "Ollama をインストールし、使いたいローカルモデルをダウンロードして実行します。完全なローカルモデル名をここに入力してください。初期設定のローカルサーバーに API キーは不要で、Ollama のクラウドキーも必要ありません。",
+    "compatibleSetupLMStudioHelp": "LM Studio でモデルをダウンロードして読み込み、「Developer」画面でサーバーを起動し、モデル識別子をここにコピーします。初期設定では API キーは不要です。サーバーの認証を有効にした場合は、そのトークンを入力してください。"
   },
   "de": {
     "providerAlibabaDescription": "Unterstützt Simultanübersetzung\noder Spracherkennung mit anschließender Übersetzung durch einen frei wählbaren Dienst.",
@@ -168,7 +240,25 @@ export const PROVIDER_COPY = {
     "speechTranslationModeSaveFailed": "Übersetzungsmodus konnte nicht gespeichert werden. Bitte erneut versuchen.",
     "compatiblePresetLabel": "Schnelleinrichtung",
     "compatiblePresetCustom": "Benutzerdefiniert",
-    "compatiblePresetHelp": "Füllt eine bearbeitbare Dienstadresse aus; manche Modell-IDs müssen Sie eingeben. Wählen Sie ein freigeschaltetes oder lokal geladenes Modell. Adresse, Kontoregion, Produkt und API-Schlüssel müssen zusammenpassen. Textübersetzung und Spracherkennung haben getrennte Zugangsdaten."
+    "compatiblePresetHelp": "Füllt eine bearbeitbare Dienstadresse aus; manche Modell-IDs müssen Sie eingeben. Wählen Sie ein freigeschaltetes oder lokal geladenes Modell. Adresse, Kontoregion, Produkt und API-Schlüssel müssen zusammenpassen. Textübersetzung und Spracherkennung haben getrennte Zugangsdaten.",
+    "compatibleSetupGetKey": "API-Schlüssel abrufen",
+    "compatibleSetupGuide": "Einrichtungsanleitung",
+    "compatibleSetupLocalGuide": "Installation und Einrichtung",
+    "compatibleSetupNoKey": "Kein API-Schlüssel nötig",
+    "compatibleSetupOpenFailed": "Die offizielle Einrichtungsseite konnte nicht geöffnet werden. Bitte erneut versuchen.",
+    "compatibleSetupOpenAIHelp": "Wählen Sie auf der OpenAI-API-Plattform ein Projekt, erstellen Sie einen API-Schlüssel und fügen Sie ihn hier ein. Tragen Sie eine Modell-ID ein, die für dieses Projekt verfügbar ist. Ein ChatGPT-Abo ersetzt keinen API-Schlüssel.",
+    "compatibleSetupDeepSeekHelp": "Erstellen Sie auf der DeepSeek-Plattform unter „API keys“ einen Schlüssel und fügen Sie ihn hier ein. Kopieren Sie einen verfügbaren Modellnamen aus der offiziellen Modellliste oder dem API-Beispiel, speichern Sie und prüfen Sie die Übersetzung.",
+    "compatibleSetupQwenHelp": "Wählen Sie in Model Studio Region und Workspace, erstellen Sie einen API-Schlüssel und fügen Sie ihn hier ein. Tragen Sie eine dort freigeschaltete Modell-ID ein. Die Vorlage nutzt Peking; für andere Regionen muss auch die Adresse geändert werden.",
+    "compatibleSetupGeminiHelp": "Wählen Sie in Google AI Studio ein Projekt, erstellen Sie einen Gemini-API-Schlüssel und fügen Sie ihn hier ein. Tragen Sie eine mit diesem Schlüssel verfügbare Modell-ID ein. Ein Gemini-Abo ersetzt keinen API-Schlüssel.",
+    "compatibleSetupKimiHelp": "Erstellen Sie in der API-Schlüsselverwaltung der Kimi-API-Plattform einen Schlüssel und tragen Sie eine verfügbare Modell-ID ein. Verwenden Sie keinen Kimi-Code-Schlüssel. Internationale Konten benötigen die passende internationale Adresse und Schlüsselverwaltung.",
+    "compatibleSetupSiliconFlowHelp": "Erstellen Sie in der SiliconFlow-Konsole unter „API keys“ einen Schlüssel und fügen Sie ihn hier ein. Kopieren Sie die vollständige Modell-ID einschließlich Anbieterpräfix aus dem Modellkatalog. Adresse und Schlüssel müssen zur selben regionalen Website gehören.",
+    "compatibleSetupOpenRouterHelp": "Erstellen Sie in den OpenRouter-Schlüsseleinstellungen einen API-Schlüssel und fügen Sie ihn hier ein. Kopieren Sie den vollständigen Anbieter/Modell-Namen von der Modellseite und prüfen Sie den Kontozugriff.",
+    "compatibleSetupIndexHelp": "Der offizielle öffentliche Endpunkt benötigt keinen API-Schlüssel. Behalten Sie Adresse und Modell bei und tragen Sie keinen Schlüssel eines anderen Dienstes ein. Speichern Sie und prüfen Sie die Übersetzung. Die Verfügbarkeit hängt vom öffentlichen Dienst ab.",
+    "compatibleSetupTencentHelp": "Erstellen Sie auf der API-Key-Seite von Tencent TokenHub einen Schlüssel und kopieren Sie eine freigeschaltete Modell-ID. Die Vorlage nutzt Guangzhou. Region, Produkt und Schlüssel müssen zusammenpassen; SecretID/SecretKey des Tencent-Sprachdienstes sind hier nicht verwendbar.",
+    "compatibleSetupBaiduHelp": "Öffnen Sie in Baidu AI Cloud „Sicherheitsauthentifizierung → API Key“ und erstellen Sie einen Schlüssel mit Qianfan-Zugriff. Fügen Sie ihn hier ein und tragen Sie eine freigeschaltete Qianfan-Modell-ID ein. AppID/AppKey der Baidu-Sprachübersetzung sind hier nicht verwendbar.",
+    "compatibleSetupVolcanoHelp": "Wählen Sie in Volcano Ark ein Projekt, erstellen Sie einen API-Schlüssel und fügen Sie ihn hier ein. Tragen Sie eine freigeschaltete Modell- oder Inferenzendpunkt-ID ein. Die Vorlage nutzt die reguläre API in Peking; Coding-Tarif- oder Doubao-Sprachschlüssel sind kein Ersatz.",
+    "compatibleSetupOllamaHelp": "Installieren Sie Ollama, laden Sie ein lokales Modell herunter und starten Sie es. Tragen Sie hier den vollständigen lokalen Modellnamen ein. Der lokale Standardserver benötigt keinen API-Schlüssel; ein Ollama-Cloud-Schlüssel ist nicht nötig.",
+    "compatibleSetupLMStudioHelp": "Laden Sie in LM Studio ein Modell herunter und laden Sie es in den Speicher. Starten Sie auf der Developer-Seite den Server und kopieren Sie die Modellkennung hierher. Standardmäßig ist kein API-Schlüssel nötig. Bei aktivierter Serverauthentifizierung tragen Sie dessen Token ein."
   },
   "ko": {
     "providerAlibabaDescription": "동시통역을 지원하며,\n음성을 먼저 인식한 뒤 원하는 번역 서비스로 번역할 수도 있습니다.",
@@ -202,7 +292,25 @@ export const PROVIDER_COPY = {
     "speechTranslationModeSaveFailed": "번역 모드를 저장하지 못했습니다. 다시 시도하세요.",
     "compatiblePresetLabel": "빠른 설정",
     "compatiblePresetCustom": "사용자 지정",
-    "compatiblePresetHelp": "수정 가능한 서비스 주소를 채웁니다. 일부 모델 ID는 직접 입력해야 합니다. 활성화했거나 로컬에 다운로드한 모델을 선택하고 계정 리전, 제품, API 키에 맞는 주소를 사용하세요. 텍스트 번역과 음성 인식의 인증 정보는 별도로 설정합니다."
+    "compatiblePresetHelp": "수정 가능한 서비스 주소를 채웁니다. 일부 모델 ID는 직접 입력해야 합니다. 활성화했거나 로컬에 다운로드한 모델을 선택하고 계정 리전, 제품, API 키에 맞는 주소를 사용하세요. 텍스트 번역과 음성 인식의 인증 정보는 별도로 설정합니다.",
+    "compatibleSetupGetKey": "API 키 가져오기",
+    "compatibleSetupGuide": "설정 안내",
+    "compatibleSetupLocalGuide": "설치 및 설정",
+    "compatibleSetupNoKey": "API 키 불필요",
+    "compatibleSetupOpenFailed": "공식 설정 페이지를 열지 못했습니다. 다시 시도하세요.",
+    "compatibleSetupOpenAIHelp": "OpenAI API 플랫폼에서 프로젝트를 선택하고 API 키를 만들어 여기에 붙여넣으세요. 해당 프로젝트에서 사용할 수 있는 모델 ID를 입력하세요. ChatGPT 구독은 API 키를 대신하지 않습니다.",
+    "compatibleSetupDeepSeekHelp": "DeepSeek 플랫폼의 API keys에서 키를 만들어 여기에 붙여넣으세요. 공식 모델 목록이나 API 예제에서 사용 가능한 모델 이름을 복사한 뒤 저장하고 번역을 확인하세요.",
+    "compatibleSetupQwenHelp": "Model Studio에서 리전과 워크스페이스를 선택하고 API 키를 만들어 여기에 붙여넣으세요. 해당 워크스페이스에서 활성화한 모델 ID를 입력하세요. 기본 주소는 베이징이므로 다른 리전의 키라면 주소도 바꾸세요.",
+    "compatibleSetupGeminiHelp": "Google AI Studio에서 프로젝트를 선택하고 Gemini API 키를 만들어 여기에 붙여넣으세요. 해당 키로 사용할 수 있는 모델 ID를 입력하세요. Gemini 구독은 API 키를 대신하지 않습니다.",
+    "compatibleSetupKimiHelp": "Kimi API 플랫폼의 API 키 관리에서 키를 만들고 해당 계정의 모델 ID를 입력하세요. Kimi Code 키는 사용하지 마세요. 국제 계정은 국제 서비스 주소와 키 관리 페이지를 사용해야 합니다.",
+    "compatibleSetupSiliconFlowHelp": "SiliconFlow 콘솔의 API 키에서 키를 만들어 여기에 붙여넣으세요. 모델 목록에서 제공업체 접두사가 포함된 전체 모델 ID를 복사하세요. 주소와 키는 같은 지역 사이트의 것이어야 합니다.",
+    "compatibleSetupOpenRouterHelp": "OpenRouter 키 설정에서 API 키를 만들어 여기에 붙여넣으세요. 모델 페이지에서 제공업체/모델 형식의 전체 이름을 복사하고 계정에서 호출할 수 있는지 확인하세요.",
+    "compatibleSetupIndexHelp": "공식 공개 API는 API 키가 필요하지 않습니다. 미리 채운 주소와 모델을 유지하고 다른 서비스의 키를 입력하지 마세요. 저장 후 번역을 확인하세요. 공개 서비스의 가용성은 운영 측에 따릅니다.",
+    "compatibleSetupTencentHelp": "Tencent TokenHub의 API Key 페이지에서 키를 만들고 모델 목록에서 활성화한 모델 ID를 복사하세요. 기본 주소는 광저우입니다. 리전, 제품, 키를 맞춰야 하며 Tencent 음성 서비스의 SecretID/SecretKey는 사용할 수 없습니다.",
+    "compatibleSetupBaiduHelp": "Baidu AI Cloud의 보안 인증 → API Key에서 Qianfan을 호출할 수 있는 키를 만들어 여기에 붙여넣으세요. 활성화한 Qianfan 모델 ID를 입력하세요. Baidu 음성 번역의 AppID/AppKey는 사용할 수 없습니다.",
+    "compatibleSetupVolcanoHelp": "Volcano Ark에서 프로젝트를 선택하고 API 키를 만들어 여기에 붙여넣으세요. 활성화한 모델 또는 추론 엔드포인트 ID를 입력하세요. 기본값은 베이징 일반 API이며 Coding 요금제나 Doubao 음성 키는 사용할 수 없습니다.",
+    "compatibleSetupOllamaHelp": "Ollama를 설치하고 사용할 로컬 모델을 다운로드한 뒤 먼저 실행하세요. 전체 로컬 모델 이름을 여기에 입력하세요. 기본 로컬 서버에는 API 키가 필요 없으며 Ollama 클라우드 키를 만들 필요도 없습니다.",
+    "compatibleSetupLMStudioHelp": "LM Studio에서 모델을 다운로드하고 로드한 뒤 Developer 페이지에서 서버를 시작하고 모델 식별자를 여기에 복사하세요. 기본적으로 API 키는 필요 없습니다. 서버 인증을 켰다면 해당 서버의 토큰을 입력하세요."
   },
   "fr": {
     "providerAlibabaDescription": "Traduction simultanée,\nou reconnaissance vocale suivie d’une traduction avec le service de votre choix.",
@@ -236,7 +344,25 @@ export const PROVIDER_COPY = {
     "speechTranslationModeSaveFailed": "Impossible d’enregistrer le mode de traduction. Réessayez.",
     "compatiblePresetLabel": "Configuration rapide",
     "compatiblePresetCustom": "Personnalisé",
-    "compatiblePresetHelp": "Préremplit une adresse modifiable ; certains identifiants de modèle restent à saisir. Choisissez un modèle activé ou téléchargé localement. L’adresse doit correspondre à la région du compte, au produit et à la clé API. Traduction et reconnaissance vocale ont des identifiants distincts."
+    "compatiblePresetHelp": "Préremplit une adresse modifiable ; certains identifiants de modèle restent à saisir. Choisissez un modèle activé ou téléchargé localement. L’adresse doit correspondre à la région du compte, au produit et à la clé API. Traduction et reconnaissance vocale ont des identifiants distincts.",
+    "compatibleSetupGetKey": "Obtenir une clé API",
+    "compatibleSetupGuide": "Guide de configuration",
+    "compatibleSetupLocalGuide": "Installation et configuration",
+    "compatibleSetupNoKey": "Aucune clé API nécessaire",
+    "compatibleSetupOpenFailed": "Impossible d’ouvrir la page officielle de configuration. Réessayez.",
+    "compatibleSetupOpenAIHelp": "Choisissez un projet sur la plateforme API OpenAI, créez une clé API et collez-la ici. Saisissez un identifiant de modèle accessible à ce projet ; un abonnement ChatGPT ne remplace pas une clé API.",
+    "compatibleSetupDeepSeekHelp": "Créez une clé dans API keys sur la plateforme DeepSeek et collez-la ici. Copiez un nom de modèle disponible depuis la liste officielle ou un exemple API, puis enregistrez et vérifiez la traduction.",
+    "compatibleSetupQwenHelp": "Choisissez une région et un espace dans Model Studio, créez une clé API et collez-la ici. Saisissez un modèle activé dans cet espace. L’adresse prédéfinie utilise Pékin ; modifiez-la si votre clé appartient à une autre région.",
+    "compatibleSetupGeminiHelp": "Choisissez un projet dans Google AI Studio, créez une clé API Gemini et collez-la ici. Saisissez un modèle accessible avec cette clé ; un abonnement Gemini ne remplace pas une clé API.",
+    "compatibleSetupKimiHelp": "Créez une clé dans la gestion des clés de la plateforme API Kimi et saisissez un modèle accessible à ce compte. N’utilisez pas une clé Kimi Code. Les comptes internationaux nécessitent l’adresse et la console de clés internationales correspondantes.",
+    "compatibleSetupSiliconFlowHelp": "Créez une clé dans API keys de la console SiliconFlow et collez-la ici. Copiez l’identifiant complet du modèle, préfixe du fournisseur inclus, depuis le catalogue. L’adresse et la clé doivent appartenir au même site régional.",
+    "compatibleSetupOpenRouterHelp": "Créez une clé API dans les paramètres de clés OpenRouter et collez-la ici. Copiez le nom complet fournisseur/modèle depuis sa page et vérifiez que votre compte peut l’utiliser.",
+    "compatibleSetupIndexHelp": "L’API publique officielle ne nécessite aucune clé. Gardez l’adresse et le modèle préremplis ; n’entrez pas la clé d’un autre service. Enregistrez et vérifiez la traduction. La disponibilité dépend du service public en amont.",
+    "compatibleSetupTencentHelp": "Créez une clé sur la page API Key de Tencent TokenHub et copiez un modèle activé depuis sa liste. L’adresse prédéfinie utilise Guangzhou. Région, produit et clé doivent correspondre ; les identifiants SecretID/SecretKey du service vocal Tencent ne conviennent pas.",
+    "compatibleSetupBaiduHelp": "Dans Baidu AI Cloud, ouvrez Authentification de sécurité → API Key et créez une clé donnant accès à Qianfan. Collez-la ici et saisissez un modèle Qianfan activé. Les identifiants AppID/AppKey de traduction vocale Baidu ne conviennent pas.",
+    "compatibleSetupVolcanoHelp": "Choisissez un projet dans Volcano Ark, créez une clé API et collez-la ici. Saisissez un modèle ou un point d’inférence activé. Le préréglage utilise l’API ordinaire de Pékin ; les clés Coding ou Doubao Speech ne conviennent pas.",
+    "compatibleSetupOllamaHelp": "Installez Ollama, téléchargez un modèle local et lancez-le d’abord. Saisissez son nom local complet ici. Le serveur local par défaut ne nécessite aucune clé API ; inutile de créer une clé cloud Ollama.",
+    "compatibleSetupLMStudioHelp": "Téléchargez et chargez un modèle dans LM Studio, démarrez le serveur dans Developer et copiez son identifiant ici. Aucune clé API n’est nécessaire par défaut. Si l’authentification du serveur est activée, saisissez son jeton."
   },
   "th": {
     "providerAlibabaDescription": "รองรับการแปลพร้อมเสียง\nหรือรู้จำเสียงก่อนแล้วแปลด้วยบริการที่คุณเลือก",
@@ -270,7 +396,25 @@ export const PROVIDER_COPY = {
     "speechTranslationModeSaveFailed": "บันทึกโหมดการแปลไม่สำเร็จ ลองอีกครั้ง",
     "compatiblePresetLabel": "ตั้งค่าด่วน",
     "compatiblePresetCustom": "กำหนดเอง",
-    "compatiblePresetHelp": "กรอกที่อยู่บริการให้โดยยังแก้ไขได้ บางโมเดลต้องกรอก ID เอง เลือกโมเดลที่เปิดใช้หรือดาวน์โหลดไว้ในเครื่อง และใช้ที่อยู่ที่ตรงกับภูมิภาคบัญชี ผลิตภัณฑ์ และ API key ตั้งค่าข้อมูลรับรองการแปลข้อความแยกจากการรู้จำเสียง"
+    "compatiblePresetHelp": "กรอกที่อยู่บริการให้โดยยังแก้ไขได้ บางโมเดลต้องกรอก ID เอง เลือกโมเดลที่เปิดใช้หรือดาวน์โหลดไว้ในเครื่อง และใช้ที่อยู่ที่ตรงกับภูมิภาคบัญชี ผลิตภัณฑ์ และ API key ตั้งค่าข้อมูลรับรองการแปลข้อความแยกจากการรู้จำเสียง",
+    "compatibleSetupGetKey": "รับ API Key",
+    "compatibleSetupGuide": "คู่มือการตั้งค่า",
+    "compatibleSetupLocalGuide": "ติดตั้งและตั้งค่า",
+    "compatibleSetupNoKey": "ไม่ต้องใช้ API Key",
+    "compatibleSetupOpenFailed": "เปิดหน้าตั้งค่าอย่างเป็นทางการไม่ได้ ลองอีกครั้ง",
+    "compatibleSetupOpenAIHelp": "เลือกโปรเจกต์ในแพลตฟอร์ม OpenAI API สร้าง API key แล้ววางที่นี่ กรอก ID โมเดลที่โปรเจกต์ใช้งานได้ การสมัคร ChatGPT ใช้แทน API key ไม่ได้",
+    "compatibleSetupDeepSeekHelp": "สร้างคีย์ในหน้า API keys ของแพลตฟอร์ม DeepSeek แล้ววางที่นี่ คัดลอกชื่อโมเดลที่ใช้ได้จากรายการโมเดลหรือ API ตัวอย่างอย่างเป็นทางการ จากนั้นบันทึกและตรวจสอบการแปล",
+    "compatibleSetupQwenHelp": "เลือกภูมิภาคและเวิร์กสเปซใน Model Studio สร้าง API key แล้ววางที่นี่ กรอก ID โมเดลที่เปิดใช้ในเวิร์กสเปซนั้น ค่าที่ตั้งไว้ใช้ปักกิ่ง หากคีย์เป็นภูมิภาคอื่นต้องเปลี่ยนที่อยู่ด้วย",
+    "compatibleSetupGeminiHelp": "เลือกโปรเจกต์ใน Google AI Studio สร้าง Gemini API key แล้ววางที่นี่ กรอก ID โมเดลที่คีย์เรียกใช้ได้ การสมัคร Gemini ใช้แทน API key ไม่ได้",
+    "compatibleSetupKimiHelp": "สร้างคีย์ในหน้าจัดการ API Key ของแพลตฟอร์ม Kimi API แล้วกรอก ID โมเดลที่บัญชีใช้ได้ อย่าใช้คีย์ Kimi Code บัญชีสากลต้องใช้ที่อยู่และหน้าจัดการคีย์ของบริการสากลให้ตรงกัน",
+    "compatibleSetupSiliconFlowHelp": "สร้างคีย์ในหน้า API keys ของคอนโซล SiliconFlow แล้ววางที่นี่ คัดลอก ID โมเดลแบบเต็มจากรายการโมเดล รวมชื่อผู้ให้บริการด้านหน้า ที่อยู่และคีย์ต้องเป็นของเว็บไซต์ภูมิภาคเดียวกัน",
+    "compatibleSetupOpenRouterHelp": "สร้าง API key ในหน้าตั้งค่าคีย์ของ OpenRouter แล้ววางที่นี่ คัดลอกชื่อแบบเต็มในรูปแบบผู้ให้บริการ/โมเดลจากหน้าโมเดล และตรวจสอบว่าบัญชีเรียกใช้ได้",
+    "compatibleSetupIndexHelp": "API สาธารณะอย่างเป็นทางการไม่ต้องใช้คีย์ ใช้ที่อยู่และโมเดลที่กรอกไว้ และอย่าใส่คีย์ของบริการอื่น บันทึกแล้วตรวจสอบการแปล ความพร้อมใช้งานขึ้นอยู่กับผู้ให้บริการสาธารณะ",
+    "compatibleSetupTencentHelp": "สร้างคีย์ในหน้า API Key ของ Tencent TokenHub แล้วคัดลอก ID โมเดลที่เปิดใช้จากรายการ ค่าเริ่มต้นใช้กว่างโจว ภูมิภาค ผลิตภัณฑ์ และคีย์ต้องตรงกัน ใช้ SecretID/SecretKey ของบริการเสียง Tencent ไม่ได้",
+    "compatibleSetupBaiduHelp": "ใน Baidu AI Cloud เปิดการยืนยันตัวตนด้านความปลอดภัย → API Key แล้วสร้างคีย์ที่เรียก Qianfan ได้ วางที่นี่และกรอก ID โมเดล Qianfan ที่เปิดใช้ ใช้ AppID/AppKey ของบริการแปลเสียง Baidu ไม่ได้",
+    "compatibleSetupVolcanoHelp": "เลือกโปรเจกต์ใน Volcano Ark สร้าง API key แล้ววางที่นี่ กรอก ID โมเดลหรือจุดเชื่อมต่อการอนุมานที่เปิดใช้ ค่าเริ่มต้นเป็น API ปกติในปักกิ่ง ใช้คีย์แพ็กเกจ Coding หรือ Doubao Speech แทนไม่ได้",
+    "compatibleSetupOllamaHelp": "ติดตั้ง Ollama ดาวน์โหลดโมเดลในเครื่องและเรียกใช้ก่อน กรอกชื่อโมเดลในเครื่องแบบเต็มที่นี่ เซิร์ฟเวอร์ในเครื่องค่าเริ่มต้นไม่ต้องใช้ API key และไม่ต้องสร้างคีย์ Ollama Cloud",
+    "compatibleSetupLMStudioHelp": "ดาวน์โหลดและโหลดโมเดลใน LM Studio เริ่มเซิร์ฟเวอร์ในหน้า Developer แล้วคัดลอกตัวระบุโมเดลมาที่นี่ ค่าเริ่มต้นไม่ต้องใช้ API key หากเปิดการยืนยันตัวตนของเซิร์ฟเวอร์ ให้กรอกโทเค็นของเซิร์ฟเวอร์นั้น"
   }
 } as const;
 
@@ -279,78 +423,130 @@ export const OPENAI_COMPATIBLE_PRESETS = [
     "id": "openai",
     "label": "OpenAI",
     "endpoint": "https://api.openai.com/v1",
-    "model": "gpt-6-luna"
+    "model": "gpt-6-luna",
+    "apiKeyUrl": "https://platform.openai.com/api-keys",
+    "guideUrl": "https://developers.openai.com/api/docs/quickstart",
+    "setupKind": "cloud",
+    "setupHelpKey": "compatibleSetupOpenAIHelp"
   },
   {
     "id": "deepseek",
     "label": "DeepSeek",
     "endpoint": "https://api.deepseek.com",
-    "model": "deepseek-flash"
+    "model": "deepseek-flash",
+    "apiKeyUrl": "https://platform.deepseek.com/api_keys",
+    "guideUrl": "https://api-docs.deepseek.com/",
+    "setupKind": "cloud",
+    "setupHelpKey": "compatibleSetupDeepSeekHelp"
   },
   {
     "id": "qwen",
     "label": "Qwen (Alibaba Cloud)",
     "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    "model": "qwen-flash"
+    "model": "qwen-flash",
+    "apiKeyUrl": "https://bailian.console.aliyun.com/cn-beijing/model/settings/api-key",
+    "guideUrl": "https://help.aliyun.com/zh/model-studio/first-api-call-to-qwen",
+    "setupKind": "cloud",
+    "setupHelpKey": "compatibleSetupQwenHelp"
   },
   {
     "id": "gemini",
     "label": "Google Gemini",
     "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai",
-    "model": ""
+    "model": "",
+    "apiKeyUrl": "https://aistudio.google.com/apikey",
+    "guideUrl": "https://ai.google.dev/gemini-api/docs/api-key",
+    "setupKind": "cloud",
+    "setupHelpKey": "compatibleSetupGeminiHelp"
   },
   {
     "id": "kimi",
     "label": "Kimi",
     "endpoint": "https://api.moonshot.cn/v1",
-    "model": ""
+    "model": "",
+    "apiKeyUrl": "https://platform.kimi.com/console/api-keys",
+    "guideUrl": "https://www.kimi.com/help/kimi-api/api-overview",
+    "setupKind": "cloud",
+    "setupHelpKey": "compatibleSetupKimiHelp"
   },
   {
     "id": "siliconflow",
     "label": "SiliconFlow",
     "endpoint": "https://api.siliconflow.cn/v1",
-    "model": ""
+    "model": "",
+    "apiKeyUrl": "https://cloud.siliconflow.cn/account/ak",
+    "guideUrl": "https://docs.siliconflow.cn/docs/userguide/quickstart",
+    "setupKind": "cloud",
+    "setupHelpKey": "compatibleSetupSiliconFlowHelp"
   },
   {
     "id": "openrouter",
     "label": "OpenRouter",
     "endpoint": "https://openrouter.ai/api/v1",
-    "model": ""
+    "model": "",
+    "apiKeyUrl": "https://openrouter.ai/settings/keys",
+    "guideUrl": "https://openrouter.ai/docs/quickstart",
+    "setupKind": "cloud",
+    "setupHelpKey": "compatibleSetupOpenRouterHelp"
   },
   {
     "id": "indexTranslate",
     "label": "Index-Translate",
     "endpoint": "https://index-translate.bilibili.com/v1",
-    "model": "Index-Translate-35B-A3B"
+    "model": "Index-Translate-35B-A3B",
+    "apiKeyUrl": "",
+    "guideUrl": "https://github.com/bilibili/Index-Translate",
+    "setupKind": "keyless",
+    "setupHelpKey": "compatibleSetupIndexHelp"
   },
   {
     "id": "tencentTokenHub",
     "label": "Tencent TokenHub",
     "endpoint": "https://tokenhub.tencentmaas.com/v1",
-    "model": ""
+    "model": "",
+    "apiKeyUrl": "https://console.cloud.tencent.com/tokenhub/apikey",
+    "guideUrl": "https://cloud.tencent.com/document/product/1823/130078",
+    "setupKind": "cloud",
+    "setupHelpKey": "compatibleSetupTencentHelp"
   },
   {
     "id": "baiduQianfan",
     "label": "Baidu Qianfan",
     "endpoint": "https://qianfan.baidubce.com/v2",
-    "model": ""
+    "model": "",
+    "apiKeyUrl": "https://console.bce.baidu.com/iam/#/iam/apikey/list",
+    "guideUrl": "https://cloud.baidu.com/doc/qianfan-docs/s/qm8qxemze",
+    "setupKind": "cloud",
+    "setupHelpKey": "compatibleSetupBaiduHelp"
   },
   {
     "id": "volcanoArk",
     "label": "Volcano Ark / Doubao",
     "endpoint": "https://ark.cn-beijing.volces.com/api/v3",
-    "model": ""
+    "model": "",
+    "apiKeyUrl": "https://ark.volcengine.com/region:cn-beijing/apikey",
+    "guideUrl": "https://docs.volcengine.com/docs/ark/quick-start?lang=zh",
+    "setupKind": "cloud",
+    "setupHelpKey": "compatibleSetupVolcanoHelp"
   },
   {
     "id": "ollama",
     "label": "Ollama",
     "endpoint": "http://127.0.0.1:11434/v1",
-    "model": ""
+    "model": "",
+    "apiKeyUrl": "",
+    "guideUrl": "https://docs.ollama.com/quickstart",
+    "setupKind": "local",
+    "setupHelpKey": "compatibleSetupOllamaHelp"
   },
   {
     "id": "lmStudio",
     "label": "LM Studio",
     "endpoint": "http://127.0.0.1:1234/v1",
-    "model": ""
+    "model": "",
+    "apiKeyUrl": "",
+    "guideUrl": "https://lmstudio.ai/docs/developer/core/server",
+    "setupKind": "local",
+    "setupHelpKey": "compatibleSetupLMStudioHelp"
   }
 ] as const;

@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { openAlibabaSetupPage, profileSelect, profileUpdate, testProfileConnection } from "./ipc";
+import { openAlibabaSetupPage, openTextTranslationSetupPage, profileSelect, profileUpdate, testProfileConnection } from "./ipc";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue({}) }));
 beforeEach(() => vi.mocked(invoke).mockClear());
 it("omits language patches on unrelated profile updates", async () => {
@@ -45,4 +45,9 @@ it("saves experimental Alibaba mode and non-secret workspace as metadata", async
 it.each(["guide", "apiKey", "workspace"] as const)("opens only the requested Alibaba setup page %s", async page => {
   await openAlibabaSetupPage(page);
   expect(invoke).toHaveBeenCalledExactlyOnceWith("open_alibaba_setup_page", { page });
+});
+
+it.each(["guide", "apiKey"] as const)("passes a preset identity without a URL for text setup %s", async page => {
+  await openTextTranslationSetupPage("qwen", page);
+  expect(invoke).toHaveBeenCalledExactlyOnceWith("open_text_translation_setup_page", { presetId: "qwen", page });
 });

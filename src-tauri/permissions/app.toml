@@ -55,6 +55,7 @@ commands.allow = [
   "app_open_releases",
   "open_tencent_setup_page",
   "open_alibaba_setup_page",
+  "open_text_translation_setup_page",
   "profile_create",
   "profile_duplicate",
   "profile_update",

@@ -30,4 +30,22 @@
     <string name="translation_preset">빠른 설정</string>
     <string name="translation_preset_custom">사용자 지정</string>
     <string name="translation_preset_help">수정 가능한 서비스 주소를 채웁니다. 일부 모델 ID는 직접 입력해야 합니다. 활성화했거나 로컬에 다운로드한 모델을 선택하고 계정 리전, 제품, API 키에 맞는 주소를 사용하세요. 텍스트 번역과 음성 인식의 인증 정보는 별도로 설정합니다.</string>
+    <string name="translation_setup_get_key">API 키 가져오기</string>
+    <string name="translation_setup_guide">설정 안내</string>
+    <string name="translation_setup_local_guide">설치 및 설정</string>
+    <string name="translation_setup_no_key">API 키 불필요</string>
+    <string name="translation_setup_open_failed">공식 설정 페이지를 열지 못했습니다. 다시 시도하세요.</string>
+    <string name="translation_setup_openai_help">OpenAI API 플랫폼에서 프로젝트를 선택하고 API 키를 만들어 여기에 붙여넣으세요. 해당 프로젝트에서 사용할 수 있는 모델 ID를 입력하세요. ChatGPT 구독은 API 키를 대신하지 않습니다.</string>
+    <string name="translation_setup_deepseek_help">DeepSeek 플랫폼의 API keys에서 키를 만들어 여기에 붙여넣으세요. 공식 모델 목록이나 API 예제에서 사용 가능한 모델 이름을 복사한 뒤 저장하고 번역을 확인하세요.</string>
+    <string name="translation_setup_qwen_help">Model Studio에서 리전과 워크스페이스를 선택하고 API 키를 만들어 여기에 붙여넣으세요. 해당 워크스페이스에서 활성화한 모델 ID를 입력하세요. 기본 주소는 베이징이므로 다른 리전의 키라면 주소도 바꾸세요.</string>
+    <string name="translation_setup_gemini_help">Google AI Studio에서 프로젝트를 선택하고 Gemini API 키를 만들어 여기에 붙여넣으세요. 해당 키로 사용할 수 있는 모델 ID를 입력하세요. Gemini 구독은 API 키를 대신하지 않습니다.</string>
+    <string name="translation_setup_kimi_help">Kimi API 플랫폼의 API 키 관리에서 키를 만들고 해당 계정의 모델 ID를 입력하세요. Kimi Code 키는 사용하지 마세요. 국제 계정은 국제 서비스 주소와 키 관리 페이지를 사용해야 합니다.</string>
+    <string name="translation_setup_siliconflow_help">SiliconFlow 콘솔의 API 키에서 키를 만들어 여기에 붙여넣으세요. 모델 목록에서 제공업체 접두사가 포함된 전체 모델 ID를 복사하세요. 주소와 키는 같은 지역 사이트의 것이어야 합니다.</string>
+    <string name="translation_setup_openrouter_help">OpenRouter 키 설정에서 API 키를 만들어 여기에 붙여넣으세요. 모델 페이지에서 제공업체/모델 형식의 전체 이름을 복사하고 계정에서 호출할 수 있는지 확인하세요.</string>
+    <string name="translation_setup_index_help">공식 공개 API는 API 키가 필요하지 않습니다. 미리 채운 주소와 모델을 유지하고 다른 서비스의 키를 입력하지 마세요. 저장 후 번역을 확인하세요. 공개 서비스의 가용성은 운영 측에 따릅니다.</string>
+    <string name="translation_setup_tencent_help">Tencent TokenHub의 API Key 페이지에서 키를 만들고 모델 목록에서 활성화한 모델 ID를 복사하세요. 기본 주소는 광저우입니다. 리전, 제품, 키를 맞춰야 하며 Tencent 음성 서비스의 SecretID/SecretKey는 사용할 수 없습니다.</string>
+    <string name="translation_setup_baidu_help">Baidu AI Cloud의 보안 인증 → API Key에서 Qianfan을 호출할 수 있는 키를 만들어 여기에 붙여넣으세요. 활성화한 Qianfan 모델 ID를 입력하세요. Baidu 음성 번역의 AppID/AppKey는 사용할 수 없습니다.</string>
+    <string name="translation_setup_volcano_help">Volcano Ark에서 프로젝트를 선택하고 API 키를 만들어 여기에 붙여넣으세요. 활성화한 모델 또는 추론 엔드포인트 ID를 입력하세요. 기본값은 베이징 일반 API이며 Coding 요금제나 Doubao 음성 키는 사용할 수 없습니다.</string>
+    <string name="translation_setup_ollama_help">Ollama를 설치하고 사용할 로컬 모델을 다운로드한 뒤 먼저 실행하세요. 전체 로컬 모델 이름을 여기에 입력하세요. 기본 로컬 서버에는 API 키가 필요 없으며 Ollama 클라우드 키를 만들 필요도 없습니다.</string>
+    <string name="translation_setup_lmstudio_help">LM Studio에서 모델을 다운로드하고 로드한 뒤 Developer 페이지에서 서버를 시작하고 모델 식별자를 여기에 복사하세요. 기본적으로 API 키는 필요 없습니다. 서버 인증을 켰다면 해당 서버의 토큰을 입력하세요.</string>
 </resources>

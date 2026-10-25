@@ -7,7 +7,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { diagnosticCopy, profileErrorMessage } from "../../lib/connectionDiagnostics";
 import { speechLanguageGuidance, targetLanguageOptionLabel } from "../../lib/speechLanguageGuidance";
 import { I18N, UI_LANGUAGES, providerDisplayName, setStoredUiLanguage } from "../../lib/i18n";
-import { openAlibabaSetupPage, getAppleSpeechSupport, prepareAppleSpeechLanguage, profileCredentialEditorState, profileRevealCredential, testProfileConnection } from "../../lib/ipc";
+import { openAlibabaSetupPage, openTextTranslationSetupPage, getAppleSpeechSupport, prepareAppleSpeechLanguage, profileCredentialEditorState, profileRevealCredential, testProfileConnection } from "../../lib/ipc";
 import { SERVICE_PROVIDERS, sourceLanguagesForSettings, targetLanguagesForSettings } from "../../lib/providerCapabilities";
 import { SOURCE_LANGUAGE_DISPLAY_NAMES, TARGET_LANGUAGE_DISPLAY_NAMES } from "../../lib/types";
 import type { AppleSpeechSupport, ServiceProfile, SettingsSnapshot } from "../../lib/types";
@@ -21,7 +21,7 @@ const actions = vi.hoisted(() => ({
 }));
 const boot = vi.hoisted(() => ({ initializationStatus: "ready" as "ready" | "loading" | "error", initializationError: null as "timeout" | "unavailable" | null, init: vi.fn(), nativeSettings: null as SettingsSnapshot | null }));
 vi.mock("../../lib/store", () => ({ useStore: (select: (state: typeof actions & typeof boot & { settings: { windowsAudioSource?: string }; session: { isActive: boolean; isPaused: boolean } }) => unknown) => select({ ...actions, ...boot, settings: boot.nativeSettings ?? { windowsAudioSource: "" }, session: { isActive: false, isPaused: false } }) }));
-vi.mock("../../lib/ipc", () => ({ isTauri: false, openAlibabaSetupPage: vi.fn(), getAppleSpeechSupport: vi.fn(), prepareAppleSpeechLanguage: vi.fn(), testProfileConnection: vi.fn(), profileRevealCredential: vi.fn(), profileCredentialEditorState: vi.fn(), setOverlayPointerCursor: vi.fn() }));
+vi.mock("../../lib/ipc", () => ({ isTauri: false, openAlibabaSetupPage: vi.fn(), openTextTranslationSetupPage: vi.fn(), getAppleSpeechSupport: vi.fn(), prepareAppleSpeechLanguage: vi.fn(), testProfileConnection: vi.fn(), profileRevealCredential: vi.fn(), profileCredentialEditorState: vi.fn(), setOverlayPointerCursor: vi.fn() }));
 
 const profile: ServiceProfile = { id: "synthetic", name: "Alibaba", provider: "alibabaCloud", credentialState: "unavailable" };
 const settings: SettingsSnapshot = {
@@ -41,6 +41,7 @@ beforeEach(() => {
   vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla Linux");
   for (const action of Object.values(actions)) action.mockReset();
   vi.mocked(openAlibabaSetupPage).mockReset().mockResolvedValue(undefined);
+  vi.mocked(openTextTranslationSetupPage).mockReset().mockResolvedValue(undefined);
   vi.mocked(testProfileConnection).mockReset();
   vi.mocked(profileRevealCredential).mockReset();
   vi.mocked(profileCredentialEditorState).mockReset().mockResolvedValue({ savedFields: ["apiKey"] });
@@ -1381,6 +1382,37 @@ async function renderPresetEditor(endpoint = "https://api.openai.com/v1") {
   await render(configured);
   await act(async () => host.querySelector<HTMLButtonElement>(".service-row__edit")?.click());
 }
+
+it("keeps preset selection local and preserves unsaved model/key when opening its setup pages", async () => {
+  await renderPresetEditor();
+  await chooseTranslationPreset("kimi");
+  expect(openTextTranslationSetupPage).not.toHaveBeenCalled();
+  expect(actions.saveProfileCredentials).not.toHaveBeenCalled();
+  expect(testProfileConnection).not.toHaveBeenCalled();
+  await change('.service-stage--translation input[id$="-model"]', "synthetic-edited-model");
+  await change('.service-stage--translation input[id$="-token"]', "synthetic-edited-key");
+  await act(async () => host.querySelector<HTMLButtonElement>('.service-stage--translation .translation-setup-link[aria-label^="' + PROVIDER_COPY.en.compatibleSetupGetKey + '"]')!.click());
+  expect(openTextTranslationSetupPage).toHaveBeenLastCalledWith("kimi", "apiKey");
+  await act(async () => host.querySelector<HTMLButtonElement>('.service-stage--translation .translation-setup-link[aria-label^="' + PROVIDER_COPY.en.compatibleSetupGuide + '"]')!.click());
+  expect(openTextTranslationSetupPage).toHaveBeenLastCalledWith("kimi", "guide");
+  expect(host.querySelector<HTMLInputElement>('.service-stage--translation input[id$="-model"]')!.value).toBe("synthetic-edited-model");
+  expect(host.querySelector<HTMLInputElement>('.service-stage--translation input[id$="-token"]')!.value).toBe("synthetic-edited-key");
+  expect(actions.saveProfileCredentials).not.toHaveBeenCalled();
+  expect(testProfileConnection).not.toHaveBeenCalled();
+  expect(profileRevealCredential).not.toHaveBeenCalled();
+});
+
+it("shows keyless/local guidance and removes provider links for explicit Custom", async () => {
+  await renderPresetEditor();
+  await chooseTranslationPreset("indexTranslate");
+  expect(host.querySelector(".translation-setup-keyless")?.textContent).toBe(PROVIDER_COPY.en.compatibleSetupNoKey);
+  expect([...host.querySelectorAll(".translation-setup-link")].map(node => node.textContent)).toEqual([PROVIDER_COPY.en.compatibleSetupGuide]);
+  await chooseTranslationPreset("ollama");
+  expect(host.querySelector(".translation-setup-link")?.textContent).toBe(PROVIDER_COPY.en.compatibleSetupLocalGuide);
+  await chooseTranslationPreset("custom");
+  expect(host.querySelector(".translation-setup-link")).toBeNull();
+  expect(host.querySelector<HTMLInputElement>('.service-stage--translation input[id$="-endpoint"]')!.value).toBe("http://127.0.0.1:11434/v1");
+});
 
 it("prefills a compatible service without saving or probing and only submits its newly entered key", async () => {
   await renderPresetEditor();

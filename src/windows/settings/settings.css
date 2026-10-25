@@ -3222,17 +3222,21 @@
   margin-top: 16px;
   padding-top: 0;
 }
-.alibaba-setup-control {
+.alibaba-setup-control,
+.service-setup-control {
   display: grid;
   grid-column: 2;
   min-width: 0;
   gap: 6px;
 }
-.alibaba-setup-control > .alibaba-setup-link {
+.alibaba-setup-control > .alibaba-setup-link,
+.service-setup-control > .translation-setup-link,
+.service-setup-control > .translation-setup-keyless {
   justify-self: end;
 }
 @media (max-width: 700px) {
-  .service-stage .settings-field > .alibaba-setup-control {
+  .service-stage .settings-field > .alibaba-setup-control,
+  .service-stage .settings-field > .service-setup-control {
     grid-column: 1 / -1;
   }
 }
@@ -3240,7 +3244,8 @@
   flex-wrap: wrap;
   gap: 4px;
 }
-.alibaba-setup-link {
+.alibaba-setup-link,
+.translation-setup-link {
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -3299,8 +3304,11 @@
 .service-editor-module--languages .profile-language-settings { display: grid; gap: 16px; }
 .service-editor-module--management .service-detail__actions { margin: 0; }
 .service-editor-module .service-stage__field-label { gap: 6px; }
-.service-editor-module .alibaba-setup-link { font-size: inherit; min-height: 24px; }
-.service-editor-module .alibaba-setup-control { gap: 8px; }
+.service-editor-module .alibaba-setup-link,
+.service-editor-module .translation-setup-link { font-size: inherit; min-height: 24px; }
+.service-editor-module .alibaba-setup-control,
+.service-editor-module .service-setup-control { gap: 8px; }
+.translation-setup-keyless { color: var(--settings-text-muted); font-size: inherit; }
 .service-editor-module .service-stage .settings-field,
 .service-editor-module .service-detail__name > .settings-field,
 .service-detail .service-proxies .settings-row,
@@ -3319,11 +3327,13 @@
   .service-editor-module--languages .settings-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .service-editor-module .service-stage .settings-field > .config-input-group,
   .service-editor-module .service-stage .settings-field > .settings-select-wrap,
-  .service-editor-module .service-stage .settings-field > .alibaba-setup-control { grid-column: 1 / -1; }
+  .service-editor-module .service-stage .settings-field > .alibaba-setup-control,
+  .service-editor-module .service-stage .settings-field > .service-setup-control { grid-column: 1 / -1; }
   .service-editor-module .service-stage__heading { gap: 8px 12px; }
 }
 
-.service-editor-module .settings-field:has(> .alibaba-setup-control) > :first-child {
+.service-editor-module .settings-field:has(> .alibaba-setup-control) > :first-child,
+.service-editor-module .settings-field:has(> .service-setup-control) > :first-child {
   align-self: start;
   min-height: 36px;
   display: flex;
@@ -3340,7 +3350,8 @@
 .services-home .services-toolbar { margin-bottom: 16px; }
 @media (max-width: 700px) {
   #service-profiles-panel > #audio-input { padding: 16px; }
-  .service-editor-module .settings-field:has(> .alibaba-setup-control) > :first-child { min-height: auto; }
+  .service-editor-module .settings-field:has(> .alibaba-setup-control) > :first-child,
+  .service-editor-module .settings-field:has(> .service-setup-control) > :first-child { min-height: auto; }
 }
 
 

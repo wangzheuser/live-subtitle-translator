@@ -30,4 +30,22 @@
     <string name="translation_preset">Quick setup</string>
     <string name="translation_preset_custom">Custom</string>
     <string name="translation_preset_help">Prefills an editable service address; some model IDs must be entered. Choose an enabled or locally downloaded model. Match the address to your account region, product and API key. Text translation and speech recognition use separate credentials.</string>
+    <string name="translation_setup_get_key">Get API key</string>
+    <string name="translation_setup_guide">Setup guide</string>
+    <string name="translation_setup_local_guide">Install and set up</string>
+    <string name="translation_setup_no_key">No API key needed</string>
+    <string name="translation_setup_open_failed">Could not open the official setup page. Try again.</string>
+    <string name="translation_setup_openai_help">Choose a project on the OpenAI API platform, create an API key and paste it here. Enter a model ID available to that project; a ChatGPT subscription is not an API key.</string>
+    <string name="translation_setup_deepseek_help">Create a key under API keys on the DeepSeek platform and paste it here. Copy an available model name from the official model list or API example, then save and check translation.</string>
+    <string name="translation_setup_qwen_help">Choose a region and workspace in Model Studio, create an API key and paste it here. Enter a model ID enabled in that workspace. The preset uses Beijing; change the address if your key belongs to another region.</string>
+    <string name="translation_setup_gemini_help">Choose a project in Google AI Studio, create a Gemini API key and paste it here. Enter a model ID available to that key; a Gemini subscription is not an API key.</string>
+    <string name="translation_setup_kimi_help">Create a key in API Key management on the Kimi API platform and enter a model ID available to that account. Do not use a Kimi Code key. International accounts need the matching international address and key console.</string>
+    <string name="translation_setup_siliconflow_help">Create a key under API keys in the SiliconFlow console and paste it here. Copy the full model ID from the model catalog, including its provider prefix. Use an address and key from the same regional site.</string>
+    <string name="translation_setup_openrouter_help">Create an API key in OpenRouter key settings and paste it here. Copy the complete provider/model slug from the model page and confirm your account can call it.</string>
+    <string name="translation_setup_index_help">The official public endpoint needs no API key. Keep the prefilled address and model; do not enter a key from another service. Save and check translation. Availability depends on the upstream public service.</string>
+    <string name="translation_setup_tencent_help">Create a key on the Tencent TokenHub API Key page and copy an enabled model ID from its model list. The preset uses Guangzhou. Match the region, product and key; Tencent speech SecretID/SecretKey credentials cannot be used here.</string>
+    <string name="translation_setup_baidu_help">In Baidu AI Cloud, open Security authentication → API Key and create a key with Qianfan access. Paste it here and enter an enabled Qianfan model ID. Baidu speech-translation AppID/AppKey credentials cannot be used here.</string>
+    <string name="translation_setup_volcano_help">Choose a project in Volcano Ark, create an API key and paste it here. Enter an enabled model or inference endpoint ID. The preset uses the ordinary Beijing API; Coding-plan or Doubao Speech keys are not substitutes.</string>
+    <string name="translation_setup_ollama_help">Install Ollama, download a local model and run it first. Enter its complete local model name here. The default local server needs no API key; you do not need to create an Ollama cloud key.</string>
+    <string name="translation_setup_lmstudio_help">Download and load a model in LM Studio, start the server on its Developer page and copy the model identifier here. No API key is needed by default. If server authentication is enabled, enter that server’s token.</string>
 </resources>

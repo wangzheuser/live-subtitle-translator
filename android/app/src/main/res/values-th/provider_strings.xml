@@ -30,4 +30,22 @@
     <string name="translation_preset">ตั้งค่าด่วน</string>
     <string name="translation_preset_custom">กำหนดเอง</string>
     <string name="translation_preset_help">กรอกที่อยู่บริการให้โดยยังแก้ไขได้ บางโมเดลต้องกรอก ID เอง เลือกโมเดลที่เปิดใช้หรือดาวน์โหลดไว้ในเครื่อง และใช้ที่อยู่ที่ตรงกับภูมิภาคบัญชี ผลิตภัณฑ์ และ API key ตั้งค่าข้อมูลรับรองการแปลข้อความแยกจากการรู้จำเสียง</string>
+    <string name="translation_setup_get_key">รับ API Key</string>
+    <string name="translation_setup_guide">คู่มือการตั้งค่า</string>
+    <string name="translation_setup_local_guide">ติดตั้งและตั้งค่า</string>
+    <string name="translation_setup_no_key">ไม่ต้องใช้ API Key</string>
+    <string name="translation_setup_open_failed">เปิดหน้าตั้งค่าอย่างเป็นทางการไม่ได้ ลองอีกครั้ง</string>
+    <string name="translation_setup_openai_help">เลือกโปรเจกต์ในแพลตฟอร์ม OpenAI API สร้าง API key แล้ววางที่นี่ กรอก ID โมเดลที่โปรเจกต์ใช้งานได้ การสมัคร ChatGPT ใช้แทน API key ไม่ได้</string>
+    <string name="translation_setup_deepseek_help">สร้างคีย์ในหน้า API keys ของแพลตฟอร์ม DeepSeek แล้ววางที่นี่ คัดลอกชื่อโมเดลที่ใช้ได้จากรายการโมเดลหรือ API ตัวอย่างอย่างเป็นทางการ จากนั้นบันทึกและตรวจสอบการแปล</string>
+    <string name="translation_setup_qwen_help">เลือกภูมิภาคและเวิร์กสเปซใน Model Studio สร้าง API key แล้ววางที่นี่ กรอก ID โมเดลที่เปิดใช้ในเวิร์กสเปซนั้น ค่าที่ตั้งไว้ใช้ปักกิ่ง หากคีย์เป็นภูมิภาคอื่นต้องเปลี่ยนที่อยู่ด้วย</string>
+    <string name="translation_setup_gemini_help">เลือกโปรเจกต์ใน Google AI Studio สร้าง Gemini API key แล้ววางที่นี่ กรอก ID โมเดลที่คีย์เรียกใช้ได้ การสมัคร Gemini ใช้แทน API key ไม่ได้</string>
+    <string name="translation_setup_kimi_help">สร้างคีย์ในหน้าจัดการ API Key ของแพลตฟอร์ม Kimi API แล้วกรอก ID โมเดลที่บัญชีใช้ได้ อย่าใช้คีย์ Kimi Code บัญชีสากลต้องใช้ที่อยู่และหน้าจัดการคีย์ของบริการสากลให้ตรงกัน</string>
+    <string name="translation_setup_siliconflow_help">สร้างคีย์ในหน้า API keys ของคอนโซล SiliconFlow แล้ววางที่นี่ คัดลอก ID โมเดลแบบเต็มจากรายการโมเดล รวมชื่อผู้ให้บริการด้านหน้า ที่อยู่และคีย์ต้องเป็นของเว็บไซต์ภูมิภาคเดียวกัน</string>
+    <string name="translation_setup_openrouter_help">สร้าง API key ในหน้าตั้งค่าคีย์ของ OpenRouter แล้ววางที่นี่ คัดลอกชื่อแบบเต็มในรูปแบบผู้ให้บริการ/โมเดลจากหน้าโมเดล และตรวจสอบว่าบัญชีเรียกใช้ได้</string>
+    <string name="translation_setup_index_help">API สาธารณะอย่างเป็นทางการไม่ต้องใช้คีย์ ใช้ที่อยู่และโมเดลที่กรอกไว้ และอย่าใส่คีย์ของบริการอื่น บันทึกแล้วตรวจสอบการแปล ความพร้อมใช้งานขึ้นอยู่กับผู้ให้บริการสาธารณะ</string>
+    <string name="translation_setup_tencent_help">สร้างคีย์ในหน้า API Key ของ Tencent TokenHub แล้วคัดลอก ID โมเดลที่เปิดใช้จากรายการ ค่าเริ่มต้นใช้กว่างโจว ภูมิภาค ผลิตภัณฑ์ และคีย์ต้องตรงกัน ใช้ SecretID/SecretKey ของบริการเสียง Tencent ไม่ได้</string>
+    <string name="translation_setup_baidu_help">ใน Baidu AI Cloud เปิดการยืนยันตัวตนด้านความปลอดภัย → API Key แล้วสร้างคีย์ที่เรียก Qianfan ได้ วางที่นี่และกรอก ID โมเดล Qianfan ที่เปิดใช้ ใช้ AppID/AppKey ของบริการแปลเสียง Baidu ไม่ได้</string>
+    <string name="translation_setup_volcano_help">เลือกโปรเจกต์ใน Volcano Ark สร้าง API key แล้ววางที่นี่ กรอก ID โมเดลหรือจุดเชื่อมต่อการอนุมานที่เปิดใช้ ค่าเริ่มต้นเป็น API ปกติในปักกิ่ง ใช้คีย์แพ็กเกจ Coding หรือ Doubao Speech แทนไม่ได้</string>
+    <string name="translation_setup_ollama_help">ติดตั้ง Ollama ดาวน์โหลดโมเดลในเครื่องและเรียกใช้ก่อน กรอกชื่อโมเดลในเครื่องแบบเต็มที่นี่ เซิร์ฟเวอร์ในเครื่องค่าเริ่มต้นไม่ต้องใช้ API key และไม่ต้องสร้างคีย์ Ollama Cloud</string>
+    <string name="translation_setup_lmstudio_help">ดาวน์โหลดและโหลดโมเดลใน LM Studio เริ่มเซิร์ฟเวอร์ในหน้า Developer แล้วคัดลอกตัวระบุโมเดลมาที่นี่ ค่าเริ่มต้นไม่ต้องใช้ API key หากเปิดการยืนยันตัวตนของเซิร์ฟเวอร์ ให้กรอกโทเค็นของเซิร์ฟเวอร์นั้น</string>
 </resources>

@@ -84,6 +84,11 @@ export function openAlibabaSetupPage(page: AlibabaSetupPage): Promise<void> {
   return invoke("open_alibaba_setup_page", { page });
 }
 
+export type TextTranslationSetupPage = "apiKey" | "guide";
+export function openTextTranslationSetupPage(presetId: string, page: TextTranslationSetupPage): Promise<void> {
+  return invoke("open_text_translation_setup_page", { presetId, page });
+}
+
 export type TencentSetupPage = "account" | "apiKey" | "asr";
 export function openTencentSetupPage(page: TencentSetupPage): Promise<void> {
   return invoke("open_tencent_setup_page", { page });

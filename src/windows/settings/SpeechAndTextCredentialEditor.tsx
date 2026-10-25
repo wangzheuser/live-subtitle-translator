@@ -21,6 +21,7 @@ import { useAppleTranslationSupport } from "./useAppleTranslationSupport";
 import { AppleTranslationSettings } from "./AppleTranslationSettings";
 import { OPENAI_COMPATIBLE_PRESETS, PROVIDER_COPY } from "../../lib/generated/providerCopy";
 import { compatiblePresetForEndpoint } from "../../lib/textTranslationPresets";
+import { TextTranslationSetupLink } from "./TextTranslationSetupLink";
 
 const XAI_TRANSLATION_HELP = {
   zh: "使用 xAI 的 Grok 文字模型翻译识别结果。此处的 API Key 仅用于文字翻译，与语音识别配置分别保存。",
@@ -81,6 +82,8 @@ export function SpeechAndTextCredentialEditor({ profile, inputId, disabled, busy
   const translationState = useCredentialEditorState(profile.id, translation === "followService" ? undefined : translation, visible && !integratedRealtime && translation !== "followService" && !nativeTranslation, revealEpoch);
   const endpointValue = editedFields.endpoint ? draft.endpoint : translationState.state?.endpoint ?? draft.endpoint;
   const modelValue = editedFields.model ? draft.model : translationState.state?.model ?? (xaiTranslation ? "grok-4.3" : draft.model);
+  const preset = translation === "openAICompatible" ? compatiblePresetForEndpoint(endpointValue) : undefined;
+  const setupPreset = customPreset ? undefined : preset;
   const endpointChanged = editedFields.endpoint && draft.endpoint.trim() !== (translationState.state?.endpoint ?? "");
   const modelChanged = editedFields.model && draft.model.trim() !== (translationState.state?.model ?? "");
   const endpointDraft = translation !== savedTranslation ? endpointValue : endpointChanged ? draft.endpoint : "";
@@ -145,12 +148,11 @@ export function SpeechAndTextCredentialEditor({ profile, inputId, disabled, busy
       ...(compatible && clearToken ? { clearToken: true } : {}),
     };
   }
-  const destinationKeyLabel = xaiTranslation ? I18N.settings.apiKey : translation === "deepL" ? I18N.settings.deepLApiKey : compatible ? I18N.settings.openAICompatibleApiKey : I18N.settings.deepLXToken;
+  const destinationKeyLabel = xaiTranslation || setupPreset?.setupKind === "cloud" ? I18N.settings.apiKey : translation === "deepL" ? I18N.settings.deepLApiKey : compatible ? I18N.settings.openAICompatibleApiKey : I18N.settings.deepLXToken;
   const endpointId = `${inputId}-endpoint`;
   const modelId = `${inputId}-model`;
   const noteId = storageNoteId ?? `${inputId}-storage-note`;
   const presetCopy = PROVIDER_COPY[effectiveUiLanguage()];
-  const preset = compatiblePresetForEndpoint(endpointValue);
   const choosePreset = (id: string) => {
     const next = OPENAI_COMPATIBLE_PRESETS.find(item => item.id === id);
     // Custom leaves the editable destination intact. Selecting a preset is
@@ -272,8 +274,8 @@ export function SpeechAndTextCredentialEditor({ profile, inputId, disabled, busy
         onRetry={apple.refresh} onBusyChange={onNativeTranslationBusyChange} onPrepared={onNativeTranslationPrepared} />}
       {nativeTranslation && <div className="apple-speech-connection-check">{translationCheck}</div>}
       {translation !== "followService" && !nativeTranslation && <div className="credential-form__fields">
-        {translation === "openAICompatible" && <div className="settings-field translation-preset-field">
-          <span className="service-stage__name-help">{presetCopy.compatiblePresetLabel}<SettingsHelp text={presetCopy.compatiblePresetHelp} label={I18N.settings.helpLabel} /></span>
+        {translation === "openAICompatible" && <div className="settings-field service-stage__selector translation-preset-field">
+          <span className="service-stage__name-help">{presetCopy.compatiblePresetLabel}<SettingsHelp text={setupPreset ? presetCopy[setupPreset.setupHelpKey] : presetCopy.compatiblePresetHelp} label={I18N.settings.helpLabel} /></span>
           <SettingsSelect label={presetCopy.compatiblePresetLabel} disabled={disabled || awaitingSavedDestination} value={customPreset ? "custom" : preset?.id ?? "custom"}
             options={[{ value: "custom", label: presetCopy.compatiblePresetCustom }, ...OPENAI_COMPATIBLE_PRESETS.map(item => ({ value: item.id, label: item.label }))]}
             onChange={choosePreset} />
@@ -285,12 +287,19 @@ export function SpeechAndTextCredentialEditor({ profile, inputId, disabled, busy
         </label>}
         {(compatible || xaiTranslation) && <label className="settings-field" htmlFor={modelId}>
           <span>{I18N.settings.openAICompatibleModel}</span>
+          <div className="service-setup-control">
           <ConfigInput copyable expandable key={translation} ref={modelRef} id={modelId} type="text" autoComplete="off" spellCheck={false} disabled={disabled} required value={modelValue} placeholder={translation === "chatMock" ? I18N.settings.chatMockModelPlaceholder : I18N.settings.modelNamePlaceholder} aria-invalid={modelInvalid || undefined} aria-describedby={modelInvalid ? `${modelId}-error ${noteId}` : noteId} onValueChange={(value) => { setEditedFields((current) => ({ ...current, model: true })); setDraft((current) => ({ ...current, model: value })); if (modelInvalid) setModelInvalid(!openAICompatibleModelIsValid(value)); }} />
+          {setupPreset && <TextTranslationSetupLink preset={setupPreset} page="guide" disabled={disabled || busy} />}
+          </div>
           {modelInvalid && <span id={`${modelId}-error`} role="alert" className="credential-unavailable">{I18N.settings.openAICompatibleModelInvalid}</span>}
         </label>}
         <div className="settings-field">
           <span className="service-stage__field-label"><label htmlFor={`${inputId}-token`}>{destinationKeyLabel}</label>{compatible && <SettingsHelp id={`${inputId}-compatible-required`} text={keepsSavedDestination ? I18N.settings.openAICompatibleAddressKey : I18N.settings.openAICompatibleRequired} label={I18N.settings.helpLabel} />}</span>
-          <SavedCredentialInput key={`${profile.id}:${translation}:${revealEpoch}`} profileId={profile.id} field="token" textTranslation={translation} label={destinationKeyLabel} hasSavedValue={hasTranslationKey && !clearTranslationToken && !endpointChanged && !presetDiscardedToken} allowSavedReveal={translation === savedTranslation && !presetDiscardedToken} active={visible && !busy && !confirmingDelete} id={`${inputId}-token`} type="password" autoComplete="new-password" spellCheck={false} disabled={disabled || clearTranslationToken} value={draft.token} placeholder={compatible ? clearTranslationToken ? I18N.settings.noTranslationKeyPlaceholder : hasTranslationKey && !endpointChanged && !presetDiscardedToken ? I18N.settings.savedTranslationKeyPlaceholder : I18N.settings.optionalTranslationKeyPlaceholder : translation === "deepL" || xaiTranslation ? hasTranslationKey ? I18N.settings.savedTranslationKeyPlaceholder : I18N.settings.apiKeyPlaceholder : undefined} aria-describedby={compatible ? `${inputId}-compatible-required ${noteId}` : noteId} onValueChange={(value) => setDraft((current) => ({ ...current, token: value }))} />
+          <div className="service-setup-control">
+          <SavedCredentialInput key={`${profile.id}:${translation}:${revealEpoch}`} profileId={profile.id} field="token" textTranslation={translation} label={destinationKeyLabel} hasSavedValue={hasTranslationKey && !clearTranslationToken && !endpointChanged && !presetDiscardedToken} allowSavedReveal={translation === savedTranslation && !presetDiscardedToken} active={visible && !busy && !confirmingDelete} id={`${inputId}-token`} type="password" autoComplete="new-password" spellCheck={false} disabled={disabled || clearTranslationToken} value={draft.token} placeholder={compatible ? clearTranslationToken ? I18N.settings.noTranslationKeyPlaceholder : hasTranslationKey && !endpointChanged && !presetDiscardedToken ? I18N.settings.savedTranslationKeyPlaceholder : setupPreset?.setupKind === "cloud" ? I18N.settings.apiKeyPlaceholder : I18N.settings.optionalTranslationKeyPlaceholder : translation === "deepL" || xaiTranslation ? hasTranslationKey ? I18N.settings.savedTranslationKeyPlaceholder : I18N.settings.apiKeyPlaceholder : undefined} aria-describedby={compatible ? `${inputId}-compatible-required ${noteId}` : noteId} onValueChange={(value) => setDraft((current) => ({ ...current, token: value }))} />
+          {setupPreset?.setupKind === "keyless" ? <span className="translation-setup-keyless">{presetCopy.compatibleSetupNoKey}</span>
+            : setupPreset && <TextTranslationSetupLink preset={setupPreset} page="apiKey" disabled={disabled || busy} />}
+          </div>
         </div>
         {compatible && keepsSavedDestination && hasTranslationKey && !presetDiscardedToken && <span className="credential-form__actions">
           <button type="button" className="settings-button settings-button--quiet settings-button--compact" disabled={disabled} aria-pressed={clearTranslationToken} onClick={() => { setClearTranslationToken((current) => !current); setDraft((current) => ({ ...current, token: "" })); }}>

@@ -30,4 +30,22 @@
     <string name="translation_preset">快速填入</string>
     <string name="translation_preset_custom">自訂</string>
     <string name="translation_preset_help">快速填入服務位址，部分模型 ID 需自行填寫，欄位仍可修改。請選擇已開通或本機已下載的模型；位址須與帳號的地域、產品及 API Key 對應。文字翻譯憑據與語音辨識分別設定。</string>
+    <string name="translation_setup_get_key">取得 API Key</string>
+    <string name="translation_setup_guide">設定指南</string>
+    <string name="translation_setup_local_guide">安裝與設定</string>
+    <string name="translation_setup_no_key">不需要 API Key</string>
+    <string name="translation_setup_open_failed">無法開啟官方設定頁面，請重試。</string>
+    <string name="translation_setup_openai_help">在 OpenAI API 平台選擇專案並建立 API Key，貼到此處。模型名稱填寫該專案可呼叫的模型 ID；ChatGPT 會員不能代替 API Key。</string>
+    <string name="translation_setup_deepseek_help">在 DeepSeek 開放平台的「API keys」建立金鑰並貼到此處。從官方模型清單或呼叫範例複製可用的模型名稱，再儲存並檢查翻譯。</string>
+    <string name="translation_setup_qwen_help">在百煉選擇地域和業務空間，建立 API Key 並貼到此處。模型填寫該空間已開通的模型 ID；預設位址使用北京地域，其他地域需同步修改位址。</string>
+    <string name="translation_setup_gemini_help">在 Google AI Studio 選擇專案並建立 Gemini API Key，貼到此處。模型名稱填寫該 Key 可呼叫的模型 ID；Gemini 訂閱不能代替 API Key。</string>
+    <string name="translation_setup_kimi_help">在 Kimi 開放平台的「API Key 管理」新建金鑰並貼到此處，模型填寫該帳號可用的模型 ID。請勿使用 Kimi Code 的 Key；國際站帳號需修改位址，並在對應國際站取得 Key。</string>
+    <string name="translation_setup_siliconflow_help">在矽基流動控制台的「API 金鑰」新建金鑰並貼到此處。在模型廣場複製完整模型 ID，包括提供商前綴；位址和 Key 須屬於同一站點。</string>
+    <string name="translation_setup_openrouter_help">在 OpenRouter 的金鑰設定頁建立 API Key 並貼到此處。從模型頁複製完整的「提供商/模型」名稱，確認該帳號可以呼叫。</string>
+    <string name="translation_setup_index_help">官方公共介面不需要 API Key，保留預填的服務位址和模型名稱即可，請勿填入其他服務的 Key。儲存後檢查翻譯；公共服務的可用性以上游為準。</string>
+    <string name="translation_setup_tencent_help">在騰訊 TokenHub 的 API Key 頁面建立金鑰並貼到此處，從模型清單複製已開通的模型 ID。預設位址使用廣州地域；地域、產品和 Key 須一致，請勿使用騰訊語音的 SecretID/SecretKey。</string>
+    <string name="translation_setup_baidu_help">在百度智慧雲「安全認證 → API Key」建立可呼叫千帆的 Key，貼到此處。模型填寫千帆已開通的模型 ID；請勿使用百度語音翻譯的 AppID/AppKey。</string>
+    <string name="translation_setup_volcano_help">在火山方舟選擇專案並建立 API Key，貼到此處。模型填寫已開通的模型或推論接入點 ID；預設使用北京一般 API，請勿混用 Coding 套餐或豆包語音的 Key。</string>
+    <string name="translation_setup_ollama_help">先安裝 Ollama 並下載、執行要使用的本機模型，模型名稱填寫完整的本機模型名稱。預設本機服務不需要 API Key；無須建立 Ollama 雲端 Key。</string>
+    <string name="translation_setup_lmstudio_help">先在 LM Studio 下載並載入模型，在 Developer 頁面啟動伺服器，複製模型識別碼到此處。預設不需要 API Key；若伺服器啟用驗證，則填寫該伺服器的 Token。</string>
 </resources>

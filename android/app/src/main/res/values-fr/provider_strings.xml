@@ -30,4 +30,22 @@
     <string name="translation_preset">Configuration rapide</string>
     <string name="translation_preset_custom">Personnalisé</string>
     <string name="translation_preset_help">Préremplit une adresse modifiable ; certains identifiants de modèle restent à saisir. Choisissez un modèle activé ou téléchargé localement. L’adresse doit correspondre à la région du compte, au produit et à la clé API. Traduction et reconnaissance vocale ont des identifiants distincts.</string>
+    <string name="translation_setup_get_key">Obtenir une clé API</string>
+    <string name="translation_setup_guide">Guide de configuration</string>
+    <string name="translation_setup_local_guide">Installation et configuration</string>
+    <string name="translation_setup_no_key">Aucune clé API nécessaire</string>
+    <string name="translation_setup_open_failed">Impossible d’ouvrir la page officielle de configuration. Réessayez.</string>
+    <string name="translation_setup_openai_help">Choisissez un projet sur la plateforme API OpenAI, créez une clé API et collez-la ici. Saisissez un identifiant de modèle accessible à ce projet ; un abonnement ChatGPT ne remplace pas une clé API.</string>
+    <string name="translation_setup_deepseek_help">Créez une clé dans API keys sur la plateforme DeepSeek et collez-la ici. Copiez un nom de modèle disponible depuis la liste officielle ou un exemple API, puis enregistrez et vérifiez la traduction.</string>
+    <string name="translation_setup_qwen_help">Choisissez une région et un espace dans Model Studio, créez une clé API et collez-la ici. Saisissez un modèle activé dans cet espace. L’adresse prédéfinie utilise Pékin ; modifiez-la si votre clé appartient à une autre région.</string>
+    <string name="translation_setup_gemini_help">Choisissez un projet dans Google AI Studio, créez une clé API Gemini et collez-la ici. Saisissez un modèle accessible avec cette clé ; un abonnement Gemini ne remplace pas une clé API.</string>
+    <string name="translation_setup_kimi_help">Créez une clé dans la gestion des clés de la plateforme API Kimi et saisissez un modèle accessible à ce compte. N’utilisez pas une clé Kimi Code. Les comptes internationaux nécessitent l’adresse et la console de clés internationales correspondantes.</string>
+    <string name="translation_setup_siliconflow_help">Créez une clé dans API keys de la console SiliconFlow et collez-la ici. Copiez l’identifiant complet du modèle, préfixe du fournisseur inclus, depuis le catalogue. L’adresse et la clé doivent appartenir au même site régional.</string>
+    <string name="translation_setup_openrouter_help">Créez une clé API dans les paramètres de clés OpenRouter et collez-la ici. Copiez le nom complet fournisseur/modèle depuis sa page et vérifiez que votre compte peut l’utiliser.</string>
+    <string name="translation_setup_index_help">L’API publique officielle ne nécessite aucune clé. Gardez l’adresse et le modèle préremplis ; n’entrez pas la clé d’un autre service. Enregistrez et vérifiez la traduction. La disponibilité dépend du service public en amont.</string>
+    <string name="translation_setup_tencent_help">Créez une clé sur la page API Key de Tencent TokenHub et copiez un modèle activé depuis sa liste. L’adresse prédéfinie utilise Guangzhou. Région, produit et clé doivent correspondre ; les identifiants SecretID/SecretKey du service vocal Tencent ne conviennent pas.</string>
+    <string name="translation_setup_baidu_help">Dans Baidu AI Cloud, ouvrez Authentification de sécurité → API Key et créez une clé donnant accès à Qianfan. Collez-la ici et saisissez un modèle Qianfan activé. Les identifiants AppID/AppKey de traduction vocale Baidu ne conviennent pas.</string>
+    <string name="translation_setup_volcano_help">Choisissez un projet dans Volcano Ark, créez une clé API et collez-la ici. Saisissez un modèle ou un point d’inférence activé. Le préréglage utilise l’API ordinaire de Pékin ; les clés Coding ou Doubao Speech ne conviennent pas.</string>
+    <string name="translation_setup_ollama_help">Installez Ollama, téléchargez un modèle local et lancez-le d’abord. Saisissez son nom local complet ici. Le serveur local par défaut ne nécessite aucune clé API ; inutile de créer une clé cloud Ollama.</string>
+    <string name="translation_setup_lmstudio_help">Téléchargez et chargez un modèle dans LM Studio, démarrez le serveur dans Developer et copiez son identifiant ici. Aucune clé API n’est nécessaire par défaut. Si l’authentification du serveur est activée, saisissez son jeton.</string>
 </resources>

@@ -307,6 +307,8 @@ Enable a text model with your chosen provider and obtain its **service address, 
 
 **Quick setup** offers these 13 editable presets. A preset fills the service address and any example model; enter an available model ID where the field is blank.
 
+After choosing a preset, **Get API key** opens its official key console and **Setup guide** explains activation and model selection. The nearby help gives the steps for that service. Local servers offer **Install and set up** instead; keyless services show **No API key needed**. Only clicking an action opens a page, and your unsaved fields remain in the editor.
+
 | Service | Model setup |
 | --- | --- |
 | [OpenAI](https://developers.openai.com/api/docs/models/gpt-6-luna) | An example model is filled in; confirm it is enabled for your key. |

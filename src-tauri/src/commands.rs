@@ -16,7 +16,7 @@ use crate::windows::{OverlayControlMode, OverlayControlWindowManager, OverlayWin
 use serde::{Deserialize, Serialize};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, LazyLock,
 };
 use tauri::{AppHandle, Emitter, Listener, Manager, State};
 use tauri_plugin_opener::OpenerExt;
@@ -815,6 +815,7 @@ mod tests {
             "profile_duplicate",
             "open_tencent_setup_page",
             "open_alibaba_setup_page",
+            "open_text_translation_setup_page",
         ] {
             assert!(include_str!("lib.rs").contains(&format!("commands::{command},")));
             let permissions = include_str!("../permissions/app.toml");
@@ -871,6 +872,51 @@ mod tests {
         }
         for value in ["https://example.com", "file:///tmp/test", "Account", ""] {
             assert!(serde_json::from_value::<TencentSetupPage>(serde_json::json!(value)).is_err());
+        }
+    }
+
+    #[test]
+    fn text_setup_pages_resolve_only_catalog_destinations() {
+        assert_eq!(
+            text_translation_setup_url("openai", TextTranslationSetupPage::ApiKey),
+            Some("https://platform.openai.com/api-keys")
+        );
+        let catalog: serde_json::Value =
+            serde_json::from_str(include_str!("../../shared/provider-copy.json")).unwrap();
+        for preset in catalog["compatiblePresets"].as_array().unwrap() {
+            let id = preset["id"].as_str().unwrap();
+            assert_eq!(
+                text_translation_setup_url(id, TextTranslationSetupPage::Guide),
+                preset["guideUrl"].as_str()
+            );
+            assert_eq!(
+                text_translation_setup_url(id, TextTranslationSetupPage::ApiKey),
+                preset["apiKeyUrl"].as_str().filter(|url| !url.is_empty())
+            );
+        }
+        for id in [
+            "unknown",
+            "https://example.com",
+            "file:///tmp/test",
+            "openai/../",
+            "",
+        ] {
+            assert_eq!(
+                text_translation_setup_url(id, TextTranslationSetupPage::Guide),
+                None
+            );
+        }
+        for id in ["ollama", "lmStudio", "indexTranslate"] {
+            assert_eq!(
+                text_translation_setup_url(id, TextTranslationSetupPage::ApiKey),
+                None
+            );
+        }
+        for page in ["https://example.com", "models", "ApiKey", ""] {
+            assert!(
+                serde_json::from_value::<TextTranslationSetupPage>(serde_json::json!(page))
+                    .is_err()
+            );
         }
     }
 
@@ -1904,6 +1950,63 @@ pub fn open_alibaba_setup_page(app: AppHandle, page: AlibabaSetupPage) -> Result
             );
             "Could not open the Alibaba Cloud setup page.".to_string()
         })
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TextTranslationSetupPage {
+    ApiKey,
+    Guide,
+}
+
+fn text_translation_setup_url(
+    preset_id: &str,
+    page: TextTranslationSetupPage,
+) -> Option<&'static str> {
+    static CATALOG: LazyLock<Option<serde_json::Value>> = LazyLock::new(|| {
+        serde_json::from_str(include_str!("../../shared/provider-copy.json")).ok()
+    });
+    let field = match page {
+        TextTranslationSetupPage::ApiKey => "apiKeyUrl",
+        TextTranslationSetupPage::Guide => "guideUrl",
+    };
+    let preset = CATALOG
+        .as_ref()?
+        .get("compatiblePresets")?
+        .as_array()?
+        .iter()
+        .find(|preset| preset.get("id").and_then(serde_json::Value::as_str) == Some(preset_id))?;
+    if matches!(page, TextTranslationSetupPage::ApiKey)
+        && preset.get("setupKind").and_then(serde_json::Value::as_str) != Some("cloud")
+    {
+        return None;
+    }
+    let value = preset.get(field)?.as_str()?;
+    let url = url::Url::parse(value).ok()?;
+    (url.scheme() == "https"
+        && url.host_str().is_some()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && !value.chars().any(char::is_control))
+    .then_some(value)
+}
+
+/// Settings supplies only a catalog ID and page kind, never an editable URL.
+#[tauri::command]
+pub fn open_text_translation_setup_page(
+    app: AppHandle,
+    preset_id: String,
+    page: TextTranslationSetupPage,
+) -> Result<(), String> {
+    let url = text_translation_setup_url(&preset_id, page)
+        .ok_or_else(|| "text_translation_setup_page_unavailable".to_string())?;
+    app.opener().open_url(url, None::<&str>).map_err(|_| {
+        tracing::warn!(
+            label = "system_opener_failed",
+            "text translation setup page open failed"
+        );
+        "text_translation_setup_open_failed".to_string()
+    })
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]

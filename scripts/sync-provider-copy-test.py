@@ -93,15 +93,19 @@ class SharedProviderCopyTest(unittest.TestCase):
         ts = outputs[MODULE.TS_OUTPUT].split("export const OPENAI_COMPATIBLE_PRESETS = ", 1)[1]
         self.assertEqual(presets, json.loads(ts.removesuffix(" as const;\n")))
         kotlin = outputs[MODULE.KOTLIN_OUTPUT]
+        entries = json.loads(MODULE.SOURCE.read_text(encoding="utf-8"))["entries"]
         positions = []
         for preset in presets:
-            row = "TextTranslationPreset(" + ", ".join(MODULE.kotlin_string(preset[key]) for key in ("id", "label", "endpoint", "model")) + ")"
+            row = "TextTranslationPreset(" + ", ".join(MODULE.kotlin_string(preset[key]) for key in
+                ("id", "label", "endpoint", "model", "apiKeyUrl", "guideUrl", "setupKind"))
+            row += ", R.string." + entries[preset["setupHelpKey"]]["androidResource"] + ")"
             positions.append(kotlin.index(row))
         self.assertEqual(sorted(positions), positions)
         self.assertEqual('"synthetic\\$value"', MODULE.kotlin_string("synthetic$value"))
 
     def test_invalid_compatible_presets_are_rejected(self):
-        preset = {"id": "synthetic", "label": "Synthetic", "endpoint": "https://example.com/v1", "model": ""}
+        data = json.loads(MODULE.SOURCE.read_text(encoding="utf-8"))
+        preset = {**data["compatiblePresets"][0], "id": "synthetic", "label": "Synthetic", "endpoint": "https://example.com/v1", "model": ""}
         cases = [
             [preset, preset],
             [{**preset, "id": "not-an-id"}],
@@ -119,11 +123,45 @@ class SharedProviderCopyTest(unittest.TestCase):
         ]
         for presets in cases:
             with self.subTest(presets=presets), self.assertRaisesRegex(ValueError, "compatible preset"):
-                MODULE.compatible_presets({"compatiblePresets": presets})
-        self.assertEqual([preset], MODULE.compatible_presets({"compatiblePresets": [preset]}))
+                MODULE.compatible_presets({**data, "compatiblePresets": presets})
+        self.assertEqual([preset], MODULE.compatible_presets({**data, "compatiblePresets": [preset]}))
         for endpoint in ("http://127.0.0.1:11434/v1", "http://[::1]:1234/v1"):
             local = {**preset, "endpoint": endpoint}
-            self.assertEqual([local], MODULE.compatible_presets({"compatiblePresets": [local]}))
+            self.assertEqual([local], MODULE.compatible_presets({**data, "compatiblePresets": [local]}))
+
+    def test_setup_links_and_help_must_match_the_preset_kind(self):
+        data = json.loads(MODULE.SOURCE.read_text(encoding="utf-8"))
+        preset = data["compatiblePresets"][0]
+        cases = [
+            {**preset, "setupKind": "unknown"},
+            {**preset, "apiKeyUrl": ""},
+            {**preset, "setupKind": "keyless"},
+            {**preset, "setupHelpKey": "missingHelp"},
+            {**preset, "guideUrl": ""},
+        ]
+        for field in ("apiKeyUrl", "guideUrl"):
+            for url in ("http://example.com", "https://localhost", "https://127.0.0.1", "https://127.1",
+                        "https://0x7f.1", "https://[::1]", "https://10.0.0.1", "https://example.local",
+                        "https://key@example.com", "https://example.com:invalid", "https://example.com:8443",
+                        "https://example.com/line\nbreak", "javascript:alert(1)"):
+                cases.append({**preset, field: url})
+        for invalid in cases:
+            with self.subTest(preset=invalid), self.assertRaisesRegex(ValueError, "compatible preset"):
+                MODULE.compatible_presets({**data, "compatiblePresets": [invalid]})
+        # Official consoles may route API-key screens with a query or fragment.
+        linked = {**preset, "guideUrl": "https://example.com/guide?lang=zh#models"}
+        self.assertEqual([linked], MODULE.compatible_presets({**data, "compatiblePresets": [linked]}))
+        for kind in ("local", "keyless"):
+            valid = {**preset, "setupKind": kind, "apiKeyUrl": ""}
+            self.assertEqual([valid], MODULE.compatible_presets({**data, "compatiblePresets": [valid]}))
+
+    def test_setup_help_requires_both_platforms_and_an_android_resource(self):
+        for mutation in ({"scope": ["desktop"]}, {"androidResource": None}):
+            data = json.loads(MODULE.SOURCE.read_text(encoding="utf-8"))
+            preset = data["compatiblePresets"][0]
+            data["entries"][preset["setupHelpKey"]].update(mutation)
+            with self.assertRaisesRegex(ValueError, "compatible preset setup help"):
+                MODULE.compatible_presets(data)
 
     def test_check_detects_kotlin_drift_without_overwriting_it(self):
         with tempfile.TemporaryDirectory() as directory:

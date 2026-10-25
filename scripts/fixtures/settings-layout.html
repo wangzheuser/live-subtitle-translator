@@ -4,7 +4,7 @@
 <body><main id="root"></main><script type="module">
 // Local UI fixtures only: no native bridge, credentials, provider or capture.
 let fixture = {};
-window.layoutFixtureRequests = { profileCreate: 0, translationStatus: 0, translationPrepare: 0, speechPrepare: 0, speechSave: 0, credentialSave: 0, credentialReveal: 0, connectionCheck: 0 };
+window.layoutFixtureRequests = { profileCreate: 0, translationStatus: 0, translationPrepare: 0, speechPrepare: 0, speechSave: 0, credentialSave: 0, credentialReveal: 0, connectionCheck: 0, setupOpen: 0 };
 // These scenarios exercise the real settings components with synthetic data only.
 const diagnosticCases = ["idle", "listening", "silent", "permission", "translation-wait", "rate-limit", "recovered", "load-error"];
 const sessionCases = ["empty", "current", "library", "mixed", "read-error", "export-cancel", "delete-fail"];
@@ -372,8 +372,14 @@ window.__TAURI_INTERNALS__ = {
       useStore.setState({ settings: snapshot });
       return snapshot;
     }
+    if (command === "open_text_translation_setup_page") {
+      window.layoutFixtureRequests.setupOpen += 1;
+      window.layoutOpenedSetup = { presetId: args.presetId, page: args.page };
+      if (fixture.failSetupOpen) throw new Error("fixture_setup_open_failed");
+      return;
+    }
     if (command === "profile_credential_editor_state") return args.textTranslation
-      ? { savedFields: fixture.keyless ? [] : ["token"], ...(args.textTranslation === "xAI" ? { model: "grok-4.3" } : { endpoint: "http://127.0.0.1:8080/v1", model: "fixture-model" }) }
+      ? { savedFields: fixture.keyless ? [] : ["token"], ...(args.textTranslation === "xAI" ? { model: "grok-4.3" } : { endpoint: fixture.savedTextEndpoint ?? "http://127.0.0.1:8080/v1", model: fixture.savedTextModel ?? "fixture-model" }) }
       : { savedFields: (useStore.getState().settings.profiles.find(profile => profile.id === args.profileId)?.speechCredentialState ?? useStore.getState().settings.profiles.find(profile => profile.id === args.profileId)?.credentialState) === "missing" ? [] : ["apiKey"], endpoint: fixture.savedSpeechEndpoint ?? "wss://speech.example/v1/realtime", model: fixture.savedSpeechModel ?? "fixture-speech-model" };
     if (command === "profile_reveal_credential") { window.layoutFixtureRequests.credentialReveal += 1; return "fixture-saved-value"; }
     if (command === "plugin:event|listen") return 0;
@@ -417,7 +423,8 @@ let generation = 0;
 window.applyLayoutCase = async next => {
   fixture = { ...next };
   resetWorkspace(next);
-  window.layoutFixtureRequests = { profileCreate: 0, translationStatus: 0, translationPrepare: 0, speechPrepare: 0, speechSave: 0, credentialSave: 0, credentialReveal: 0, connectionCheck: 0 };
+  window.layoutFixtureRequests = { profileCreate: 0, translationStatus: 0, translationPrepare: 0, speechPrepare: 0, speechSave: 0, credentialSave: 0, credentialReveal: 0, connectionCheck: 0, setupOpen: 0 };
+  window.layoutOpenedSetup = null;
   Object.defineProperty(navigator, "userAgent", { configurable: true, value: next.platform === "windows" ? "Windows NT 10.0" : next.platform === "macos" ? "Macintosh" : "Linux x86_64" });
   const active = next.active ?? (next.diagnostics
     ? ["listening", "silent", "translation-wait", "rate-limit", "recovered"].includes(next.diagnostics)

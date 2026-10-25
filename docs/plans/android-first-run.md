@@ -85,9 +85,9 @@ provider credentials, live capture or paid sessions are used. The accepted
 immersive screenshots and baseline use the same emulator/display and synthetic
 configuration; status-bar times differ.
 
-- [Before: settings enable before confirmation](../screenshots/android-first-run/before-immersive-settings.png)
-- [After: settings wait for confirmation](../screenshots/android-first-run/after-immersive-settings.png)
-- [After: dark overlay explanation and exit guidance](../screenshots/android-first-run/after-immersive-overlay-dark.png)
+The [PR comment attachments](https://github.com/yuxino/Mimi/pull/102#issuecomment-6398721012)
+show Settings before/after acknowledgement handling and the dark overlay's
+explanation and exit guidance.
 
 Debug and release each pass 40 unit tests and lint with zero errors; both APK
 variants and the instrumentation APK build. The canonical repository check

@@ -64,6 +64,11 @@ Preserve these product constraints:
 
 ## Working agreements
 
+- Upload PR review and QA screenshots as attachments in the relevant PR comments;
+  do not commit those images or screenshot-only galleries to the repository.
+  Link verification records to the comment and retain the tested revision and
+  evidence limits. Keep product icons and images needed by public documentation
+  or release notes separate from disposable review evidence.
 - Follow [UI consistency and feedback](docs/development/ui-guidelines.md). When fixing a repeated UI pattern, find and review its sibling controls across settings, native tray menu and overlay; cover success and failure paths, including silent save rejections. Reuse shared components and design tokens. Do not call the sweep complete after checking only the reported page.
 - Interactive controls with hover feedback must keep a pointer cursor across the overlay, control panel, native tray menu and settings, including help controls. Preserve disabled/busy, text-input, slider and resize cursors. On macOS, verify the nonactivating overlay's native cursor path as well as CSS; a successful native cursor update does not guarantee WebKit will retain it on later movement.
 - Keep explanatory copy out of persistent small-print paragraphs. Use compact help icons with hover/focus tooltips for non-essential descriptions, protocol requirements, and storage details. Keep field labels, essential choices, and actionable errors visible at the normal interface text size. Do not add small text merely to fill space or explain an otherwise clear control.

@@ -4,7 +4,7 @@ use crate::core::models::{SourceLanguage, TargetLanguage};
 use crate::core::protocols::qwen_mt::{
     QwenMTClientError, QwenMTEndpoint, QwenMTMemoryPair, QwenMTModel, QwenMTProtocolError,
     QwenMTRejectionCategory, QwenMTRequestEncoder, QwenMTResponseDecoder, QwenMTStreamDecoder,
-    QwenMTTerm,
+    QwenMTStreamText, QwenMTTerm,
 };
 use crate::pipeline_log;
 use futures_util::StreamExt;
@@ -13,7 +13,6 @@ use std::time::Duration;
 // A sentence translation should stay far below these bounds. Enforce byte
 // limits even when Content-Length is absent or the server never sends '\n'.
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
-const MAX_TRANSLATION_BYTES: usize = 64 * 1024;
 const SSE_TAIL_DRAIN_TIMEOUT: Duration = Duration::from_millis(20);
 const MAX_SSE_TAIL_DRAIN_BYTES: usize = 8 * 1024;
 const MAX_SSE_TAIL_DRAIN_CHUNKS: usize = 32;
@@ -179,7 +178,10 @@ impl QwenMTClient {
             return Err(rejected_error(status.as_u16(), &bytes));
         }
 
-        let mut decoder = BoundedSseResponse::default();
+        let mut decoder = BoundedSseResponse {
+            translation: QwenMTStreamText::new(self.model),
+            ..Default::default()
+        };
         let mut completed = false;
         while let Some(chunk) = response
             .chunk()
@@ -298,7 +300,7 @@ struct BoundedSseResponse {
     buffer: Vec<u8>,
     scanned: usize,
     received: usize,
-    translation: String,
+    translation: QwenMTStreamText,
     done: bool,
 }
 
@@ -348,15 +350,16 @@ impl BoundedSseResponse {
         if !self.done {
             return Err(incomplete_translation_error());
         }
-        Ok(self.translation.trim().to_string())
+        Ok(self.translation.text().trim().to_string())
     }
 }
 
-/// Handles one SSE `data:` line, appending decoded content to `translation`.
+/// Lite/Flash send incremental content; Plus sends the whole generated sequence.
+/// Empty completion chunks preserve the latest translation in either format.
 /// Returns `true` when `[DONE]` or a successful `stop` confirms completion.
 fn handle_sse_line(
     line: &str,
-    translation: &mut String,
+    translation: &mut QwenMTStreamText,
     on_partial: &(impl Fn(String) + Send + Sync),
 ) -> Result<bool, QwenMTClientError> {
     let Some(payload) = line.strip_prefix("data:") else {
@@ -376,12 +379,8 @@ fn handle_sse_line(
         },
     )?;
     if let Some(content) = content {
-        if !content.is_empty() {
-            if content.len() > MAX_TRANSLATION_BYTES - translation.len() {
-                return Err(QwenMTClientError::ResponseTooLarge);
-            }
-            translation.push_str(&content);
-            on_partial(translation.clone());
+        if translation.apply(&content)? {
+            on_partial(translation.text().to_owned());
         }
     }
     Ok(complete)
@@ -425,6 +424,7 @@ fn error_message(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::protocols::qwen_mt::MAX_TRANSLATION_BYTES;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
@@ -449,6 +449,104 @@ mod tests {
             )
             .unwrap();
         assert_eq!(decoder.finish(&|_| {}).unwrap(), "hello");
+    }
+
+    #[test]
+    fn plus_sse_replaces_cumulative_sequences_across_every_utf8_boundary() {
+        // Match the documented Plus shape: successive delta.content values
+        // contain the whole sequence, including the final stop chunk.
+        let data = concat!(
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"合成\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"合成文本\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"字幕。\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"字幕。\"},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+        for split in 0..=data.len() {
+            let mut decoder = BoundedSseResponse {
+                translation: QwenMTStreamText::new(QwenMTModel::Plus),
+                ..Default::default()
+            };
+            let partials = std::sync::Mutex::new(Vec::new());
+            let record = |text| partials.lock().unwrap().push(text);
+            decoder.push(&data.as_bytes()[..split], &record).unwrap();
+            decoder.push(&data.as_bytes()[split..], &record).unwrap();
+            assert_eq!(decoder.finish(&record).unwrap(), "字幕。");
+            assert_eq!(*partials.lock().unwrap(), ["合成", "合成文本", "字幕。"]);
+        }
+    }
+
+    #[test]
+    fn plus_sse_preserves_empty_completion_and_rejects_incomplete_or_empty_results() {
+        for tail in [
+            r#"{"choices":[{"delta":{"content":""},"finish_reason":"stop"}]}"#,
+            r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+        ] {
+            let mut decoder = BoundedSseResponse {
+                translation: QwenMTStreamText::new(QwenMTModel::Plus),
+                ..Default::default()
+            };
+            decoder
+                .push(
+                    format!(
+                        "data: {{\"choices\":[{{\"delta\":{{\"content\":\"complete\"}}}}]}}\n\ndata: {tail}\n"
+                    )
+                    .as_bytes(),
+                    &|_| {},
+                )
+                .unwrap();
+            assert_eq!(decoder.finish(&|_| {}).unwrap(), "complete");
+        }
+        for reason in ["length", "content_filter"] {
+            let mut decoder = BoundedSseResponse {
+                translation: QwenMTStreamText::new(QwenMTModel::Plus),
+                ..Default::default()
+            };
+            assert_eq!(
+                decoder.push(
+                    format!(
+                        "data: {{\"choices\":[{{\"delta\":{{\"content\":\"partial\"}},\"finish_reason\":\"{reason}\"}}]}}\n"
+                    )
+                    .as_bytes(),
+                    &|_| panic!("incomplete content must not be published"),
+                ),
+                Err(incomplete_translation_error())
+            );
+        }
+        let mut decoder = BoundedSseResponse {
+            translation: QwenMTStreamText::new(QwenMTModel::Plus),
+            ..Default::default()
+        };
+        decoder
+            .push(b"data: {\"choices\":[{\"delta\":{\"content\":\"\"},\"finish_reason\":\"stop\"}]}\n", &|_| panic!("empty content must not be published"))
+            .unwrap();
+        assert!(decoder.finish(&|_| {}).unwrap().is_empty());
+    }
+
+    #[test]
+    fn plus_sse_bounds_each_replacement_instead_of_total_snapshot_bytes() {
+        let mut translation = QwenMTStreamText::new(QwenMTModel::Plus);
+        translation
+            .apply(&"x".repeat(MAX_TRANSLATION_BYTES))
+            .unwrap();
+        let valid = format!(
+            "data: {}",
+            serde_json::json!({"choices":[{"delta":{"content": "y".repeat(MAX_TRANSLATION_BYTES)}}]})
+        );
+        handle_sse_line(&valid, &mut translation, &|_| {}).unwrap();
+        assert_eq!(translation.text(), "y".repeat(MAX_TRANSLATION_BYTES));
+        let invalid = format!(
+            "data: {}",
+            serde_json::json!({"choices":[{"delta":{"content": "z".repeat(MAX_TRANSLATION_BYTES + 1)}}]})
+        );
+        assert_eq!(
+            handle_sse_line(&invalid, &mut translation, &|_| {
+                panic!("oversized content must not be published")
+            }),
+            Err(QwenMTClientError::ResponseTooLarge)
+        );
+        assert_eq!(translation.text(), "y".repeat(MAX_TRANSLATION_BYTES));
     }
 
     #[test]
@@ -478,14 +576,17 @@ mod tests {
 
     #[test]
     fn translation_limit_rejects_before_publishing_an_oversized_preview() {
-        let mut translation = "x".repeat(MAX_TRANSLATION_BYTES);
+        let mut translation = QwenMTStreamText::new(QwenMTModel::Flash);
+        translation
+            .apply(&"x".repeat(MAX_TRANSLATION_BYTES))
+            .unwrap();
         let error = handle_sse_line(
             r#"data: {"choices":[{"delta":{"content":"x"}}]}"#,
             &mut translation,
             &|_| panic!("oversized partial must not be published"),
         );
         assert_eq!(error, Err(QwenMTClientError::ResponseTooLarge));
-        assert_eq!(translation.len(), MAX_TRANSLATION_BYTES);
+        assert_eq!(translation.text().len(), MAX_TRANSLATION_BYTES);
     }
 
     async fn fixture_client(response: String) -> (QwenMTClient, tokio::task::JoinHandle<String>) {
@@ -576,16 +677,79 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn http_streaming_uses_selected_model_accumulation_and_rejects_empty_plus() {
+        for model in [QwenMTModel::Lite, QwenMTModel::Flash, QwenMTModel::Plus] {
+            let second = if model == QwenMTModel::Plus {
+                "你好"
+            } else {
+                "好"
+            };
+            let body = format!(
+                "data: {{\"choices\":[{{\"delta\":{{\"content\":\"你\"}},\"finish_reason\":null}}]}}\n\ndata: {{\"choices\":[{{\"delta\":{{\"content\":\"{second}\"}},\"finish_reason\":\"stop\"}}]}}\n\n"
+            );
+            let (mut client, server) = fixture_client(format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len(),
+            ))
+            .await;
+            client.model = model;
+            let partials = std::sync::Mutex::new(Vec::new());
+            assert_eq!(
+                client
+                    .translate_streaming("hello", None, &[], |text| {
+                        partials.lock().unwrap().push(text);
+                    })
+                    .await
+                    .unwrap(),
+                "你好"
+            );
+            assert_eq!(*partials.lock().unwrap(), ["你", "你好"]);
+            let request = server.await.unwrap();
+            let body: serde_json::Value =
+                serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
+            assert_eq!(body["model"], model.raw_name());
+            assert_eq!(body["stream"], true);
+        }
+
+        let body =
+            "data: {\"choices\":[{\"delta\":{\"content\":\"\"},\"finish_reason\":\"stop\"}]}\n\n";
+        let (mut client, server) = fixture_client(format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len(),
+        ))
+        .await;
+        client.model = QwenMTModel::Plus;
+        assert!(matches!(
+            client
+                .translate_streaming("hello", None, &[], |_| panic!("empty preview"))
+                .await,
+            Err(QwenMTClientError::RequestFailed {
+                status_code: 200,
+                ..
+            })
+        ));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
     async fn qwen_completion_contracts_reject_partial_http_successes() {
         let contracts: serde_json::Value =
             serde_json::from_str(include_str!("../../../translation-contracts.json")).unwrap();
-        for case in contracts["qwenCompletionResponses"].as_array().unwrap() {
+        for case in contracts["qwenCompletionResponses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .chain(contracts["qwenStreamingResponses"].as_array().unwrap())
+        {
             let body = case["body"].as_str().unwrap();
-            let (client, server) = fixture_client(format!(
+            let (mut client, server) = fixture_client(format!(
                 "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len(),
             ))
             .await;
+            if let Some(model) = case.get("model") {
+                client.model = serde_json::from_value(model.clone()).unwrap();
+            }
             let result = if case["stream"].as_bool().unwrap() {
                 client
                     .translate_streaming("Synthetic source", None, &[], |_| {})
@@ -812,6 +976,12 @@ mod tests {
 
     #[tokio::test]
     async fn cancelling_completed_sse_during_tail_drain_closes_the_owned_response() {
+        for model in [QwenMTModel::Lite, QwenMTModel::Plus] {
+            assert_eq!(cancelled_completed_sse_connection_bytes(model).await, 0);
+        }
+    }
+
+    async fn cancelled_completed_sse_connection_bytes(model: QwenMTModel) -> usize {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
@@ -829,7 +999,7 @@ mod tests {
             "fixture-only",
             SourceLanguage::English,
             TargetLanguage::SimplifiedChinese,
-            QwenMTModel::Lite,
+            model,
             None,
             vec![],
             Duration::from_secs(2),
@@ -851,7 +1021,7 @@ mod tests {
         received.await.unwrap();
         request.abort();
         let _ = request.await;
-        assert_eq!(server.await.unwrap(), 0);
+        server.await.unwrap()
     }
 
     #[tokio::test]
@@ -936,7 +1106,7 @@ mod tests {
 
     #[test]
     fn sse_line_appends_content_and_reports_done() {
-        let mut translation = String::new();
+        let mut translation = QwenMTStreamText::new(QwenMTModel::Flash);
         let partials = std::sync::Mutex::new(Vec::new());
 
         let handled = handle_sse_line(
@@ -946,19 +1116,19 @@ mod tests {
         )
         .unwrap();
         assert!(!handled);
-        assert_eq!(translation, "今天");
+        assert_eq!(translation.text(), "今天");
         assert_eq!(*partials.lock().unwrap(), vec!["今天".to_string()]);
 
         let done = handle_sse_line("data: [DONE]", &mut translation, &|_| {}).unwrap();
         assert!(done);
-        assert_eq!(translation, "今天");
+        assert_eq!(translation.text(), "今天");
     }
 
     #[test]
     fn non_data_lines_are_ignored() {
-        let mut translation = String::new();
+        let mut translation = QwenMTStreamText::new(QwenMTModel::Flash);
         let handled = handle_sse_line("event: message", &mut translation, &|_| {}).unwrap();
         assert!(!handled);
-        assert!(translation.is_empty());
+        assert!(translation.text().is_empty());
     }
 }

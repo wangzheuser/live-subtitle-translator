@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Original qwen.ai favicon pixels, also bundled as src/assets/providers/qwen.png. -->
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:src="@drawable/ic_provider_qwen_mark" android:gravity="fill" />

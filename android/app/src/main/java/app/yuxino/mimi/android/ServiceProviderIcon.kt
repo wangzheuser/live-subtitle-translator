@@ -26,7 +26,7 @@ internal fun translationProviderIcon(provider: app.yuxino.mimi.android.provider.
 internal fun translationPresetIcon(presetId: String?): Int = when (presetId) {
     "openai" -> R.drawable.ic_provider_openai
     "deepseek" -> R.drawable.ic_provider_deepseek
-    "qwen" -> R.drawable.ic_translation_alibaba
+    "qwen" -> R.drawable.ic_provider_qwen
     "gemini" -> R.drawable.ic_provider_gemini
     "kimi" -> R.drawable.ic_provider_kimi
     "siliconflow" -> R.drawable.ic_provider_siliconflow

@@ -27,6 +27,8 @@ fn contract() -> Value {
         "liveTranscriptSequences",
         "customRecognitionCompletions",
         "previewContentChanges",
+        "qwenStreamingText",
+        "qwenStreamingResponses",
     ] {
         let cases = value[name].as_array().unwrap();
         assert!(!cases.is_empty(), "empty {name} contract");
@@ -42,6 +44,30 @@ fn contract() -> Value {
         }
     }
     value
+}
+
+#[test]
+fn qwen_streaming_text_contracts_preserve_model_specific_chunks() {
+    use super::qwen_mt::{QwenMTModel, QwenMTStreamText};
+    for case in contract()["qwenStreamingText"].as_array().unwrap() {
+        let model: QwenMTModel = serde_json::from_value(case["model"].clone()).unwrap();
+        let mut text = QwenMTStreamText::new(model);
+        let outputs: Vec<Value> = case["contents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|content| {
+                let changed = text.apply(content.as_str().unwrap()).unwrap();
+                serde_json::json!({"text":text.text(),"changed":changed})
+            })
+            .collect();
+        assert_eq!(
+            serde_json::json!(outputs),
+            case["expected"],
+            "{}",
+            case["id"]
+        );
+    }
 }
 
 #[test]

@@ -32,6 +32,24 @@ class SharedTranslationContractTest {
         assertEquals(case.getString("id"), case.get("expected"), actual.get("candidate"))
     }
 
+    @Test fun qwenStreamingTextContractsCrossActualJniWithoutProviderRequests() = cases("qwenStreamingText") { case ->
+        val actual = NativeRuntimeConfiguration.exchange(JSONObject(case.toString()).put("operation", "qwen_streaming_text"))
+        assertTrue(case.getString("id"), case.getJSONArray("expected").similar(actual.getJSONArray("outputs")))
+    }
+
+    @Test fun invalidQwenStreamingTextHasSanitizedNativeErrors() {
+        fun request() = JSONObject().put("operation", "qwen_streaming_text")
+            .put("model", "plus").put("contents", org.json.JSONArray().put("Synthetic"))
+        fun reject(value: JSONObject) {
+            val error = assertThrows(IllegalArgumentException::class.java) { NativeRuntimeConfiguration.exchangeRaw(value.toString()) }
+            assertEquals("native_runtime_invalid_request", error.message)
+        }
+        reject(request().put("model", "unknown-private-model"))
+        reject(request().put("contents", org.json.JSONArray().put(12)))
+        reject(request().put("contents", org.json.JSONArray(List(33) { "x" })))
+        reject(request().put("contents", org.json.JSONArray().put("x".repeat(65_537))))
+    }
+
     @Test fun previewContentChangesCrossActualJniWithoutProviderRequests() = cases("previewContentChanges") { case ->
         val actual = NativeRuntimeConfiguration.exchangeRaw(JSONObject(case.toString())
             .put("operation", "preview_content_changed").toString())

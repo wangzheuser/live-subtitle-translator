@@ -794,6 +794,24 @@ pub fn exchange(request: &str) -> Result<String, &'static str> {
             json!({"equivalent": equivalent})
         }
         "volcano_decode" => volcano_decode(&value)?,
+        "qwen_streaming_text" => {
+            use mimi_runtime::core::protocols::qwen_mt::{QwenMTModel, QwenMTStreamText};
+            let model: QwenMTModel = serde_json::from_value(value["model"].clone())
+                .map_err(|_| "native_runtime_invalid_request")?;
+            let contents = value["contents"]
+                .as_array()
+                .filter(|contents| contents.len() <= 32)
+                .ok_or("native_runtime_invalid_request")?;
+            let mut text = QwenMTStreamText::new(model);
+            let mut outputs = Vec::with_capacity(contents.len());
+            for content in contents {
+                let changed = text
+                    .apply(content.as_str().ok_or("native_runtime_invalid_request")?)
+                    .map_err(|_| "native_runtime_invalid_request")?;
+                outputs.push(json!({"text":text.text(),"changed":changed}));
+            }
+            json!({"outputs":outputs})
+        }
         "gemini_streaming_transcripts" => {
             let frames = value["frames"]
                 .as_array()
@@ -1900,6 +1918,19 @@ mod tests {
         assert_eq!(snapshot["displayPair"]["source"], "Complete B");
         assert!(snapshot["realtimePreview"].is_null());
     }
+    #[test]
+    fn qwen_streaming_text_contracts_cross_native_exchange_without_network() {
+        let contract: Value =
+            serde_json::from_str(include_str!("../../translation-contracts.json")).unwrap();
+        for case in contract["qwenStreamingText"].as_array().unwrap() {
+            let mut request = case.clone();
+            request["operation"] = json!("qwen_streaming_text");
+            let response: Value =
+                serde_json::from_str(&exchange(&request.to_string()).unwrap()).unwrap();
+            assert_eq!(response["outputs"], case["expected"], "{}", case["id"]);
+        }
+    }
+
     #[test]
     fn volcano_timing_contracts_cross_native_exchange_without_network() {
         let contract: Value =

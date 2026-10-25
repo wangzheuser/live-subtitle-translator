@@ -252,6 +252,51 @@ pub enum QwenMTModel {
     Plus,
 }
 
+pub const MAX_TRANSLATION_BYTES: usize = 64 * 1024;
+
+/// The OpenAI-compatible Qwen-MT stream uses cumulative snapshots for Plus,
+/// but incremental chunks for Lite and Flash. Bound the resulting translation
+/// before changing it so neither partials nor JNI adapters can grow it unchecked.
+#[derive(Default)]
+pub struct QwenMTStreamText {
+    model: QwenMTModel,
+    text: String,
+}
+
+impl QwenMTStreamText {
+    pub fn new(model: QwenMTModel) -> Self {
+        Self {
+            model,
+            text: String::new(),
+        }
+    }
+
+    /// Empty completion chunks keep the latest value. A duplicate cumulative
+    /// stop chunk confirms completion without publishing the same preview again.
+    pub fn apply(&mut self, content: &str) -> Result<bool, QwenMTClientError> {
+        if content.is_empty() {
+            return Ok(false);
+        }
+        if self.model == QwenMTModel::Plus {
+            if content.len() > MAX_TRANSLATION_BYTES {
+                return Err(QwenMTClientError::ResponseTooLarge);
+            }
+            if self.text == content {
+                return Ok(false);
+            }
+            self.text.clear();
+        } else if content.len() > MAX_TRANSLATION_BYTES - self.text.len() {
+            return Err(QwenMTClientError::ResponseTooLarge);
+        }
+        self.text.push_str(content);
+        Ok(true)
+    }
+
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+}
+
 /// Shared default for live subtitles and the selected-profile ready probe.
 pub const REALTIME_MT_MODEL: QwenMTModel = QwenMTModel::Lite;
 

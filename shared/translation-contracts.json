@@ -1,5 +1,50 @@
 {
   "schemaVersion": 1,
+  "qwenStreamingText": [
+    {
+      "id": "plus-cumulative-snapshots-do-not-repeat",
+      "model": "plus",
+      "contents": ["S", "Synthetic", "Synthetic result", "Synthetic result", ""],
+      "expected": [
+        { "text": "S", "changed": true },
+        { "text": "Synthetic", "changed": true },
+        { "text": "Synthetic result", "changed": true },
+        { "text": "Synthetic result", "changed": false },
+        { "text": "Synthetic result", "changed": false }
+      ]
+    },
+    {
+      "id": "plus-replaces-shorter-corrected-snapshot",
+      "model": "plus",
+      "contents": ["Synthetic original", "Synthetic revision", "Short"],
+      "expected": [
+        { "text": "Synthetic original", "changed": true },
+        { "text": "Synthetic revision", "changed": true },
+        { "text": "Short", "changed": true }
+      ]
+    },
+    {
+      "id": "lite-preserves-incremental-chunks",
+      "model": "lite",
+      "contents": ["Syn", "thetic", " result", ""],
+      "expected": [
+        { "text": "Syn", "changed": true },
+        { "text": "Synthetic", "changed": true },
+        { "text": "Synthetic result", "changed": true },
+        { "text": "Synthetic result", "changed": false }
+      ]
+    },
+    {
+      "id": "flash-preserves-incremental-unicode",
+      "model": "flash",
+      "contents": ["合", "成", "内容"],
+      "expected": [
+        { "text": "合", "changed": true },
+        { "text": "合成", "changed": true },
+        { "text": "合成内容", "changed": true }
+      ]
+    }
+  ],
   "audio3FinishDrain": [
     {
       "id": "missing-terminal-keeps-latest-draft",
@@ -130,6 +175,22 @@
         { "kind": "sessionFinished" },
         { "kind": "sourceDraft", "text": "Synthetic later draft." }
       ]
+    }
+  ],
+  "qwenStreamingResponses": [
+    {
+      "id": "plus-cumulative-sse-snapshots",
+      "model": "plus",
+      "stream": true,
+      "body": "data: {\"choices\":[{\"delta\":{\"content\":\"合\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"合成\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"合成\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+      "expected": "合成"
+    },
+    {
+      "id": "plus-shorter-corrected-sse-snapshot",
+      "model": "plus",
+      "stream": true,
+      "body": "data: {\"choices\":[{\"delta\":{\"content\":\"Synthetic original\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"Short\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+      "expected": "Short"
     }
   ],
   "qwenCompletionResponses": [

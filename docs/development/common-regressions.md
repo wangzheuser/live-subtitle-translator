@@ -121,6 +121,32 @@ Rules:
   then relaunch the intended worktree. Do not reset preferences or permissions
   to repair a package mismatch.
 
+## Rosetta compatibility warnings on an Apple silicon Mac
+
+The macOS warning about an app not opening in macOS 28 concerns Intel code
+that depends on Rosetta. It does not establish the architecture of the currently
+installed app. Inspect the exact running executable, the installed bundle and
+any helpers before changing the package or its minimum system version.
+See [Apple's Rosetta guidance](https://support.apple.com/102527).
+
+Launching an Intel release artifact for QA can leave historical Mimi entries in
+LaunchServices even after the test bundle is removed and the native ARM app is
+restored. Check the exact identifier, paths, existence and recorded slices.
+Use the tool at
+`/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister`.
+Unregister only confirmed absent Mimi test paths with `lsregister -u PATH`, then
+refresh `/Applications/mimi.app` with `lsregister -f /Applications/mimi.app`.
+Do not rebuild the global database or delete notification history, preferences,
+credentials, signing identities or capture grants. Cleaning registration does
+not prove macOS has forgotten past Rosetta use or that a warning cannot recur.
+
+Mimi's updater migrates a confirmed Rosetta process to `darwin-aarch64`, including
+an equal-version native replacement, and rejects older versions. Native ARM,
+real Intel and unsuccessful detection retain Tauri's normal update policy.
+This selection changes neither the updater signature requirement nor installation
+and restart consent. An already-shipped Intel build needs a release containing
+this policy or a manual installation of the existing Apple silicon DMG first.
+
 ## Apple Speech build and resource boundaries
 
 Apple silicon macOS builds require Xcode 26 or later for the Swift Speech adapter.

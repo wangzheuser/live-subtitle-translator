@@ -4,6 +4,28 @@
 实测范围和未解决项；条目是历史证据，后续任务仍须核对当前源码与设备。
 不写密钥、音频、字幕正文或个人目录，不把临时日志当作已持久归档的案例。
 
+## 2026-10-26：Rosetta 警告排查与原生更新迁移
+
+- 本次源码基于 main `779abd07`，只改变桌面 updater 选择；设计见
+  [Rosetta 原生更新](../plans/2026-10-26-rosetta-native-updates.md)。用户报告
+  的 macOS 28 提示来自当前 Mac，但现装正式版及唯一运行进程均为
+  ARM64 1.6.11，包内无其他 Mach-O 组件。前次发布验收曾运行 Intel 包，
+  系统仍登记 16 条已不存在的 Intel 测试副本；逐项注销并刷新当前原生
+  app 后 Intel 登记为 0。当前程序字节未变，未重启、替换或采音。
+  历史记录是可能原因，不能据清理成功断言系统警告已经永久消失。
+- 新 updater 仅在 macOS x86_64 的系统查询成功、长度正确且确认 Rosetta
+  时选择 Apple silicon 包；仅该迁移允许同版本替换，拒绝降级。原生 ARM、
+  真 Intel、其他系统及失败／畸形检测保持默认策略；签名和用户安装／
+  重启操作沿用原流程。
+- `./scripts/check.sh --quick desktop updater_target` 的 4 个新回归通过；
+  Intel `cargo check --release --target x86_64-apple-darwin`、桌面严格
+  Clippy、完整桌面 Rust 测试通过（670 passed，1 ignored）。实际只读
+  系统探针分别在 ARM 原生与 x86_64 Rosetta 下返回 0 和 1，长度均为 4。
+  未改共享 runtime、JNI 或前端；本轮未重跑完整跨层检查。
+- 未实测跨架构更新下载安装、实体 Intel Mac 或 macOS 28；本轮未发布
+  新版本。已发布的旧 Intel 程序需先取得包含本修复的版本，或手动安装
+  现有 Apple silicon DMG。一次性探针已清理，保留必要的 Git 外验证记录。
+
 ## 2026-10-26：v1.6.11 发布与公开更新验证
 
 - 发布源码 `fb948bb1` 基于 `9500f47b`，版本文件统一为 1.6.11，

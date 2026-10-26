@@ -1150,7 +1150,8 @@ impl<A: ArchiveSink> SubtitleReducer<A> {
         source_id: Option<u64>,
         is_new: bool,
     ) {
-        let duplicate = !is_new
+        let duplicate = self.has_session_confirmation
+            && !is_new
             && self.snapshot.display_pair_final
             && self
                 .snapshot
@@ -1158,8 +1159,16 @@ impl<A: ArchiveSink> SubtitleReducer<A> {
                 .as_ref()
                 .is_some_and(|pair| pair.source == source && pair.translation == translation);
         let promoted = self.update_final_display_pair(&source, &translation, source_id);
-        let time = self.append_confirmed_history(source, translation, is_new);
-        if promoted && !duplicate && time.is_some() {
+        // Display history may be disabled or cleared independently of the
+        // platform archive. Its absence must not admit a replay of the
+        // complete pair still on screen. A new recognition cycle or user
+        // session remains a distinct confirmation, even with identical text.
+        let time = if duplicate {
+            None
+        } else {
+            self.append_confirmed_history(source, translation, is_new)
+        };
+        if promoted && time.is_some() {
             self.snapshot.display_pair_created_at_ms = time;
         }
     }
@@ -2247,29 +2256,74 @@ mod tests {
 
     #[test]
     fn a_new_recognition_cycle_preserves_repeated_lyrics_but_duplicate_finals_stay_idempotent() {
-        let mut reducer = SubtitleReducer::default();
-        reducer.archive.begin(true, 0);
-        for _ in 0..2 {
-            reducer.apply(SubtitleEvent::SourceDraft("Repeated lyric".into()));
-            // Revising one recognition cycle does not create several finals.
-            reducer.apply(SubtitleEvent::SourceDraft("Repeated lyric".into()));
+        for limit in [0, 20] {
+            let mut reducer = SubtitleReducer::new(limit);
+            reducer.archive.begin(true, 0);
             for _ in 0..2 {
-                reducer.apply(SubtitleEvent::FinalPair {
-                    source: "Repeated lyric".into(),
-                    translation: "Repeated translation".into(),
-                });
+                reducer.apply(SubtitleEvent::SourceDraft("Repeated lyric".into()));
+                // Revising one recognition cycle does not create several finals.
+                reducer.apply(SubtitleEvent::SourceDraft("Repeated lyric".into()));
+                for _ in 0..2 {
+                    reducer.apply(SubtitleEvent::FinalPair {
+                        source: "Repeated lyric".into(),
+                        translation: "Repeated translation".into(),
+                    });
+                }
+            }
+            assert_eq!(reducer.snapshot.history.len(), limit.min(2));
+            assert_eq!(reducer.archive.count(), 2);
+            if limit > 0 {
+                assert!(
+                    reducer.snapshot.history[0].created_at_ms
+                        < reducer.snapshot.history[1].created_at_ms
+                );
             }
         }
-        assert_eq!(reducer.snapshot.history.len(), 2);
-        assert_eq!(reducer.archive.count(), 2);
-        assert!(
-            reducer.snapshot.history[0].created_at_ms < reducer.snapshot.history[1].created_at_ms
-        );
+    }
+
+    #[test]
+    fn idless_duplicate_suppression_is_independent_of_retention_and_audio_source() {
+        for audio_source in [
+            crate::models::AudioSource::System,
+            crate::models::AudioSource::Microphone,
+        ] {
+            let mut reducer = SubtitleReducer::new(0);
+            reducer.audio_source = audio_source;
+            reducer.archive.begin(true, 0);
+            let pair = || SubtitleEvent::FinalPair {
+                source: "Synthetic same source".into(),
+                translation: "Synthetic same translation".into(),
+            };
+            // The source-only final and atomic final projections share one
+            // identity-less confirmation boundary.
+            reducer.apply(SubtitleEvent::SourceFinal("Synthetic same source".into()));
+            reducer.apply(SubtitleEvent::TranslationFinal(
+                "Synthetic same translation".into(),
+            ));
+            reducer.apply(pair());
+            assert_eq!(reducer.archive.count(), 1);
+            assert_eq!(reducer.archive.pairs[0].audio_source, audio_source);
+            reducer.set_history_limit(3);
+            reducer.reset_transient();
+            reducer.apply(pair());
+            assert!(reducer.snapshot.history.is_empty());
+            assert_eq!(reducer.archive.count(), 1);
+
+            reducer.begin_new_session();
+            reducer.apply(pair());
+            assert_eq!(reducer.archive.count(), 2);
+            assert_eq!(reducer.snapshot.history.len(), 1);
+            reducer.apply(SubtitleEvent::Clear);
+            reducer.apply(pair());
+            assert_eq!(reducer.archive.count(), 1);
+            assert_eq!(reducer.snapshot.history.len(), 1);
+        }
     }
 
     #[test]
     fn current_confirmation_time_survives_disabled_history_and_ignores_duplicates() {
         let mut reducer = SubtitleReducer::new(0);
+        reducer.archive.begin(true, 0);
         let event = SubtitleEvent::FinalPair {
             source: "Synthetic source".into(),
             translation: "Synthetic translation".into(),
@@ -2280,8 +2334,29 @@ mod tests {
         assert!(reducer.snapshot.history.is_empty());
         reducer.apply(event);
         assert_eq!(reducer.snapshot.display_pair_created_at_ms, Some(time));
+        assert_eq!(reducer.archive.count(), 1);
         reducer.apply(SubtitleEvent::Clear);
         assert_eq!(reducer.snapshot.display_pair_created_at_ms, None);
+    }
+
+    #[test]
+    fn a_new_session_identical_final_refreshes_its_confirmation_time() {
+        let mut reducer = SubtitleReducer::default();
+        let pair = || SubtitleEvent::FinalPair {
+            source: "Synthetic repeated source".into(),
+            translation: "Synthetic repeated translation".into(),
+        };
+        reducer.apply(pair());
+        let previous_time = reducer.snapshot.display_pair_created_at_ms.unwrap();
+        reducer.begin_new_session();
+        reducer.apply(pair());
+        assert_eq!(reducer.snapshot.history.len(), 2);
+        let current_time = reducer.snapshot.history.last().unwrap().created_at_ms;
+        assert!(current_time > previous_time);
+        assert_eq!(
+            reducer.snapshot.display_pair_created_at_ms,
+            Some(current_time)
+        );
     }
 
     #[test]

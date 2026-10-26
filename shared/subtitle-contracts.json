@@ -1910,7 +1910,8 @@
                 "translation": "Repeated session translation"
               }
             ]
-          }
+          },
+          "displayTimeMatchesLatestHistory": true
         },
         {
           "resetTransient": true,
@@ -1964,7 +1965,8 @@
                 "translation": "Repeated session translation"
               }
             ]
-          }
+          },
+          "displayTimeMatchesLatestHistory": true
         },
         {
           "beginSession": true,
@@ -2131,7 +2133,8 @@
                 "translation": "Repeated session translation"
               }
             ]
-          }
+          },
+          "displayTimeMatchesLatestHistory": true
         },
         {
           "event": {
@@ -2165,7 +2168,8 @@
                 "translation": "Repeated session translation"
               }
             ]
-          }
+          },
+          "displayTimeMatchesLatestHistory": true
         },
         {
           "resetTransient": true,
@@ -2229,7 +2233,8 @@
                 "translation": "Repeated session translation"
               }
             ]
-          }
+          },
+          "displayTimeMatchesLatestHistory": true
         }
       ]
     },
@@ -2553,6 +2558,262 @@
             ]
           },
           "displayPairFinal": true
+        }
+      ]
+    },
+    {
+      "id": "idless-confirmation-dedup-survives-history-disabled-then-enabled",
+      "maxHistoryCount": 0,
+      "audioSource": "system",
+      "steps": [
+        {
+          "event": {
+            "type": "final_pair",
+            "source": "Synthetic retained source",
+            "translation": "Synthetic retained translation"
+          },
+          "expected": {
+            "source": {
+              "text": "Synthetic retained source",
+              "isFinal": true
+            },
+            "translation": {
+              "text": "Synthetic retained translation",
+              "isFinal": true
+            },
+            "previewPair": null,
+            "displayPair": {
+              "source": "Synthetic retained source",
+              "translation": "Synthetic retained translation"
+            },
+            "history": []
+          }
+        },
+        {
+          "event": {
+            "type": "final_pair",
+            "source": "Synthetic retained source",
+            "translation": "Synthetic retained translation"
+          },
+          "expected": {
+            "source": {
+              "text": "Synthetic retained source",
+              "isFinal": true
+            },
+            "translation": {
+              "text": "Synthetic retained translation",
+              "isFinal": true
+            },
+            "previewPair": null,
+            "displayPair": {
+              "source": "Synthetic retained source",
+              "translation": "Synthetic retained translation"
+            },
+            "history": []
+          }
+        },
+        {
+          "historyLimit": 3,
+          "expected": {
+            "source": {
+              "text": "Synthetic retained source",
+              "isFinal": true
+            },
+            "translation": {
+              "text": "Synthetic retained translation",
+              "isFinal": true
+            },
+            "previewPair": null,
+            "displayPair": {
+              "source": "Synthetic retained source",
+              "translation": "Synthetic retained translation"
+            },
+            "history": []
+          }
+        },
+        {
+          "resetTransient": true,
+          "expected": {
+            "source": {
+              "text": "Synthetic retained source",
+              "isFinal": true
+            },
+            "translation": {
+              "text": "Synthetic retained translation",
+              "isFinal": true
+            },
+            "previewPair": null,
+            "displayPair": {
+              "source": "Synthetic retained source",
+              "translation": "Synthetic retained translation"
+            },
+            "history": []
+          }
+        },
+        {
+          "event": {
+            "type": "final_pair",
+            "source": "Synthetic retained source",
+            "translation": "Synthetic retained translation"
+          },
+          "expected": {
+            "source": {
+              "text": "Synthetic retained source",
+              "isFinal": true
+            },
+            "translation": {
+              "text": "Synthetic retained translation",
+              "isFinal": true
+            },
+            "previewPair": null,
+            "displayPair": {
+              "source": "Synthetic retained source",
+              "translation": "Synthetic retained translation"
+            },
+            "history": []
+          }
+        },
+        {
+          "event": {
+            "type": "source_draft",
+            "text": "Synthetic retained source"
+          },
+          "expected": {
+            "source": {
+              "text": "Synthetic retained source",
+              "isFinal": false
+            },
+            "translation": {
+              "text": "Synthetic retained translation",
+              "isFinal": true
+            },
+            "previewPair": null,
+            "displayPair": {
+              "source": "Synthetic retained source",
+              "translation": "Synthetic retained translation"
+            },
+            "history": []
+          }
+        },
+        {
+          "event": {
+            "type": "final_pair",
+            "source": "Synthetic retained source",
+            "translation": "Synthetic retained translation"
+          },
+          "expected": {
+            "source": {
+              "text": "Synthetic retained source",
+              "isFinal": true
+            },
+            "translation": {
+              "text": "Synthetic retained translation",
+              "isFinal": true
+            },
+            "previewPair": null,
+            "displayPair": {
+              "source": "Synthetic retained source",
+              "translation": "Synthetic retained translation"
+            },
+            "history": [
+              {
+                "audioSource": "system",
+                "source": "Synthetic retained source",
+                "translation": "Synthetic retained translation"
+              }
+            ]
+          },
+          "displayTimeMatchesLatestHistory": true
+        },
+        {
+          "event": {
+            "type": "final_pair",
+            "source": "Synthetic retained source",
+            "translation": "Synthetic retained translation"
+          },
+          "expected": {
+            "source": {
+              "text": "Synthetic retained source",
+              "isFinal": true
+            },
+            "translation": {
+              "text": "Synthetic retained translation",
+              "isFinal": true
+            },
+            "previewPair": null,
+            "displayPair": {
+              "source": "Synthetic retained source",
+              "translation": "Synthetic retained translation"
+            },
+            "history": [
+              {
+                "audioSource": "system",
+                "source": "Synthetic retained source",
+                "translation": "Synthetic retained translation"
+              }
+            ]
+          },
+          "displayTimeMatchesLatestHistory": true
+        },
+        {
+          "beginSession": true,
+          "expected": {
+            "source": {
+              "text": "Synthetic retained source",
+              "isFinal": true
+            },
+            "translation": {
+              "text": "Synthetic retained translation",
+              "isFinal": true
+            },
+            "previewPair": null,
+            "displayPair": {
+              "source": "Synthetic retained source",
+              "translation": "Synthetic retained translation"
+            },
+            "history": [
+              {
+                "audioSource": "system",
+                "source": "Synthetic retained source",
+                "translation": "Synthetic retained translation"
+              }
+            ]
+          }
+        },
+        {
+          "event": {
+            "type": "final_pair",
+            "source": "Synthetic retained source",
+            "translation": "Synthetic retained translation"
+          },
+          "expected": {
+            "source": {
+              "text": "Synthetic retained source",
+              "isFinal": true
+            },
+            "translation": {
+              "text": "Synthetic retained translation",
+              "isFinal": true
+            },
+            "previewPair": null,
+            "displayPair": {
+              "source": "Synthetic retained source",
+              "translation": "Synthetic retained translation"
+            },
+            "history": [
+              {
+                "audioSource": "system",
+                "source": "Synthetic retained source",
+                "translation": "Synthetic retained translation"
+              },
+              {
+                "audioSource": "system",
+                "source": "Synthetic retained source",
+                "translation": "Synthetic retained translation"
+              }
+            ]
+          },
+          "displayTimeMatchesLatestHistory": true
         }
       ]
     }

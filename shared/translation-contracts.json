@@ -1,5 +1,31 @@
 {
   "schemaVersion": 1,
+  "recognitionRecoveryErrors": [
+    { "id": "custom-disconnected", "code": "custom_speech_unreachable", "normalized": "transport_error", "retryable": true, "requiresUserAction": false },
+    { "id": "custom-not-connected", "code": "custom_speech_not_connected", "normalized": "transport_error", "retryable": true, "requiresUserAction": false },
+    { "id": "custom-health-timeout", "code": "custom_speech_health_timeout", "normalized": "transport_error", "retryable": true, "requiresUserAction": false },
+    { "id": "custom-authentication", "code": "custom_speech_authentication_failed", "normalized": "credential_authentication_failed", "retryable": false, "requiresUserAction": true },
+    { "id": "custom-credentials", "code": "custom_speech_credentials_missing", "normalized": "invalid_configuration", "retryable": false, "requiresUserAction": true },
+    { "id": "gemini-disconnected", "code": "gemini_transcribe_unreachable", "normalized": "transport_error", "retryable": true, "requiresUserAction": false },
+    { "id": "gemini-not-connected", "code": "gemini_transcribe_not_connected", "normalized": "transport_error", "retryable": true, "requiresUserAction": false },
+    { "id": "gemini-health-timeout", "code": "gemini_transcribe_health_timeout", "normalized": "transport_error", "retryable": true, "requiresUserAction": false },
+    { "id": "gemini-authentication", "code": "gemini_transcribe_authentication_failed", "normalized": "credential_authentication_failed", "retryable": false, "requiresUserAction": true },
+    { "id": "gemini-credentials", "code": "gemini_transcribe_credentials_missing", "normalized": "invalid_configuration", "retryable": false, "requiresUserAction": true },
+    { "id": "gemini-language", "code": "gemini_transcribe_language_unsupported", "normalized": "invalid_configuration", "retryable": false, "requiresUserAction": true },
+    { "id": "xai-disconnected", "code": "xai_stt_unreachable", "normalized": "transport_error", "retryable": true, "requiresUserAction": false },
+    { "id": "xai-not-connected", "code": "xai_stt_not_connected", "normalized": "transport_error", "retryable": true, "requiresUserAction": false },
+    { "id": "xai-health-timeout", "code": "xai_stt_health_timeout", "normalized": "transport_error", "retryable": true, "requiresUserAction": false },
+    { "id": "xai-authentication", "code": "xai_stt_authentication_failed", "normalized": "credential_authentication_failed", "retryable": false, "requiresUserAction": true },
+    { "id": "xai-credentials", "code": "xai_stt_credentials_missing", "normalized": "invalid_configuration", "retryable": false, "requiresUserAction": true },
+    { "id": "xai-language", "code": "xai_stt_language_unsupported", "normalized": "invalid_configuration", "retryable": false, "requiresUserAction": true },
+    { "id": "xai-protocol", "code": "xai_stt_protocol_invalid", "normalized": "provider_error", "retryable": false, "requiresUserAction": false },
+    { "id": "xai-untrusted-suffix", "code": "xai_stt_unreachable: synthetic-private-detail", "normalized": "provider_error", "retryable": false, "requiresUserAction": false },
+    { "id": "gemini-untrusted-suffix", "code": "gemini_transcribe_authentication_failed: synthetic-private-detail", "normalized": "provider_error", "retryable": false, "requiresUserAction": false }
+  ],
+  "xaiStreamingRecovery": [
+    { "id": "established-transport-closes", "failureFrame": null, "expectedConnections": 2, "expectedErrorCode": null },
+    { "id": "established-authentication-rejected", "failureFrame": { "type": "error", "code": "unauthorized", "message": "synthetic-private-detail" }, "expectedConnections": 1, "expectedErrorCode": "credential_authentication_failed" }
+  ],
   "textProbeRejections": [
     {
       "id": "deepl-http-rate-limit",

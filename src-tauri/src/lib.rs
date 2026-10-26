@@ -37,6 +37,7 @@ mod session_export;
 mod session_history;
 mod session_manager;
 mod settings_store;
+mod updater_target;
 mod windows;
 #[cfg(target_os = "windows")]
 mod windows_startup;
@@ -102,7 +103,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build());
+        .plugin(updater_target::builder().build());
     // X11 grabs cannot act as desktop shortcuts in a Wayland session.
     let builder = if desktop_shortcuts::uses_system_shortcuts() {
         builder

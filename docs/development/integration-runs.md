@@ -4,6 +4,40 @@
 实测范围和未解决项；条目是历史证据，后续任务仍须核对当前源码与设备。
 不写密钥、音频、字幕正文或个人目录，不把临时日志当作已持久归档的案例。
 
+## 2026-10-26：v1.6.12 发布与公开更新验证
+
+- 发布源码 `9dfbeced` 基于 main `99dc2ddc`，统一桌面版本 1.6.12 与
+  Android versionCode 10612。承接已合并的 Rosetta 原生更新和会话可靠性
+  修复；版本准备只改六处版本来源及英中等价发布说明，没有额外业务改动。
+- 正式源码完整 `./scripts/check.sh` 通过：core 108 项及 4 项契约、
+  runtime 942 项、JNI Rust 30 项、桌面 671 项、前端 155 文件共 2,803 项。
+  保留既有 ignored；格式、严格 Clippy、架构边界、lint、typecheck、
+  生产前端及调试器排除检查通过。
+- 发布源码的[主 CI](https://github.com/yuxino/Mimi/actions/runs/40314405171)
+  和[独立 Android CI](https://github.com/yuxino/Mimi/actions/runs/40314404959)
+  通过；标签的[全部发布 CI](https://github.com/yuxino/Mimi/actions/runs/40315348426)
+  和[独立 Android CI](https://github.com/yuxino/Mimi/actions/runs/40315348388)
+  通过，包括 Windows x64/ARM64、Linux、Mac 双架构及正式 Android APK。
+- 两个 Mac 架构均核对固定签名身份、源码/版本标记、DMG 内外应用与
+  更新归档一致性。正式应用保持原进程，没有为后台发布中断会话或替换
+  安装；未将构建或浏览器检查称为本地新版原生 UI 验收。Gatekeeper
+  仍拒绝自签名未公证包，双语说明保留此限制，没有调整信任或权限。
+- [v1.6.12](https://github.com/yuxino/Mimi/releases/tag/v1.6.12) 已公开为
+  Latest/Immutable。实际下载的 17 项文件逐一匹配远端摘要和 16 项校验
+  清单，四平台更新映射、五份更新签名与四个原始 Mac 上传文件均匹配。
+  GitHub Release 与更新清单使用同一双语说明。标签、Latest 和应用原
+  小写配置地址的匿名请求均为 HTTP 200，清单字节完全相同，版本为 1.6.12。
+- 实际下载的正式 APK 为非调试包，包名与 1.6.12/10612 元数据正确，
+  `apksigner` 验证通过，证书与 v1.6.11 相同，16 KB ZIP 对齐通过。
+  浏览器核对公开页的双语说明、17 项正式下载链接及原生 Contributors
+  `@yuxino`，头像加载并经目视确认。
+- 清理任务下载的重复安装包、两架构临时 bundle 和一次性工具。按当前
+  二进制及 Cargo 依赖闭包清理 76 个不再引用且未被打开的旧发布变体；
+  当前构建字节保持不变。保留有效依赖和精简的 Git 外验收记录，未触碰
+  源码、已安装应用、用户数据、凭据、签名身份或全局共享工具链。
+- 本轮未调用真实提供商或采音。真实服务恢复与延迟、完整覆盖/跨架构
+  更新、实体 Windows/Linux/Android、长期会话仍未由本轮建立。
+
 ## 2026-10-26：会话恢复、确认时间与凭据修复
 
 - 实现提交 `1f6f26d5`，基于 main `57e829d0`；下列自动检查在提交前

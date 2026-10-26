@@ -60,6 +60,13 @@ class SharedSubtitleContractTest {
                 if (step.has("displayPairFinal")) {
                     assertEquals(step.getBoolean("displayPairFinal"), response.getJSONObject("snapshot").getBoolean("displayPairFinal"))
                 }
+                if (step.optBoolean("displayTimeMatchesLatestHistory")) {
+                    val snapshot = response.getJSONObject("snapshot")
+                    val history = snapshot.getJSONArray("history")
+                    assertEquals("${case.getString("id")} step $stepIndex confirmation time",
+                        history.getJSONObject(history.length() - 1).getLong("createdAt"),
+                        snapshot.getLong("displayPairCreatedAt"))
+                }
                 checked += 1
             }
         }

@@ -157,6 +157,43 @@ class NativeRuntimeJniTest {
         assertTrue(voice.getJSONArray("modelNames").toString().contains("grok-voice-latest"))
     }
 
+    @Test fun xaiStreamingTransportRecoversAndAuthenticationStopsAcrossActualJni() {
+        val cases = JSONObject(requireNotNull(javaClass.getResourceAsStream("/translation-contracts.json"))
+            .bufferedReader().use { it.readText() }).getJSONArray("xaiStreamingRecovery")
+        for (index in 0 until cases.length()) {
+            val case = cases.getJSONObject(index)
+            val id = case.getString("id")
+            RealtimeLoopback(ServiceProvider.XAI, xaiRecovery = case).use { fixture ->
+                val config = configuration(ServiceProvider.XAI).put("xaiSpeechMode", "asrMt")
+                    .put("sourceLanguage", "en").put("targetLanguage", "original")
+                val handle = NativeRuntimeConfiguration.exchange(JSONObject().put("operation", "create")
+                    .put("configuration", config).put("network", fixture.network)).getLong("handle")
+                try {
+                    NativeRuntimeConfiguration.command("start", handle)
+                    awaitRuntimeState(handle, fixture) { it.getString("connectionStatus") == "listening" }
+                    fixture.nextMid.countDown()
+                    if (case.isNull("expectedErrorCode")) {
+                        val recovered = awaitRuntimeState(handle, fixture) {
+                            assertFalse("$id terminated instead of reconnecting: ${it.optString("errorCode")}", it.getBoolean("finished"))
+                            fixture.reconnected.count == 0L && it.getString("connectionStatus") == "listening"
+                        }
+                        assertTrue(id, recovered.isNull("errorCode"))
+                        assertFalse(id, recovered.getBoolean("finished"))
+                        NativeRuntimeConfiguration.command("finish", handle)
+                        awaitRuntimeState(handle, fixture) { it.getBoolean("finished") }
+                    } else {
+                        val failed = awaitRuntimeState(handle, fixture, expectedError = case.getString("expectedErrorCode")) { it.getBoolean("finished") }
+                        assertEquals(id, case.getString("expectedErrorCode"), failed.getString("errorCode"))
+                        assertFalse(id, failed.toString().contains("synthetic-private-detail"))
+                    }
+                    assertTrue(id, fixture.noFurtherConnections.await(2, TimeUnit.SECONDS))
+                    fixture.checkFailure()
+                    assertEquals(id, case.getInt("expectedConnections"), fixture.connectionCount.get())
+                } finally { NativeRuntimeConfiguration.command("stop", handle) }
+            }
+        }
+    }
+
     @Test fun xaiRuntimeNeverFillsAMissingTextKeyFromTheSpeechKeyAcrossActualJni() {
         val speech = ServiceConfiguration(ServiceProvider.XAI, mapOf("apiKey" to "synthetic-speech-only-key"), xaiSpeechMode = "asrMt")
         val missing = buildRuntimeConfiguration(speech, TranslationConfiguration(provider = TextTranslationProvider.NONE), "en", "zh", "lite")
@@ -887,12 +924,14 @@ class NativeRuntimeJniTest {
             .put("alibabaRealtimeMode", "liveTranslate").put("alibabaWorkspaceId", "synthetic-workspace")
             .put("sourceLanguage", "auto")).put("network", fixture.network)).getLong("handle")
 
-    private fun awaitRuntimeState(handle: Long, fixture: RealtimeLoopback, predicate: (JSONObject) -> Boolean): JSONObject {
+    private fun awaitRuntimeState(handle: Long, fixture: RealtimeLoopback, expectedError: String? = null,
+        predicate: (JSONObject) -> Boolean): JSONObject {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
         while (System.nanoTime() < deadline) {
             fixture.checkFailure()
             val state = NativeRuntimeConfiguration.command("poll", handle)
-            assertTrue("Loopback runtime failed: ${state.optString("errorCode")}", state.isNull("errorCode"))
+            assertTrue("Loopback runtime failed: ${state.optString("errorCode")}",
+                state.isNull("errorCode") || (expectedError != null && state.optString("errorCode") == expectedError))
             if (predicate(state)) return state
             Thread.sleep(10)
         }
@@ -916,7 +955,7 @@ class NativeRuntimeJniTest {
             RealtimeLoopback(ServiceProvider.DASHSCOPE, liveTranslate = true, lateFinalReplay = true).use { fixture ->
                 val handle = createLiveTranslate(fixture)
                 fun awaitState(predicate: (JSONObject) -> Boolean): JSONObject {
-                    val state = awaitRuntimeState(handle, fixture, predicate)
+                    val state = awaitRuntimeState(handle, fixture, predicate = predicate)
                     SubtitleBus.onRuntimeSnapshot(state, false)
                     return state
                 }
@@ -976,7 +1015,7 @@ class NativeRuntimeJniTest {
             RealtimeLoopback(ServiceProvider.DASHSCOPE, liveTranslate = true, sourceOrderReplay = true).use { fixture ->
                 val handle = createLiveTranslate(fixture)
                 fun awaitState(predicate: (JSONObject) -> Boolean): JSONObject {
-                    val state = awaitRuntimeState(handle, fixture, predicate)
+                    val state = awaitRuntimeState(handle, fixture, predicate = predicate)
                     SubtitleBus.onRuntimeSnapshot(state, false)
                     return state
                 }
@@ -1044,14 +1083,17 @@ class NativeRuntimeJniTest {
         private val liveTranslate: Boolean = false, private val finishTail: Boolean = false,
         private val holdSetup: Boolean = false, private val recoverOverflow: Boolean = false,
         private val lateFinalReplay: Boolean = false, private val sourceOrderReplay: Boolean = false,
-        private val translationStartReplay: Boolean = false, private val finishTailCount: Int = 1) : AutoCloseable {
+        private val translationStartReplay: Boolean = false, private val finishTailCount: Int = 1,
+        private val xaiRecovery: JSONObject? = null) : AutoCloseable {
         private val tencent = provider == ServiceProvider.TENCENT
         private val qwen = provider == ServiceProvider.DASHSCOPE && !liveTranslate
-        private val host = if (liveTranslate) "synthetic-workspace.cn-beijing.maas.aliyuncs.com"
+        private val host = if (xaiRecovery != null) "api.x.ai"
+            else if (liveTranslate) "synthetic-workspace.cn-beijing.maas.aliyuncs.com"
             else if (qwen) "dashscope.aliyuncs.com" else if (tencent) "asr.cloud.tencent.com" else "aip.baidubce.com"
         private val phases = JSONObject(requireNotNull(javaClass.getResourceAsStream("/translation-contracts.json"))
             .bufferedReader().use { it.readText() }).let { contract ->
-            if (translationStartReplay) JSONObject(requireNotNull(javaClass.getResourceAsStream("/live-pair-contracts.json"))
+            if (xaiRecovery != null) JSONArray()
+            else if (translationStartReplay) JSONObject(requireNotNull(javaClass.getResourceAsStream("/live-pair-contracts.json"))
                 .bufferedReader().use { it.readText() }).getJSONObject("translationStartActivity").getJSONArray("phases")
             else if (sourceOrderReplay) JSONArray(listOf(
                 JSONArray(listOf(
@@ -1163,6 +1205,10 @@ class NativeRuntimeJniTest {
             worker = thread(name = "mimi-realtime-loopback", isDaemon = true) {
                 try {
                     server.soTimeout = 5_000
+                    if (xaiRecovery != null) {
+                        xaiRecoverySession(tls)
+                        return@thread
+                    }
                     if (recoverOverflow) {
                         repeat(2) { index ->
                             acceptWebSocket(tls).use { secure ->
@@ -1227,12 +1273,43 @@ class NativeRuntimeJniTest {
             socket = secure
             val input = DataInputStream(secure.inputStream)
             val request = headers(input)
-            check(request.startsWith(if (liveTranslate) "GET /api-ws/v1/realtime?model=qwen3.8-livetranslate-flash-realtime HTTP/1.1\r\n"
+            check(request.startsWith(if (xaiRecovery != null) "GET /v1/stt?model=grok-voice-transcribe-2.0&sample_rate=16000&encoding=pcm&interim_results=true&language=en HTTP/1.1\r\n"
+                else if (liveTranslate) "GET /api-ws/v1/realtime?model=qwen3.8-livetranslate-flash-realtime HTTP/1.1\r\n"
                 else if (qwen) "GET /api-ws/v1/inference HTTP/1.1\r\n" else if (tencent) "GET /asr/speech_translate/123456789?" else "GET /ws/realtime_speech_trans HTTP/1.1\r\n"))
             val key = request.lineSequence().first { it.startsWith("sec-websocket-key:", true) }.substringAfter(':').trim()
             val accept = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-1").digest((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").toByteArray(Charsets.US_ASCII)))
             secure.outputStream.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: $accept\r\n\r\n".toByteArray(Charsets.US_ASCII))
             return secure
+        }
+
+        private fun xaiRecoverySession(tls: SSLContext) {
+            val recovery = requireNotNull(xaiRecovery)
+            acceptWebSocket(tls).use { first ->
+                send(first.outputStream, """{"type":"transcript.created"}""")
+                check(nextMid.await(5, TimeUnit.SECONDS))
+                if (!recovery.isNull("failureFrame")) {
+                    send(first.outputStream, recovery.getJSONObject("failureFrame").toString())
+                    check(readText(DataInputStream(first.inputStream), first.outputStream).isEmpty())
+                }
+            }
+            if (recovery.getInt("expectedConnections") == 2) {
+                acceptWebSocket(tls).use { second ->
+                    send(second.outputStream, """{"type":"transcript.created"}""")
+                    reconnected.countDown()
+                    val finish = JSONObject(readText(DataInputStream(second.inputStream), second.outputStream))
+                    check(finish.getString("type") == "audio.done")
+                    send(second.outputStream, """{"type":"transcript.done","duration":0}""")
+                }
+            }
+            server.soTimeout = 500
+            try {
+                server.accept().use {
+                    connectionCount.incrementAndGet()
+                    error("Unexpected extra xAI connection after recovery completed")
+                }
+            } catch (_: java.net.SocketTimeoutException) {
+                noFurtherConnections.countDown()
+            }
         }
 
         private fun liveTranslateSession(input: DataInputStream, output: OutputStream, connection: Int = 1) {
@@ -1330,7 +1407,7 @@ class NativeRuntimeJniTest {
                     val mask = ByteArray(4).also(input::readFully)
                     val payload = ByteArray(size).also(input::readFully)
                     for (index in payload.indices) payload[index] = (payload[index].toInt() xor mask[index % 4].toInt()).toByte()
-                    if ((qwen || liveTranslate) && opcode == 8) {
+                    if ((qwen || liveTranslate || xaiRecovery != null) && opcode == 8) {
                         if (liveTranslate) observeTransportClosed(connection)
                         return ""
                     }
@@ -1341,7 +1418,7 @@ class NativeRuntimeJniTest {
                     }
                 }
             } catch (error: java.io.EOFException) {
-                if (!liveTranslate) throw error
+                if (!liveTranslate && xaiRecovery == null) throw error
                 observeTransportClosed(connection)
                 return ""
             }

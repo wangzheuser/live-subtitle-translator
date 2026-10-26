@@ -21,6 +21,9 @@ pub fn normalize_provider_error_code(code: &str) -> &'static str {
         | "custom_speech_unreachable"
         | "custom_speech_not_connected"
         | "custom_speech_health_timeout"
+        | "xai_stt_unreachable"
+        | "xai_stt_not_connected"
+        | "xai_stt_health_timeout"
         | "gemini_transcribe_unreachable"
         | "gemini_transcribe_not_connected"
         | "gemini_transcribe_health_timeout" => "transport_error",
@@ -38,6 +41,7 @@ pub fn normalize_provider_error_code(code: &str) -> &'static str {
         | "translation_authentication_failed"
         | "credential_authentication_failed"
         | "custom_speech_authentication_failed"
+        | "xai_stt_authentication_failed"
         | "gemini_transcribe_authentication_failed" => "credential_authentication_failed",
         "invalid_configuration" => "invalid_configuration",
         code if provider_error_requires_user_action(code) => "invalid_configuration",
@@ -63,6 +67,9 @@ pub fn provider_error_requires_user_action(error: &str) -> bool {
                 | "gemini_transcribe_authentication_failed"
                 | "gemini_transcribe_credentials_missing"
                 | "gemini_transcribe_language_unsupported"
+                | "xai_stt_authentication_failed"
+                | "xai_stt_credentials_missing"
+                | "xai_stt_language_unsupported"
                 | "text_translation_credentials_missing"
                 | "invalid_configuration"
         )
@@ -162,6 +169,32 @@ impl RecoverySchedule {
 #[cfg(test)]
 mod schedule_tests {
     use super::*;
+
+    #[test]
+    fn recognition_recovery_contract_preserves_raw_and_normalized_decisions() {
+        let fixtures: serde_json::Value =
+            serde_json::from_str(include_str!("../../../translation-contracts.json")).unwrap();
+        let cases = fixtures["recognitionRecoveryErrors"].as_array().unwrap();
+        assert!(!cases.is_empty());
+        for case in cases {
+            let id = case["id"].as_str().unwrap();
+            let code = case["code"].as_str().unwrap();
+            let normalized = normalize_provider_error_code(code);
+            assert_eq!(normalized, case["normalized"].as_str().unwrap(), "{id}");
+            for code in [code, normalized] {
+                assert_eq!(
+                    provider_error_is_retryable(code),
+                    case["retryable"].as_bool().unwrap(),
+                    "{id}: {code}"
+                );
+            }
+            assert_eq!(
+                provider_error_requires_user_action(code),
+                case["requiresUserAction"].as_bool().unwrap(),
+                "{id}"
+            );
+        }
+    }
 
     #[test]
     fn independent_asr_transport_expiry_recovers_but_bad_credentials_do_not() {

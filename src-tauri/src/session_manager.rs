@@ -445,19 +445,12 @@ fn configuration_failure_requires_repair(error: &str) -> bool {
 }
 
 fn session_error_requires_user_action(error: &str) -> bool {
-    configuration_failure_requires_repair(error)
+    provider_error_requires_user_action(error)
         || matches!(
             error,
             "System audio capture permission was denied."
                 | "Microphone capture permission was denied."
                 | "System audio capture was stopped by the user."
-                | "credential_authentication_failed"
-                | "custom_speech_authentication_failed"
-                | "custom_speech_credentials_missing"
-                | "custom_speech_endpoint_invalid"
-                | "custom_speech_model_invalid"
-                | "text_translation_credentials_missing"
-                | "invalid_configuration"
         )
 }
 
@@ -7828,6 +7821,12 @@ mod lifecycle_tests {
             "custom_speech_credentials_missing",
             "custom_speech_endpoint_invalid",
             "custom_speech_model_invalid",
+            "gemini_transcribe_authentication_failed",
+            "gemini_transcribe_credentials_missing",
+            "gemini_transcribe_language_unsupported",
+            "xai_stt_authentication_failed",
+            "xai_stt_credentials_missing",
+            "xai_stt_language_unsupported",
             "text_translation_credentials_missing",
         ] {
             let mut controller = TranslationSessionController::default();
@@ -7847,6 +7846,12 @@ mod lifecycle_tests {
             "custom_speech_unreachable",
             "custom_speech_setup_timeout",
             "custom_speech_authentication_failed: private-detail",
+            "gemini_transcribe_unreachable",
+            "gemini_transcribe_setup_timeout",
+            "gemini_transcribe_authentication_failed: private-detail",
+            "xai_stt_unreachable",
+            "xai_stt_setup_timeout",
+            "xai_stt_authentication_failed: private-detail",
         ] {
             assert!(!session_error_requires_user_action(error));
         }

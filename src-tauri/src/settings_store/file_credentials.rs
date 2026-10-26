@@ -1695,6 +1695,111 @@ mod tests {
     }
 
     #[test]
+    fn complete_custom_speech_replacement_repairs_only_its_malformed_saved_value() {
+        use crate::core::{credentials::ProviderCredentials, provider::ProviderKind};
+        for provider in [
+            ProviderKind::CustomOpenAIASR,
+            ProviderKind::CustomDashScopeASR,
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let legacy = Legacy::default();
+            let service = super::super::PROFILE_KEYCHAIN_SERVICE;
+            let bootstrap = SettingsStore::load_with_secret(
+                directory.path().into(),
+                false,
+                Box::new(legacy.clone()),
+                service,
+            );
+            let profile = bootstrap
+                .create_profile(provider, "Synthetic repair")
+                .unwrap();
+            drop(bootstrap);
+            let local = FileCredentialStore::new(
+                directory.path(),
+                service,
+                Vec::new(),
+                Box::new(legacy.clone()),
+            );
+            let path = local.path.clone();
+            let speech = credential_account(&profile);
+            let text = SettingsStore::destination_account(&profile);
+            local
+                .save(service, &speech, "malformed synthetic speech value")
+                .unwrap();
+            let destination = super::super::TextTranslationDestination {
+                endpoint: "https://text.example/translate".into(),
+                token: "synthetic retained text value".into(),
+                ..Default::default()
+            };
+            let destination = serde_json::to_string(&destination).unwrap();
+            local.save(service, &text, &destination).unwrap();
+            let store = SettingsStore::load_with_secret(
+                directory.path().into(),
+                false,
+                Box::new(local),
+                service,
+            );
+            let before = fs::read(&path).unwrap();
+            let metadata = store.profile_catalog().unwrap();
+            for request in [
+                ProviderCredentials::CustomSpeech {
+                    endpoint: String::new(),
+                    model: "synthetic-model".into(),
+                    api_key: "synthetic-replacement-key".into(),
+                },
+                ProviderCredentials::CustomSpeech {
+                    endpoint: "wss://speech.example/realtime".into(),
+                    model: String::new(),
+                    api_key: "synthetic-replacement-key".into(),
+                },
+                complete_speech_request(""),
+            ] {
+                assert_eq!(
+                    store.save_credentials(&profile.id, &request),
+                    Err(
+                        crate::core::credentials::ProviderCredentialsError::InvalidStoredValue
+                            .to_string()
+                    )
+                );
+                assert_eq!(fs::read(&path).unwrap(), before);
+            }
+            let request = complete_speech_request("synthetic-replacement-key");
+            assert!(store
+                .configuration_for_speech_draft_probe(&profile, &request, true)
+                .is_ok());
+            store.save_credentials(&profile.id, &request).unwrap();
+            assert_eq!(store.profile_catalog().unwrap(), metadata);
+            assert_eq!(
+                store.destination_value(&profile).unwrap(),
+                Some(destination.clone())
+            );
+            drop(store);
+            let restarted = FileCredentialStore::new(
+                directory.path(),
+                service,
+                Vec::new(),
+                Box::new(legacy.clone()),
+            );
+            let store = SettingsStore::load_with_secret(
+                directory.path().into(),
+                false,
+                Box::new(restarted),
+                service,
+            );
+            assert_eq!(
+                store.credentials_for_profile(&profile).unwrap(),
+                Some(request)
+            );
+            assert_eq!(
+                store.destination_value(&profile).unwrap(),
+                Some(destination)
+            );
+            assert_eq!(reads(&legacy), 0);
+            assert_eq!(legacy.0.lock().unwrap().deletes, 0);
+        }
+    }
+
+    #[test]
     fn complete_custom_speech_replacement_retires_only_its_pending_import() {
         use crate::core::{credentials::ProviderCredentials, provider::ProviderKind};
         for provider in [

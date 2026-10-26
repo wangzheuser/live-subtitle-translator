@@ -2547,19 +2547,28 @@ impl SettingsStore {
             }
             Err(error) => return Err(error.public_error()),
         };
-        let previous_credentials = previous
-            .as_deref()
-            .map(|value| ProviderCredentials::decode_for_profile(profile, value))
-            .transpose()
-            .map_err(|error| error.to_string())?;
-        let value = ProviderCredentials::CustomSpeech {
+        let draft = ProviderCredentials::CustomSpeech {
             endpoint: entered_endpoint.unwrap_or_default(),
             model: entered_model.unwrap_or_default(),
             api_key: api_key.into(),
-        }
-        .resolve_draft(profile.provider, previous_credentials.as_ref())
-        .and_then(|credentials| credentials.encode_for_keychain(profile.provider))
-        .map_err(|error| error.to_string())?;
+        };
+        // A complete explicit replacement can repair a malformed saved slot.
+        // Partial edits still require a valid old value, and the raw previous
+        // value remains available for rollback if persistence fails.
+        let value = match draft.encode_for_keychain(profile.provider) {
+            Ok(value) => value,
+            Err(_) => {
+                let previous_credentials = previous
+                    .as_deref()
+                    .map(|value| ProviderCredentials::decode_for_profile(profile, value))
+                    .transpose()
+                    .map_err(|error| error.to_string())?;
+                draft
+                    .resolve_draft(profile.provider, previous_credentials.as_ref())
+                    .and_then(|credentials| credentials.encode_for_keychain(profile.provider))
+                    .map_err(|error| error.to_string())?
+            }
+        };
         if previous.as_deref() == Some(value.as_str()) {
             return Ok(());
         }
@@ -9841,6 +9850,31 @@ mod tests {
                 .unwrap()
                 .direct_api_key(),
             Some("synthetic-old-key")
+        );
+
+        // A repair must restore even an undecodable previous value when the
+        // replacement's durable read-back fails, without deleting the slot.
+        let malformed = "malformed synthetic speech value";
+        fake.put(PROFILE_KEYCHAIN_SERVICE, &account, malformed);
+        store.secret_cache.lock().unwrap().clear();
+        *rejected_value.lock().unwrap() =
+            Some(replacement.encode_for_keychain(profile.provider).unwrap());
+        assert_eq!(
+            store.save_credentials(&profile.id, &replacement),
+            Err(CREDENTIAL_STORE_UNAVAILABLE.into())
+        );
+        assert_eq!(
+            fake.value(PROFILE_KEYCHAIN_SERVICE, &account).as_deref(),
+            Some(malformed)
+        );
+        assert_eq!(
+            store.credentials_for_profile(&profile),
+            Err(crate::core::credentials::ProviderCredentialsError::InvalidStoredValue.to_string())
+        );
+        store.save_credentials(&profile.id, &replacement).unwrap();
+        assert_eq!(
+            store.credentials_for_profile(&profile).unwrap(),
+            Some(replacement)
         );
     }
 

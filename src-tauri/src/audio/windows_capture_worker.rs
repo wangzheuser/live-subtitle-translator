@@ -10,6 +10,17 @@ use tokio::sync::oneshot;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(5);
 
+/// Bound the caller's wait, not native ownership. A timed-out stop leaves the
+/// worker reserved, so the next start cannot overlap its unfinished destruction.
+pub(crate) async fn wait_for_previous_capture_release(
+    stop: impl std::future::Future<Output = ()>,
+    timeout: Duration,
+) -> Result<(), SystemAudioCaptureError> {
+    tokio::time::timeout(timeout, stop)
+        .await
+        .map_err(|_| SystemAudioCaptureError::PreviousCaptureStopping)
+}
+
 /// Per-worker metadata only. Native streams belong to the `start` closure, so
 /// its completion flag cannot precede their destruction.
 pub(crate) struct Worker<T> {
@@ -244,6 +255,65 @@ mod tests {
         release.release();
         await_stopped(&slot).await;
         assert!(original.finished());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn restart_wait_fails_without_releasing_a_blocked_native_owner() {
+        let slot = WorkerSlot::<()>::default();
+        let release = Arc::new(Gate::default());
+        let _release_on_failure = ReleaseOnDrop(Arc::clone(&release));
+        let native_release = Arc::clone(&release);
+        let (entered_tx, entered_rx) = oneshot::channel();
+        slot.start(move |worker, ready| {
+            let _native = BlockingDrop {
+                entered: Some(entered_tx),
+                release: native_release,
+            };
+            let _ = ready.send(Ok(()));
+            run_until_cancelled(worker);
+        })
+        .await
+        .unwrap();
+        let original = slot.current().unwrap();
+        assert!(tokio::time::timeout(Duration::from_millis(30), slot.stop())
+            .await
+            .is_err());
+        tokio::time::timeout(Duration::from_secs(2), entered_rx)
+            .await
+            .unwrap()
+            .unwrap();
+
+        // AudioCapture::start releases previous backends before starting the
+        // selected source. This wait must return an error while native Drop is
+        // blocked, rather than waiting forever before WorkerSlot::reserve.
+        let restart = async {
+            wait_for_previous_capture_release(slot.stop(), Duration::from_millis(30)).await?;
+            slot.start(|_, _| panic!("native drop still owns the slot"))
+                .await
+        };
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), restart)
+                .await
+                .expect("restart must return the bounded release error"),
+            Err(SystemAudioCaptureError::PreviousCaptureStopping)
+        );
+        assert!(Arc::ptr_eq(&original, &slot.current().unwrap()));
+        assert!(original.cancelled());
+        assert!(!original.finished());
+
+        release.release();
+        wait_for_previous_capture_release(slot.stop(), Duration::from_secs(2))
+            .await
+            .unwrap();
+        assert!(original.finished());
+        slot.start(|worker, ready| {
+            let _ = ready.send(Ok(()));
+            run_until_cancelled(worker);
+        })
+        .await
+        .unwrap();
+        assert!(!Arc::ptr_eq(&original, &slot.current().unwrap()));
+        await_stopped(&slot).await;
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -440,6 +440,15 @@ impl AudioCapture {
         };
         // A dropped prior start has cancelled its native worker. Wait for it
         // to release the device before allowing a different source to open.
+        // Windows drivers can remain blocked during native destruction; fail
+        // this attempt without releasing that worker's ownership of the device.
+        #[cfg(target_os = "windows")]
+        windows_capture_worker::wait_for_previous_capture_release(
+            self.stop_backends(),
+            std::time::Duration::from_secs(2),
+        )
+        .await?;
+        #[cfg(not(target_os = "windows"))]
         self.stop_backends().await;
         #[cfg(target_os = "macos")]
         self.system.wait_until_idle().await?;

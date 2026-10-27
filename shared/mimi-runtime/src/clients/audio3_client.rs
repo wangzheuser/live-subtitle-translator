@@ -122,6 +122,59 @@ impl Audio3ContentGate {
     }
 }
 
+// A native callback can deliver an entire elapsed audio batch after an idle
+// timer has already run. Count successful PCM duration as well as send time so
+// those gaps cannot repeatedly add synthetic audio to a continuous recording.
+#[derive(Default)]
+struct Audio3SendClock {
+    started_at: Option<tokio::time::Instant>,
+    audio_end_ns: u128,
+    last_sent_at: Option<tokio::time::Instant>,
+}
+
+impl Audio3SendClock {
+    fn start(&mut self, now: tokio::time::Instant) {
+        self.started_at = Some(now);
+        self.audio_end_ns = 0;
+        self.last_sent_at = Some(now);
+    }
+
+    fn can_send_silence(&self, now: tokio::time::Instant) -> bool {
+        let (Some(started_at), Some(last_sent_at)) = (self.started_at, self.last_sent_at) else {
+            return false;
+        };
+        now.saturating_duration_since(last_sent_at) >= SILENCE_INTERVAL
+            && now.saturating_duration_since(started_at).as_nanos()
+                >= self
+                    .audio_end_ns
+                    .saturating_add(SILENCE_INTERVAL.as_nanos())
+    }
+
+    fn sent(
+        &mut self,
+        bytes: usize,
+        send_started_at: tokio::time::Instant,
+        completed_at: tokio::time::Instant,
+    ) {
+        let Some(started_at) = self.started_at else {
+            return;
+        };
+        // Count whole PCM16 frames, not rounded milliseconds. At 16 kHz every
+        // frame is exactly 62,500 ns, including arbitrarily small native blocks.
+        let duration_ns = (bytes / 2) as u128 * 1_000_000_000 / 16_000;
+        let elapsed_ns = send_started_at
+            .saturating_duration_since(started_at)
+            .as_nanos();
+        // Missed idle ticks are not audio debt. Keep any already-sent lead, but
+        // do not let old empty time fund more silence after real audio resumes.
+        self.audio_end_ns = self
+            .audio_end_ns
+            .max(elapsed_ns.saturating_sub(duration_ns))
+            .saturating_add(duration_ns);
+        self.last_sent_at = Some(completed_at);
+    }
+}
+
 struct Inner {
     generation: AtomicU64,
     content_gate: std::sync::Mutex<Audio3ContentGate>,
@@ -129,7 +182,7 @@ struct Inner {
     task_started: AtomicBool,
     task_finished: AtomicBool,
     finishing: AtomicBool,
-    last_audio_sent: Mutex<tokio::time::Instant>,
+    audio_clock: Mutex<Audio3SendClock>,
     pending_pcm: std::sync::Mutex<Option<PendingPcmGate>>,
     terminal_error: Mutex<Option<String>>,
     pong_notify: Notify,
@@ -185,7 +238,7 @@ impl Audio3ASRClient {
                 task_started: AtomicBool::new(false),
                 task_finished: AtomicBool::new(false),
                 finishing: AtomicBool::new(false),
-                last_audio_sent: Mutex::new(tokio::time::Instant::now()),
+                audio_clock: Mutex::new(Audio3SendClock::default()),
                 pending_pcm: Default::default(),
                 terminal_error: Mutex::new(None),
                 pong_notify: Notify::new(),
@@ -332,7 +385,7 @@ impl Audio3ASRClient {
         self.inner.task_started.store(false, Ordering::SeqCst);
         self.inner.task_finished.store(false, Ordering::SeqCst);
         self.inner.finishing.store(false, Ordering::SeqCst);
-        *self.inner.last_audio_sent.lock().await = tokio::time::Instant::now();
+        *self.inner.audio_clock.lock().await = Audio3SendClock::default();
         *self.inner.terminal_error.lock().await = None;
 
         let inner = self.inner.clone();
@@ -415,6 +468,13 @@ impl Audio3ASRClient {
                     let is_task_finished = matches!(&event, Audio3ASRServerEvent::TaskFinished);
                     match &event {
                         Audio3ASRServerEvent::TaskStarted => {
+                            if !inner.task_started.load(Ordering::SeqCst) {
+                                inner
+                                    .audio_clock
+                                    .lock()
+                                    .await
+                                    .start(tokio::time::Instant::now());
+                            }
                             inner.task_started.store(true, Ordering::SeqCst);
                         }
                         Audio3ASRServerEvent::TaskFinished => {}
@@ -519,12 +579,17 @@ impl Audio3ASRClient {
             let Some(sink) = sink.as_mut() else {
                 return Err(Audio3ASRClientError::NotConnected);
             };
+            let send_started_at = tokio::time::Instant::now();
             let evidence = crate::development_audio::begin_pcm(pcm_data, 16_000);
             evidence
                 .observe(sink.send(Message::Binary(pcm_data.to_vec().into())))
                 .await
                 .map_err(|_| Audio3ASRClientError::TransportFailure)?;
-            *self.inner.last_audio_sent.lock().await = tokio::time::Instant::now();
+            self.inner.audio_clock.lock().await.sent(
+                pcm_data.len(),
+                send_started_at,
+                tokio::time::Instant::now(),
+            );
             Ok(())
         };
         tokio::time::timeout(SEND_TIMEOUT, operation)
@@ -746,7 +811,11 @@ async fn send_silence_if_idle(inner: &Inner) -> Result<(), Audio3ASRClientError>
         let mut sink = inner.sink.lock().await;
         if inner.finishing.load(Ordering::SeqCst)
             || inner.terminal_error.lock().await.is_some()
-            || inner.last_audio_sent.lock().await.elapsed() < SILENCE_INTERVAL
+            || !inner
+                .audio_clock
+                .lock()
+                .await
+                .can_send_silence(tokio::time::Instant::now())
         {
             return Ok(());
         }
@@ -757,12 +826,17 @@ async fn send_silence_if_idle(inner: &Inner) -> Result<(), Audio3ASRClientError>
         if has_pending_pcm(inner) {
             return Ok(());
         }
+        let send_started_at = tokio::time::Instant::now();
         let evidence = crate::development_audio::begin_pcm(&SILENCE_PCM, 16_000);
         evidence
             .observe(sink.send(Message::Binary(SILENCE_PCM.to_vec().into())))
             .await
             .map_err(|_| Audio3ASRClientError::TransportFailure)?;
-        *inner.last_audio_sent.lock().await = tokio::time::Instant::now();
+        inner.audio_clock.lock().await.sent(
+            SILENCE_PCM.len(),
+            send_started_at,
+            tokio::time::Instant::now(),
+        );
         Ok(())
     };
     tokio::time::timeout(SEND_TIMEOUT, operation)
@@ -773,6 +847,128 @@ async fn send_silence_if_idle(inner: &Inner) -> Result<(), Audio3ASRClientError>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn silence_clock_starts_at_task_ready_without_setup_debt() {
+        let before_setup = tokio::time::Instant::now();
+        let ready = before_setup + Duration::from_secs(60);
+        let mut clock = Audio3SendClock::default();
+        assert!(!clock.can_send_silence(ready));
+        clock.start(ready);
+        assert!(!clock.can_send_silence(ready + Duration::from_millis(99)));
+        assert!(clock.can_send_silence(ready + SILENCE_INTERVAL));
+    }
+
+    fn continuous_batched_clock(
+        clock: &mut Audio3SendClock,
+        start: tokio::time::Instant,
+        batch_ticks: u32,
+    ) -> usize {
+        let mut silence_bytes = 0;
+        // One hour of continuous PCM delivered in batches. A native callback
+        // runs after the timer at equal timestamps, exercising the worst order.
+        for tick in 1..=36_000u32 {
+            let now = start + SILENCE_INTERVAL * tick;
+            if clock.can_send_silence(now) {
+                clock.sent(SILENCE_PCM.len(), now, now);
+                silence_bytes += SILENCE_PCM.len();
+            }
+            if tick.is_multiple_of(batch_ticks) {
+                clock.sent(SILENCE_PCM.len() * batch_ticks as usize, now, now);
+            }
+        }
+        silence_bytes
+    }
+
+    #[test]
+    fn one_hour_of_batched_pcm_has_only_one_bounded_initial_silence_gap() {
+        let start = tokio::time::Instant::now();
+        for batch_ticks in [2, 5] {
+            let mut clock = Audio3SendClock::default();
+            clock.start(start);
+            assert_eq!(
+                continuous_batched_clock(&mut clock, start, batch_ticks),
+                SILENCE_PCM.len() * batch_ticks as usize
+            );
+            assert_eq!(
+                clock.audio_end_ns,
+                Duration::from_millis(3_600_000 + 100 * u64::from(batch_ticks)).as_nanos()
+            );
+        }
+    }
+
+    #[test]
+    fn missed_idle_ticks_cannot_fund_silence_after_continuous_pcm_resumes() {
+        let start = tokio::time::Instant::now();
+        let resumed = start + Duration::from_secs(600);
+        let mut clock = Audio3SendClock::default();
+        clock.start(start);
+        // No task ran for ten minutes. A real batch resumes without making up
+        // that lost time as synthetic audio during subsequent capture gaps.
+        clock.sent(6400, resumed, resumed);
+        assert_eq!(clock.audio_end_ns, Duration::from_secs(600).as_nanos());
+        assert_eq!(continuous_batched_clock(&mut clock, resumed, 2), 6400);
+    }
+
+    #[test]
+    fn silence_clock_preserves_submillisecond_pcm_frames() {
+        let start = tokio::time::Instant::now();
+        let mut clock = Audio3SendClock::default();
+        clock.start(start);
+        for _ in 0..16_000 {
+            clock.sent(2, start, start);
+        }
+        assert_eq!(clock.audio_end_ns, Duration::from_secs(1).as_nanos());
+        assert!(!clock.can_send_silence(start + Duration::from_secs(1)));
+        assert!(clock.can_send_silence(start + Duration::from_millis(1100)));
+    }
+
+    #[test]
+    fn slow_send_does_not_backfill_history_and_keeps_the_idle_guard() {
+        let start = tokio::time::Instant::now();
+        let mut clock = Audio3SendClock::default();
+        clock.start(start);
+        clock.sent(
+            3200,
+            start + SILENCE_INTERVAL,
+            start + Duration::from_secs(1),
+        );
+        assert!(!clock.can_send_silence(start + Duration::from_secs(1)));
+        let next = start + Duration::from_millis(1100);
+        assert!(clock.can_send_silence(next));
+        clock.sent(3200, next, next);
+        assert_eq!(clock.audio_end_ns, Duration::from_millis(1100).as_nanos());
+        assert!(!clock.can_send_silence(next));
+    }
+
+    #[test]
+    fn a_new_task_resets_old_audio_lead() {
+        let start = tokio::time::Instant::now();
+        let mut clock = Audio3SendClock::default();
+        clock.start(start);
+        clock.sent(32_000, start, start);
+        let next_task = start + Duration::from_millis(200);
+        clock.start(next_task);
+        assert_eq!(clock.audio_end_ns, 0);
+        assert!(!clock.can_send_silence(next_task));
+        assert!(clock.can_send_silence(next_task + SILENCE_INTERVAL));
+    }
+
+    #[tokio::test]
+    async fn clearing_captions_keeps_the_audio_clock() {
+        let client = Audio3ASRClient::new("fixture-only", SourceLanguage::English).unwrap();
+        let start = tokio::time::Instant::now();
+        {
+            let mut clock = client.inner.audio_clock.lock().await;
+            clock.start(start);
+            clock.sent(6400, start, start);
+        }
+        client.clear_content().await;
+        let clock = client.inner.audio_clock.lock().await;
+        assert_eq!(clock.started_at, Some(start));
+        assert_eq!(clock.audio_end_ns, Duration::from_millis(200).as_nanos());
+        assert_eq!(clock.last_sent_at, Some(start));
+    }
 
     fn caption(id: Option<u64>, is_final: bool) -> Audio3ASRServerEvent {
         Audio3ASRServerEvent::Transcription {
@@ -1572,8 +1768,12 @@ mod streaming_tests {
 
         // Backdating the successful-send clock models a >100 ms gap without
         // a real-time sleep/testutil. Real PCM is still pending in the pipeline.
-        *client.inner.last_audio_sent.lock().await =
-            tokio::time::Instant::now() - SILENCE_INTERVAL - Duration::from_millis(1);
+        {
+            let now = tokio::time::Instant::now();
+            let mut clock = client.inner.audio_clock.lock().await;
+            clock.started_at = Some(now - Duration::from_millis(151));
+            clock.last_sent_at = Some(now - SILENCE_INTERVAL - Duration::from_millis(1));
+        }
         if bind_gate {
             // A real PCM writer can hold this lock while the receive loop's
             // heartbeat fires. Pending work must let that loop keep reading.
@@ -1597,8 +1797,12 @@ mod streaming_tests {
         assert!(pipeline.finish(Duration::from_secs(2)).await);
         assert_eq!(pending_gate.pending_count(), 0);
         if idle_after_drain {
-            *client.inner.last_audio_sent.lock().await =
-                tokio::time::Instant::now() - SILENCE_INTERVAL - Duration::from_millis(1);
+            {
+                let now = tokio::time::Instant::now();
+                let mut clock = client.inner.audio_clock.lock().await;
+                clock.started_at = Some(now - Duration::from_millis(350));
+                clock.last_sent_at = Some(now - SILENCE_INTERVAL - Duration::from_millis(1));
+            }
             send_silence_if_idle(&client.inner).await.unwrap();
         }
         client.disconnect().await;
@@ -1606,5 +1810,156 @@ mod streaming_tests {
             .await
             .unwrap()
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_pcm_send_does_not_consume_silence_budget() {
+        let (client, _receiver, mut socket) = connected_finish_fixture().await;
+        client
+            .inner
+            .audio_clock
+            .lock()
+            .await
+            .start(tokio::time::Instant::now() - Duration::from_secs(1));
+        let before = {
+            let clock = client.inner.audio_clock.lock().await;
+            (clock.audio_end_ns, clock.last_sent_at)
+        };
+        client
+            .inner
+            .sink
+            .lock()
+            .await
+            .as_mut()
+            .unwrap()
+            .close()
+            .await
+            .unwrap();
+        assert!(client.send_audio(&[1, 0].repeat(1600)).await.is_err());
+        assert!(send_silence_if_idle(&client.inner).await.is_err());
+        let clock = client.inner.audio_clock.lock().await;
+        assert_eq!((clock.audio_end_ns, clock.last_sent_at), before);
+        drop(clock);
+        client.disconnect().await;
+        assert!(matches!(
+            socket.next().await,
+            Some(Ok(Message::Close(_))) | None
+        ));
+    }
+
+    #[tokio::test]
+    async fn repeated_task_ready_does_not_reset_successful_pcm_budget() {
+        let (client, mut receiver, mut socket) = connected_finish_fixture().await;
+        client.send_audio(&[1, 0].repeat(1600)).await.unwrap();
+        assert!(matches!(socket.next().await, Some(Ok(Message::Binary(_)))));
+        let before = {
+            let clock = client.inner.audio_clock.lock().await;
+            (clock.started_at, clock.audio_end_ns, clock.last_sent_at)
+        };
+        socket
+            .send(Message::Text(
+                r#"{"header":{"event":"task-started","task_id":"finish-fixture"}}"#.into(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            receiver.recv().await,
+            Some(LiveTranslateServerEvent::SessionCreated)
+        );
+        let clock = client.inner.audio_clock.lock().await;
+        assert_eq!(
+            (clock.started_at, clock.audio_end_ns, clock.last_sent_at),
+            before
+        );
+        drop(clock);
+        client.disconnect().await;
+    }
+
+    #[tokio::test]
+    async fn batched_continuous_pcm_does_not_accumulate_idle_silence() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            let _run = socket.next().await.unwrap().unwrap();
+            socket
+                .send(Message::Text(
+                    r#"{"header":{"event":"task-started"}}"#.into(),
+                ))
+                .await
+                .unwrap();
+            let mut real_frames = Vec::new();
+            let mut silence_bytes = 0usize;
+            while let Some(message) = socket.next().await {
+                match message.unwrap() {
+                    Message::Binary(bytes) if bytes.iter().all(|byte| *byte == 0) => {
+                        silence_bytes += bytes.len();
+                    }
+                    Message::Binary(bytes) => real_frames.push(bytes.to_vec()),
+                    Message::Close(_) => break,
+                    _ => {}
+                }
+            }
+            (real_frames, silence_bytes)
+        });
+        let mut client = Audio3ASRClient::new("fixture-only", SourceLanguage::English).unwrap();
+        client.endpoint.url = url::Url::parse(&format!("ws://{address}")).unwrap();
+        client
+            .set_network(
+                super::super::provider_network::ProviderNetwork::resolve(
+                    &crate::core::network_proxy::ProxyConfig {
+                        mode: crate::core::network_proxy::ProxyMode::Direct,
+                        url: None,
+                    },
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let (sender, mut events) = provider_event_channel();
+        client.set_event_sender(sender).await;
+        let gate = PendingPcmGate::default();
+        client.set_audio_pending_gate(gate.clone());
+        client.connect("batched-pcm-fixture").await.unwrap();
+        assert_eq!(
+            events.recv().await,
+            Some(LiveTranslateServerEvent::SessionCreated)
+        );
+        let started = tokio::time::Instant::now();
+        let mut previous_capture = started;
+        let mut longest_gap = Duration::ZERO;
+        for index in 1..=10u32 {
+            tokio::time::sleep_until(started + Duration::from_millis(200) * index).await;
+            let captured = tokio::time::Instant::now();
+            longest_gap = longest_gap.max(captured.saturating_duration_since(previous_capture));
+            previous_capture = captured;
+            let pcm = [index as u8, 0].repeat(3200); // 200 ms of 16 kHz mono PCM16.
+            let pending = gate.acquire();
+            client.send_audio(&pcm).await.unwrap();
+            drop(pending);
+        }
+        let elapsed = started.elapsed();
+        client.disconnect().await;
+        let (real_frames, silence_bytes) = tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .unwrap()
+            .unwrap();
+        let real_bytes: usize = real_frames.iter().map(Vec::len).sum();
+        eprintln!("batched continuous PCM: realBytes={real_bytes} silenceBytes={silence_bytes} elapsedMs={}", elapsed.as_millis());
+        assert_eq!(
+            real_frames,
+            (1..=10u8)
+                .map(|value| [value, 0].repeat(3200))
+                .collect::<Vec<_>>()
+        );
+        // A delayed CI executor may deliver a larger initial batch. Allow that
+        // measured gap and genuinely elapsed idle time, never one extra gap per
+        // callback. The clock tests above cover an exact virtual one-hour run.
+        let allowed_gap =
+            elapsed.saturating_sub(Duration::from_secs(2)) + longest_gap + SILENCE_INTERVAL;
+        assert!(
+            silence_bytes as u128 * 1_000_000_000 / 32_000 <= allowed_gap.as_nanos(),
+            "idle silence accumulated beyond the measured capture gap: {silence_bytes} bytes"
+        );
     }
 }

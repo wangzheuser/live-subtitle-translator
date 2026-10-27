@@ -4,6 +4,7 @@
 //! stereo f32) is resampled to the provider rate, mixed to mono, and
 //! quantized to PCM16.
 
+use super::windows_capture_worker::{Worker, WorkerSlot};
 use crate::audio::send_pipeline::{AudioIngress, AudioIngressError};
 use crate::audio::streaming_resampler::StreamingPcm16Resampler;
 use crate::audio::{
@@ -15,41 +16,24 @@ use crate::core::audio_source::{
 };
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct WindowsSystemAudioCapture {
-    stream: Arc<Mutex<StreamSlot<cpal::Stream>>>,
-    active: Arc<AtomicBool>,
-    control: Arc<Mutex<()>>,
-    generation: Arc<AtomicU64>,
+    workers: Arc<WorkerSlot<WindowsWorkerState>>,
     source: Arc<Mutex<String>>,
-    follow: Arc<Mutex<FollowAudible>>,
-    current_device: Arc<Mutex<Option<String>>>,
+}
+
+#[derive(Default)]
+struct WindowsWorkerState {
+    active: Arc<AtomicBool>,
+    current_device: Mutex<Option<String>>,
     activity: Arc<Mutex<AudioActivity>>,
 }
 
-enum StreamSlotState<S> {
-    Idle,
-    Starting(u64),
-    Running(S),
-}
-
-struct StreamSlot<S> {
-    next_token: u64,
-    state: StreamSlotState<S>,
-}
-
-impl<S> Default for StreamSlot<S> {
-    fn default() -> Self {
-        Self {
-            next_token: 0,
-            state: StreamSlotState::Idle,
-        }
-    }
-}
+type CaptureWorker = Worker<WindowsWorkerState>;
 
 struct WindowsAudioProcessor {
     resampler: StreamingPcm16Resampler,
@@ -58,93 +42,50 @@ struct WindowsAudioProcessor {
 }
 
 struct WindowsStreamContext {
-    active: Arc<AtomicBool>,
+    worker: Arc<CaptureWorker>,
+    live: Arc<AtomicBool>,
     processor: Arc<Mutex<WindowsAudioProcessor>>,
     audio_ingress: AudioIngress,
     failure_tx: CaptureFailureSender,
 }
 
+/// The owner thread drops this before publishing `finished`, including on
+/// cancelled build, failed play, device rebind, and normal stop. CPAL's WASAPI
+/// destructor synchronously joins its callback thread; it must never run on a
+/// Tokio worker or while holding the capture slot lock.
+struct NativeStream {
+    stream: cpal::Stream,
+    live: Arc<AtomicBool>,
+    worker: Arc<CaptureWorker>,
+}
+
+impl Drop for NativeStream {
+    fn drop(&mut self) {
+        self.live.store(false, Ordering::SeqCst);
+        self.worker.data.active.store(false, Ordering::SeqCst);
+        *self.worker.data.current_device.lock().unwrap() = None;
+    }
+}
+
 impl WindowsSystemAudioCapture {
     pub fn new() -> Self {
-        Self {
-            stream: Arc::new(Mutex::new(StreamSlot::default())),
-            active: Arc::new(AtomicBool::new(false)),
-            control: Arc::new(Mutex::new(())),
-            generation: Arc::new(AtomicU64::new(0)),
-            source: Arc::new(Mutex::new(String::new())),
-            follow: Arc::new(Mutex::new(FollowAudible::default())),
-            current_device: Arc::new(Mutex::new(None)),
-            activity: Arc::new(Mutex::new(AudioActivity::default())),
-        }
+        Self::default()
     }
 
     pub async fn start(
         &self,
-        audio_ingress: AudioIngress,
-        failure_tx: CaptureFailureSender,
+        ingress: AudioIngress,
+        failure: CaptureFailureSender,
         format: AudioCaptureFormat,
     ) -> Result<(), SystemAudioCaptureError> {
         let source = self.source.lock().unwrap().clone();
-        *self.follow.lock().unwrap() = FollowAudible::default();
-        let device = resolve_capture_source(&source, &self.follow)?;
-        let generation = self.install_device(
-            &device,
-            audio_ingress.clone(),
-            failure_tx.clone(),
-            format,
-            None,
-        )?;
-        let capture = self.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(1));
-            loop {
-                interval.tick().await;
-                let _control = capture.control.lock().unwrap();
-                let generation_current = capture.generation.load(Ordering::SeqCst) == generation;
-                if !generation_current || failure_tx.has_reported() {
-                    break;
-                }
-                let device = resolve_capture_source(&source, &capture.follow).ok();
-                let id = device
-                    .as_ref()
-                    .and_then(|device| device.id().ok())
-                    .map(|id| id.to_string());
-                let bound = capture.current_device.lock().unwrap().clone();
-                match source_action(generation_current, bound.as_deref(), id.as_deref()) {
-                    SourceAction::StopMonitor => break,
-                    SourceAction::Keep => {}
-                    SourceAction::Unavailable => {
-                        stop_stream(&capture.stream, &capture.active);
-                        *capture.current_device.lock().unwrap() = None;
-                        failure_tx.report(SystemAudioCaptureFailure::NativeStopped);
-                        break;
-                    }
-                    SourceAction::Rebind => {
-                        stop_stream(&capture.stream, &capture.active);
-                        *capture.current_device.lock().unwrap() = None;
-                        drop(_control);
-                        if capture
-                            .install_device(
-                                &device.unwrap(),
-                                audio_ingress.clone(),
-                                failure_tx.clone(),
-                                format,
-                                Some(generation),
-                            )
-                            .is_err()
-                        {
-                            let _control = capture.control.lock().unwrap();
-                            if capture.generation.load(Ordering::SeqCst) == generation {
-                                *capture.current_device.lock().unwrap() = None;
-                                failure_tx.report(SystemAudioCaptureFailure::NativeStopped);
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-        });
-        Ok(())
+        // Do not capture `self`/WorkerSlot in the thread: dropping the last
+        // external capture handle must still cancel its owner.
+        self.workers
+            .start(move |worker, ready| {
+                run_capture(worker, source, ingress, failure, format, ready);
+            })
+            .await
     }
 
     pub fn set_source(&self, source: String) {
@@ -162,103 +103,139 @@ impl WindowsSystemAudioCapture {
                 })
             })
             .collect();
-        let (receiving_audio_data, receiving_sound) =
-            self.activity.lock().unwrap().state(Instant::now());
+        let worker = self.workers.current();
+        let (current_device, receiving_audio_data, receiving_sound) = worker
+            .filter(|worker| !worker.cancelled() && !worker.finished())
+            .map(|worker| {
+                let (data, sound) = worker.data.activity.lock().unwrap().state(Instant::now());
+                let active = worker.data.active.load(Ordering::SeqCst);
+                let device = worker.data.current_device.lock().unwrap().clone();
+                (device, active && data, active && sound)
+            })
+            .unwrap_or((None, false, false));
         Ok(crate::audio::AudioSourceSnapshot {
             devices,
-            current_device: self.current_device.lock().unwrap().clone(),
-            receiving_sound: self.active.load(Ordering::SeqCst) && receiving_sound,
-            receiving_audio_data: self.active.load(Ordering::SeqCst) && receiving_audio_data,
+            current_device,
+            receiving_sound,
+            receiving_audio_data,
         })
     }
 
-    fn install_device(
-        &self,
-        device: &cpal::Device,
-        ingress: AudioIngress,
-        failure: CaptureFailureSender,
-        format: AudioCaptureFormat,
-        expected_generation: Option<u64>,
-    ) -> Result<u64, SystemAudioCaptureError> {
-        let id = device
-            .id()
-            .map_err(|_| SystemAudioCaptureError::NativeStartFailed)?
-            .to_string();
-        let (token, generation) = {
-            let _control = self.control.lock().unwrap();
-            if expected_generation
-                .is_some_and(|generation| self.generation.load(Ordering::SeqCst) != generation)
-            {
-                return Err(SystemAudioCaptureError::NativeStartFailed);
-            }
-            let token = reserve_stream_start(&self.stream, &self.active)?;
-            let generation = expected_generation.unwrap_or_else(|| {
-                self.generation
-                    .fetch_add(1, Ordering::SeqCst)
-                    .wrapping_add(1)
-            });
-            *self.activity.lock().unwrap() = AudioActivity::default();
-            (token, generation)
-        };
-        // Native build is outside the control lock: stop can invalidate both
-        // reservations while WASAPI initializes, preserving cancellable start.
-        let stream = match build_stream_on_output_device(
+    pub async fn stop(&self) {
+        self.workers.stop().await;
+    }
+}
+
+fn open_stream(
+    worker: &Arc<CaptureWorker>,
+    device: &cpal::Device,
+    ingress: AudioIngress,
+    failure: CaptureFailureSender,
+    format: AudioCaptureFormat,
+) -> Result<NativeStream, SystemAudioCaptureError> {
+    if worker.cancelled() {
+        return Err(SystemAudioCaptureError::StartCancelled);
+    }
+    let id = device
+        .id()
+        .map_err(|_| SystemAudioCaptureError::NativeStartFailed)?
+        .to_string();
+    *worker.data.activity.lock().unwrap() = AudioActivity::default();
+    // Errors during native construction are still current. Only destruction
+    // disables this stream's error callbacks; `active` gates PCM after play.
+    let live = Arc::new(AtomicBool::new(true));
+    let stream = NativeStream {
+        stream: build_stream_on_output_device(
             device,
             ingress,
             failure,
             format,
-            Arc::clone(&self.active),
-            Arc::clone(&self.activity),
-        ) {
-            Ok(stream) => stream,
-            Err(error) => {
-                cancel_stream_start(&self.stream, token);
-                return Err(error);
-            }
-        };
-        let _control = self.control.lock().unwrap();
-        if self.generation.load(Ordering::SeqCst) != generation {
-            cancel_stream_start(&self.stream, token);
-            return Err(SystemAudioCaptureError::NativeStartFailed);
+            Arc::clone(worker),
+            Arc::clone(&live),
+        )?,
+        live,
+        worker: Arc::clone(worker),
+    };
+    if worker.cancelled() {
+        return Err(SystemAudioCaptureError::StartCancelled);
+    }
+    worker.data.active.store(true, Ordering::SeqCst);
+    stream
+        .stream
+        .play()
+        .map_err(|_| SystemAudioCaptureError::NativeStartFailed)?;
+    *worker.data.current_device.lock().unwrap() = Some(id);
+    Ok(stream)
+}
+
+fn run_capture(
+    worker: Arc<CaptureWorker>,
+    source: String,
+    ingress: AudioIngress,
+    failure: CaptureFailureSender,
+    format: AudioCaptureFormat,
+    ready: tokio::sync::oneshot::Sender<Result<(), SystemAudioCaptureError>>,
+) {
+    let follow = Mutex::new(FollowAudible::default());
+    let first = resolve_capture_source(&source, &follow)
+        .and_then(|device| open_stream(&worker, &device, ingress.clone(), failure.clone(), format));
+    let mut stream = match first {
+        Ok(stream) => stream,
+        Err(error) => {
+            let _ = ready.send(Err(error));
+            return;
         }
-        install_and_play_reserved_stream(&self.stream, &self.active, token, stream, |stream| {
-            stream.play().map_err(|_| ())
-        })?;
-        *self.current_device.lock().unwrap() = Some(id);
-        Ok(generation)
+    };
+    if ready.send(Ok(())).is_err() {
+        return;
     }
-
-    #[cfg(test)]
-    fn start_on_output_device(
-        &self,
-        output_device: &cpal::Device,
-        audio_ingress: AudioIngress,
-        failure_tx: CaptureFailureSender,
-        format: AudioCaptureFormat,
-    ) -> Result<(), SystemAudioCaptureError> {
-        build_install_and_play_stream(
-            &self.stream,
-            &self.active,
-            || {
-                build_stream_on_output_device(
-                    output_device,
-                    audio_ingress,
-                    failure_tx,
+    while !worker.cancelled() && !failure.has_reported() {
+        // The old async monitor scanned once a second. Keep that cadence,
+        // with short cancellation checks instead of a one-second stop delay.
+        let next_scan = Instant::now() + Duration::from_secs(1);
+        while Instant::now() < next_scan && !worker.cancelled() && !failure.has_reported() {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        if worker.cancelled() || failure.has_reported() {
+            break;
+        }
+        let device = resolve_capture_source(&source, &follow).ok();
+        let id = device
+            .as_ref()
+            .and_then(|device| device.id().ok())
+            .map(|id| id.to_string());
+        let bound = worker.data.current_device.lock().unwrap().clone();
+        match source_action(!worker.cancelled(), bound.as_deref(), id.as_deref()) {
+            SourceAction::StopMonitor => break,
+            SourceAction::Keep => {}
+            SourceAction::Unavailable => {
+                failure.report(SystemAudioCaptureFailure::NativeStopped);
+                break;
+            }
+            SourceAction::Rebind => {
+                // Serial ownership also prevents the old callback from
+                // observing a new active flag before its stream has exited.
+                drop(stream);
+                if worker.cancelled() || failure.has_reported() {
+                    return;
+                }
+                stream = match open_stream(
+                    &worker,
+                    &device.unwrap(),
+                    ingress.clone(),
+                    failure.clone(),
                     format,
-                    Arc::clone(&self.active),
-                    Arc::clone(&self.activity),
-                )
-            },
-            |stream| stream.play().map_err(|_| ()),
-        )
-    }
-
-    pub async fn stop(&self) {
-        let _control = self.control.lock().unwrap();
-        self.generation.fetch_add(1, Ordering::SeqCst);
-        stop_stream(&self.stream, &self.active);
-        *self.current_device.lock().unwrap() = None;
-        *self.activity.lock().unwrap() = AudioActivity::default();
+                ) {
+                    Ok(stream) => stream,
+                    Err(_) => {
+                        if !worker.cancelled() {
+                            failure.report(SystemAudioCaptureFailure::NativeStopped);
+                        }
+                        return;
+                    }
+                };
+            }
+        }
     }
 }
 
@@ -267,8 +244,8 @@ fn build_stream_on_output_device(
     audio_ingress: AudioIngress,
     failure_tx: CaptureFailureSender,
     format: AudioCaptureFormat,
-    active: Arc<AtomicBool>,
-    activity: Arc<Mutex<AudioActivity>>,
+    worker: Arc<CaptureWorker>,
+    live: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, SystemAudioCaptureError> {
     // CPAL enables WASAPI loopback when an input stream is built on an
     // output device. Its configuration must still come from that output
@@ -289,10 +266,11 @@ fn build_stream_on_output_device(
     let processor = Arc::new(Mutex::new(WindowsAudioProcessor {
         resampler: StreamingPcm16Resampler::new(sample_rate, format.sample_rate_hz, channel_count)?,
         normalized_samples: Vec::new(),
-        activity,
+        activity: Arc::clone(&worker.data.activity),
     }));
     let stream_context = WindowsStreamContext {
-        active,
+        worker,
+        live,
         processor,
         audio_ingress,
         failure_tx,
@@ -358,120 +336,33 @@ fn supports_sample_format(sample_format: cpal::SampleFormat) -> bool {
     )
 }
 
-/// Reserves the capture slot before any native build work. A concurrent stop
-/// changes `Starting(token)` back to `Idle`, so the completed build can only
-/// be installed when it still owns the same token.
-#[cfg(test)]
-fn build_install_and_play_stream<S, E>(
-    stream_slot: &Mutex<StreamSlot<S>>,
-    active: &AtomicBool,
-    build: impl FnOnce() -> Result<S, SystemAudioCaptureError>,
-    play: impl FnOnce(&S) -> Result<(), E>,
-) -> Result<(), SystemAudioCaptureError> {
-    let token = reserve_stream_start(stream_slot, active)?;
-    let stream = match build() {
-        Ok(stream) => stream,
-        Err(error) => {
-            cancel_stream_start(stream_slot, token);
-            return Err(error);
-        }
-    };
-
-    install_and_play_reserved_stream(stream_slot, active, token, stream, play)
-}
-
-fn reserve_stream_start<S>(
-    stream_slot: &Mutex<StreamSlot<S>>,
-    active: &AtomicBool,
-) -> Result<u64, SystemAudioCaptureError> {
-    let mut slot = stream_slot.lock().unwrap();
-    if !matches!(&slot.state, StreamSlotState::Idle) {
-        return Err(SystemAudioCaptureError::AlreadyRunning);
-    }
-    let token = slot.next_token;
-    slot.next_token = slot.next_token.wrapping_add(1);
-    active.store(false, Ordering::SeqCst);
-    slot.state = StreamSlotState::Starting(token);
-    Ok(token)
-}
-
-fn cancel_stream_start<S>(stream_slot: &Mutex<StreamSlot<S>>, token: u64) {
-    let mut slot = stream_slot.lock().unwrap();
-    if matches!(&slot.state, StreamSlotState::Starting(current) if *current == token) {
-        slot.state = StreamSlotState::Idle;
-    }
-}
-
-/// Installs before `play` and retains the slot lock while queuing the native
-/// start. Native failure cleanup or stop therefore observes either the owned
-/// running stream or an idle/cancelled slot, never an unowned stream in flight.
-fn install_and_play_reserved_stream<S, E>(
-    stream_slot: &Mutex<StreamSlot<S>>,
-    active: &AtomicBool,
-    token: u64,
-    stream: S,
-    play: impl FnOnce(&S) -> Result<(), E>,
-) -> Result<(), SystemAudioCaptureError> {
-    let mut slot = stream_slot.lock().unwrap();
-    if !matches!(&slot.state, StreamSlotState::Starting(current) if *current == token) {
-        // A stop (or a newer start after that stop) invalidated this build.
-        return Err(SystemAudioCaptureError::NativeStartFailed);
-    }
-
-    slot.state = StreamSlotState::Running(stream);
-    active.store(true, Ordering::SeqCst);
-    let play_failed = match &slot.state {
-        StreamSlotState::Running(stream) => play(stream).is_err(),
-        StreamSlotState::Idle | StreamSlotState::Starting(_) => unreachable!(),
-    };
-    if play_failed {
-        active.store(false, Ordering::SeqCst);
-        let failed_stream = match std::mem::replace(&mut slot.state, StreamSlotState::Idle) {
-            StreamSlotState::Running(stream) => stream,
-            StreamSlotState::Idle | StreamSlotState::Starting(_) => unreachable!(),
-        };
-        drop(slot);
-        drop(failed_stream);
-        return Err(SystemAudioCaptureError::NativeStartFailed);
-    }
-    Ok(())
-}
-
-fn stop_stream<S>(stream_slot: &Mutex<StreamSlot<S>>, active: &AtomicBool) {
-    let stream = {
-        let mut slot = stream_slot.lock().unwrap();
-        active.store(false, Ordering::SeqCst);
-        match std::mem::replace(&mut slot.state, StreamSlotState::Idle) {
-            StreamSlotState::Running(stream) => Some(stream),
-            StreamSlotState::Idle | StreamSlotState::Starting(_) => None,
-        }
-    };
-    drop(stream);
-}
-
 fn build_f32_input_stream(
     output_device: &cpal::Device,
     stream_config: cpal::StreamConfig,
     context: WindowsStreamContext,
 ) -> Result<cpal::Stream, SystemAudioCaptureError> {
     let WindowsStreamContext {
-        active,
+        worker,
+        live,
         processor,
         audio_ingress,
         failure_tx,
     } = context;
     let failure_tx_for_error = failure_tx.clone();
+    let worker_for_error = Arc::clone(&worker);
     output_device
         .build_input_stream(
             stream_config,
             move |data: &[f32], _info| {
-                if !active.load(Ordering::SeqCst) {
+                if worker.cancelled() || !worker.data.active.load(Ordering::SeqCst) {
                     return;
                 }
                 process_frames_f32(data, &processor, &audio_ingress, &failure_tx);
             },
             move |_error| {
-                failure_tx_for_error.report(SystemAudioCaptureFailure::NativeStopped);
+                if !worker_for_error.cancelled() && live.load(Ordering::SeqCst) {
+                    failure_tx_for_error.report(SystemAudioCaptureFailure::NativeStopped);
+                }
             },
             None,
         )
@@ -488,23 +379,27 @@ where
     f32: FromSample<T>,
 {
     let WindowsStreamContext {
-        active,
+        worker,
+        live,
         processor,
         audio_ingress,
         failure_tx,
     } = context;
     let failure_tx_for_error = failure_tx.clone();
+    let worker_for_error = Arc::clone(&worker);
     output_device
         .build_input_stream(
             stream_config,
             move |data: &[T], _info| {
-                if !active.load(Ordering::SeqCst) {
+                if worker.cancelled() || !worker.data.active.load(Ordering::SeqCst) {
                     return;
                 }
                 process_frames(data, &processor, &audio_ingress, &failure_tx);
             },
             move |_error| {
-                failure_tx_for_error.report(SystemAudioCaptureFailure::NativeStopped);
+                if !worker_for_error.cancelled() && live.load(Ordering::SeqCst) {
+                    failure_tx_for_error.report(SystemAudioCaptureFailure::NativeStopped);
+                }
             },
             None,
         )
@@ -517,33 +412,31 @@ fn build_i24_input_stream(
     context: WindowsStreamContext,
 ) -> Result<cpal::Stream, SystemAudioCaptureError> {
     let WindowsStreamContext {
-        active,
+        worker,
+        live,
         processor,
         audio_ingress,
         failure_tx,
     } = context;
     let failure_tx_for_error = failure_tx.clone();
+    let worker_for_error = Arc::clone(&worker);
     output_device
         .build_input_stream(
             stream_config,
             move |data: &[cpal::I24], _info| {
-                if !active.load(Ordering::SeqCst) {
+                if worker.cancelled() || !worker.data.active.load(Ordering::SeqCst) {
                     return;
                 }
                 process_frames_i24(data, &processor, &audio_ingress, &failure_tx);
             },
             move |_error| {
-                failure_tx_for_error.report(SystemAudioCaptureFailure::NativeStopped);
+                if !worker_for_error.cancelled() && live.load(Ordering::SeqCst) {
+                    failure_tx_for_error.report(SystemAudioCaptureFailure::NativeStopped);
+                }
             },
             None,
         )
         .map_err(|_| SystemAudioCaptureError::NativeStartFailed)
-}
-
-impl Default for WindowsSystemAudioCapture {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 /// Buffers interleaved frames across callbacks, resamples complete windows,
@@ -807,28 +700,119 @@ fn default_endpoint_id(role: DefaultRole) -> Option<String> {
     })
 }
 
-/// COM must be initialized on the calling thread before any of these calls; the
-/// capture monitor runs on its own task thread, so initialize lazily per thread
-/// (a mismatched apartment is fine for device enumeration and is reported as
-/// `RPC_E_CHANGED_MODE`, which we ignore).
-pub(crate) fn with_com<R>(run: impl FnOnce() -> R) -> R {
-    use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
-    thread_local! {
-        static COM_READY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    }
-    COM_READY.with(|ready| {
-        if !ready.get() {
-            let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-            ready.set(true);
+/// Own exactly the COM initialization reference acquired on this thread.
+/// S_FALSE also increments the count; RPC_E_CHANGED_MODE does not.
+struct ComApartment {
+    result: windows::core::HRESULT,
+    _thread: std::marker::PhantomData<*mut ()>,
+}
+
+impl ComApartment {
+    fn new(mode: windows::Win32::System::Com::COINIT) -> Self {
+        Self {
+            result: unsafe { windows::Win32::System::Com::CoInitializeEx(None, mode) },
+            _thread: std::marker::PhantomData,
         }
-    });
-    run()
+    }
+}
+
+impl Drop for ComApartment {
+    fn drop(&mut self) {
+        if self.result.is_ok() {
+            unsafe { windows::Win32::System::Com::CoUninitialize() };
+        }
+    }
+}
+
+/// Capture owners and presentation queries initialize COM once per thread.
+/// Release this reference when that thread exits, after its native locals.
+/// An existing incompatible apartment remains owned by its original caller.
+pub(crate) fn with_com<R>(run: impl FnOnce() -> R) -> R {
+    use windows::Win32::System::Com::COINIT_MULTITHREADED;
+    thread_local! {
+        static COM_APARTMENT: ComApartment = ComApartment::new(COINIT_MULTITHREADED);
+    }
+    COM_APARTMENT.with(|_| run())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::audio::send_pipeline::AudioSendPipeline;
+
+    fn current_com_apartment() -> windows::core::Result<(
+        windows::Win32::System::Com::APTTYPE,
+        windows::Win32::System::Com::APTTYPEQUALIFIER,
+    )> {
+        use windows::Win32::System::Com::{
+            CoGetApartmentType, APTTYPEQUALIFIER_NONE, APTTYPE_CURRENT,
+        };
+        let mut apartment = APTTYPE_CURRENT;
+        let mut qualifier = APTTYPEQUALIFIER_NONE;
+        unsafe { CoGetApartmentType(&mut apartment, &mut qualifier) }?;
+        Ok((apartment, qualifier))
+    }
+
+    fn assert_no_explicit_com_apartment() {
+        use windows::Win32::System::Com::{APTTYPEQUALIFIER_IMPLICIT_MTA, APTTYPE_MTA};
+        match current_com_apartment() {
+            // Other parallel tests may keep the process MTA alive. That does
+            // not mean this fresh thread owns an initialization reference.
+            Ok(state) => assert_eq!(state, (APTTYPE_MTA, APTTYPEQUALIFIER_IMPLICIT_MTA)),
+            Err(error) => assert_eq!(
+                error.code(),
+                windows::Win32::Foundation::CO_E_NOTINITIALIZED
+            ),
+        }
+    }
+
+    #[test]
+    fn nested_com_initialization_releases_each_successful_reference() {
+        std::thread::spawn(|| {
+            use windows::Win32::System::Com::{
+                APTTYPEQUALIFIER_NONE, APTTYPE_MTA, COINIT_MULTITHREADED,
+            };
+            assert_no_explicit_com_apartment();
+            let first = ComApartment::new(COINIT_MULTITHREADED);
+            assert!(first.result.is_ok());
+            let nested = ComApartment::new(COINIT_MULTITHREADED);
+            assert_eq!(nested.result, windows::Win32::Foundation::S_FALSE);
+            drop(nested);
+            assert_eq!(
+                current_com_apartment().unwrap(),
+                (APTTYPE_MTA, APTTYPEQUALIFIER_NONE)
+            );
+            drop(first);
+            assert_no_explicit_com_apartment();
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn failed_mta_initialization_does_not_release_existing_sta() {
+        std::thread::spawn(|| {
+            use windows::Win32::System::Com::{
+                APTTYPE_MAINSTA, APTTYPE_STA, COINIT_APARTMENTTHREADED, COINIT_MULTITHREADED,
+            };
+            assert_no_explicit_com_apartment();
+            let sta = ComApartment::new(COINIT_APARTMENTTHREADED);
+            assert!(sta.result.is_ok());
+            let original = current_com_apartment().unwrap();
+            assert!(matches!(original.0, APTTYPE_STA | APTTYPE_MAINSTA));
+            let incompatible = ComApartment::new(COINIT_MULTITHREADED);
+            assert_eq!(
+                incompatible.result,
+                windows::Win32::Foundation::RPC_E_CHANGED_MODE
+            );
+            drop(incompatible);
+            assert_eq!(current_com_apartment().unwrap(), original);
+            drop(sta);
+            assert_no_explicit_com_apartment();
+        })
+        .join()
+        .unwrap();
+    }
 
     /// The backend (WASAPI) id string, comparable with `IMMDevice::GetId`.
     fn endpoint_id(device: &cpal::Device) -> Option<String> {
@@ -888,8 +872,6 @@ mod tests {
         assert_eq!(endpoint_id(&role), endpoint_id(&cpal_default));
     }
     use std::mem::size_of;
-    use std::sync::atomic::AtomicUsize;
-    use std::sync::Barrier;
     use std::time::{Duration, Instant};
     use tokio::sync::mpsc::error::TryRecvError;
 
@@ -1139,186 +1121,6 @@ mod tests {
     }
 
     #[test]
-    fn occupied_stream_slot_rejects_a_second_start_without_playing_it() {
-        let stream_slot = Mutex::new(StreamSlot {
-            next_token: 0,
-            state: StreamSlotState::Running("existing"),
-        });
-        let active = AtomicBool::new(true);
-        let mut build_called = false;
-        let mut play_called = false;
-
-        let result = build_install_and_play_stream(
-            &stream_slot,
-            &active,
-            || {
-                build_called = true;
-                Ok("replacement")
-            },
-            |_| -> Result<(), ()> {
-                play_called = true;
-                Ok(())
-            },
-        );
-
-        assert_eq!(result, Err(SystemAudioCaptureError::AlreadyRunning));
-        assert!(!build_called);
-        assert!(!play_called);
-        assert!(matches!(
-            &stream_slot.lock().unwrap().state,
-            StreamSlotState::Running(stream) if *stream == "existing"
-        ));
-        assert!(active.load(Ordering::SeqCst));
-    }
-
-    #[test]
-    fn immediate_play_failure_clears_the_installed_stream_and_allows_restart() {
-        let stream_slot = Mutex::new(StreamSlot::default());
-        let active = AtomicBool::new(false);
-
-        let result = build_install_and_play_stream(
-            &stream_slot,
-            &active,
-            || Ok("failed"),
-            |_| Err::<(), ()>(()),
-        );
-
-        assert_eq!(result, Err(SystemAudioCaptureError::NativeStartFailed));
-        assert!(matches!(
-            &stream_slot.lock().unwrap().state,
-            StreamSlotState::Idle
-        ));
-        assert!(!active.load(Ordering::SeqCst));
-
-        build_install_and_play_stream(
-            &stream_slot,
-            &active,
-            || Ok("recovered"),
-            |_| Ok::<(), ()>(()),
-        )
-        .expect("a failed play must leave the capture slot restartable");
-        assert!(matches!(
-            &stream_slot.lock().unwrap().state,
-            StreamSlotState::Running(stream) if *stream == "recovered"
-        ));
-        assert!(active.load(Ordering::SeqCst));
-    }
-
-    #[test]
-    fn stream_is_installed_and_locked_during_play_then_can_restart_after_cleanup() {
-        let stream_slot = Arc::new(Mutex::new(StreamSlot::default()));
-        let active = AtomicBool::new(false);
-        let slot_observed_by_play = Arc::clone(&stream_slot);
-
-        build_install_and_play_stream(
-            &stream_slot,
-            &active,
-            || Ok("first"),
-            move |_| {
-                assert!(matches!(
-                    slot_observed_by_play.try_lock(),
-                    Err(std::sync::TryLockError::WouldBlock)
-                ));
-                Ok::<(), ()>(())
-            },
-        )
-        .expect("the first stream should start");
-
-        assert!(active.load(Ordering::SeqCst));
-        assert!(matches!(
-            &stream_slot.lock().unwrap().state,
-            StreamSlotState::Running(stream) if *stream == "first"
-        ));
-        stop_stream(&stream_slot, &active);
-
-        build_install_and_play_stream(&stream_slot, &active, || Ok("second"), |_| Ok::<(), ()>(()))
-            .expect("cleanup must leave the slot available for a retry");
-        assert!(matches!(
-            &stream_slot.lock().unwrap().state,
-            StreamSlotState::Running(stream) if *stream == "second"
-        ));
-        assert!(active.load(Ordering::SeqCst));
-    }
-
-    #[test]
-    fn stop_cancels_a_blocked_build_without_playing_and_allows_restart() {
-        let stream_slot = Arc::new(Mutex::new(StreamSlot::default()));
-        let active = Arc::new(AtomicBool::new(false));
-        let build_entered = Arc::new(Barrier::new(2));
-        let release_build = Arc::new(Barrier::new(2));
-        let play_calls = Arc::new(AtomicUsize::new(0));
-
-        let slot_for_start = Arc::clone(&stream_slot);
-        let active_for_start = Arc::clone(&active);
-        let entered_for_start = Arc::clone(&build_entered);
-        let release_for_start = Arc::clone(&release_build);
-        let play_calls_for_start = Arc::clone(&play_calls);
-        let blocked_start = std::thread::spawn(move || {
-            build_install_and_play_stream(
-                &slot_for_start,
-                &active_for_start,
-                || {
-                    entered_for_start.wait();
-                    release_for_start.wait();
-                    Ok("cancelled")
-                },
-                |_| {
-                    play_calls_for_start.fetch_add(1, Ordering::SeqCst);
-                    Ok::<(), ()>(())
-                },
-            )
-        });
-
-        build_entered.wait();
-        assert!(matches!(
-            &stream_slot.lock().unwrap().state,
-            StreamSlotState::Starting(_)
-        ));
-        stop_stream(&stream_slot, &active);
-        assert!(matches!(
-            &stream_slot.lock().unwrap().state,
-            StreamSlotState::Idle
-        ));
-        assert!(!active.load(Ordering::SeqCst));
-
-        release_build.wait();
-        assert_eq!(
-            blocked_start.join().unwrap(),
-            Err(SystemAudioCaptureError::NativeStartFailed)
-        );
-        assert_eq!(play_calls.load(Ordering::SeqCst), 0);
-        assert!(matches!(
-            &stream_slot.lock().unwrap().state,
-            StreamSlotState::Idle
-        ));
-        assert!(!active.load(Ordering::SeqCst));
-
-        build_install_and_play_stream(
-            &stream_slot,
-            &active,
-            || Ok("replacement"),
-            |_| {
-                play_calls.fetch_add(1, Ordering::SeqCst);
-                Ok::<(), ()>(())
-            },
-        )
-        .expect("a cancelled build must leave the capture slot restartable");
-        assert_eq!(play_calls.load(Ordering::SeqCst), 1);
-        assert!(matches!(
-            &stream_slot.lock().unwrap().state,
-            StreamSlotState::Running(stream) if *stream == "replacement"
-        ));
-        assert!(active.load(Ordering::SeqCst));
-
-        stop_stream(&stream_slot, &active);
-        assert!(matches!(
-            &stream_slot.lock().unwrap().state,
-            StreamSlotState::Idle
-        ));
-        assert!(!active.load(Ordering::SeqCst));
-    }
-
-    #[test]
     fn integer_samples_are_normalized_around_their_equilibrium() {
         assert_normalized(&[i8::MIN, 0, i8::MAX]);
         assert_normalized(&[i16::MIN, 0, i16::MAX]);
@@ -1456,13 +1258,14 @@ mod tests {
         tone_stream
             .play()
             .expect("the in-memory native test tone must start");
+        capture.set_source(output_device.id().unwrap().to_string());
         capture
-            .start_on_output_device(
-                &output_device,
+            .start(
                 ingress,
                 failure_tx,
                 AudioCaptureFormat::pcm16_mono(16_000).unwrap(),
             )
+            .await
             .expect("default output must open as a loopback input stream");
         assert_capture_failure_channel_empty(&mut failure_rx);
 

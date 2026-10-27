@@ -115,6 +115,8 @@ pub mod macos_output;
 
 #[cfg(target_os = "windows")]
 pub mod windows;
+#[cfg(any(target_os = "windows", test))]
+mod windows_capture_worker;
 
 #[cfg(target_os = "linux")]
 pub mod linux;

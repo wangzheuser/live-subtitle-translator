@@ -19,6 +19,13 @@
   阻塞析构时超时生效但不能重启、启动中取消、失败清理后重启及重复停止。
   严格 Clippy、格式及共享架构检查通过。它们验证生命周期，不能替代
   Windows 实机驱动、设备切换或采音到字幕的验收。
+- PR [#332](https://github.com/yuxino/Mimi/pull/332) 在 `7df9d5b9` 的
+  [桌面 CI](https://github.com/yuxino/Mimi/actions/runs/40526260226) 与
+  [Android CI](https://github.com/yuxino/Mimi/actions/runs/40526260188) 通过后
+  合并为 `081c7532`。Windows x64/ARM64、macOS、Linux、前端及最低 Rust
+  版本检查通过；Windows x64 的 645 项包含四项 worker 生命周期及两项
+  COM 引用配对检查，零失败。两个既有手动用例仍 ignored，其中真实
+  loopback tone 需要播放设备，不能记作 Windows 现场采音通过。
 - 长测证据重新核对：50,747 行连续，输入/发送和 91 组终稿身份完整对应；
   没有发现漏掉慢结果或持续补静音的新反例。计时仅到事件出队，MT 终稿
   队列数据不代表 PCM 采集队列；相应报告边界已明确。

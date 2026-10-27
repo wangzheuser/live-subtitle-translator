@@ -244,6 +244,15 @@ then restore the original bytes
 after quitting. Never delete the original catalog or reset credentials to make
 an unrelated UI error disappear.
 
+Before cloud-package QA, exercise backup, restore and cleanup on the same
+PowerShell runtime with synthetic credentials before transferring real ones.
+On PowerShell 5.1, assign `ConvertFrom-Json` results first, then enumerate the
+array explicitly; verify file hashes and the exact file/directory set separately.
+For the observed `0x0400` (`DiscretionaryAclAutoInherited`) difference, [verify Microsoft's semantics](https://learn.microsoft.com/en-us/windows/win32/secauthz/automatic-propagation-of-inheritable-aces)
+and compare the remaining security descriptor bytes; never skip ACL verification
+or generalize this exception to other flags, ACEs, ownership or protection.
+On restore failure, retain the backup and diagnose locally; do not rerun paid API tests.
+
 Production and ordinary development credentials use private local files on all
 desktop platforms. Legacy OS items are read only during automatic upgrade import,
 then deleted after durable write and read-back verification. Completed imports

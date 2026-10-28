@@ -5370,3 +5370,34 @@
   manual native desktop/Android acceptance were not repeated for this catalog
   edit; cross-platform CI is recorded with the delivery PR. No production app
   restart, release, recording or real provider request occurred.
+
+### 2026-10-28 — update panel and concise interface copy
+
+- UI source `d586933e2ea1b8a640f642a706a0a3332beafca9`, followed by the
+  copy pass `4a64e02e4d177b3204df1f0053bbb4d7b2134897`, in
+  [PR #333](https://github.com/yuxino/Mimi/pull/333). The update panel shows
+  current/target versions, a single action, transfer amounts and progress;
+  redundant branding and instructions are removed. Eight locales retain
+  meaningful prerequisites, data consequences and platform restrictions.
+- Complete frontend checks passed at the UI revision: typecheck, lint and
+  2,805 tests in 155 files. The subsequent copy pass passed typecheck, lint,
+  333 focused tests covering services, navigation, saved sessions, the guide
+  and updater, plus diff checks. No Rust logic or dependency changed; the
+  complete local cross-layer check was not rerun.
+- Ego Lite passed 1,088 real-component browser cases: eight languages,
+  520/760 px widths, light/dark themes, long versions, manual distributions,
+  transfer/verification/install/restart and failure states. The visible fill
+  measured 42% of its track. Forced colors kept a Canvas track distinct from
+  CanvasText fill; reduced motion suppressed movement.
+- The stable signed `/Applications/mimi-dev.app` ran UI-only fixtures. Native
+  macOS inspection covered the panel, visible 42% download, verified-install
+  availability and the final service picker without its repeated intro.
+  A temporary delay in the native fixture made progress observable and was
+  restored before committing. Final embedded dev installation used the copy
+  revision above; production installation, credentials and permissions were
+  preserved. The user authorized quitting the running production app.
+- [Synthetic browser screenshot](https://github.com/yuxino/Mimi/pull/333#issuecomment-6460779553)
+  is attached to the PR; native screenshots and logs remain outside Git.
+  These checks do not establish a real release download/signature/install,
+  Windows/Linux native interaction, capture or provider acceptance. Next:
+  real updater acceptance on each target platform when preparing a release.

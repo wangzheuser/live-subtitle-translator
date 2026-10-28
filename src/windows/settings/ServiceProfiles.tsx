@@ -814,7 +814,7 @@ export function ServiceProfiles({
       ) : !pickerVisible && (
         <div className="services-home">
           <div className="services-toolbar">
-            <span className="services-toolbar__count">{I18N.settings.profileCount(settings.profiles.length)}<SettingsHelp label={I18N.settings.helpLabel} text={`${I18N.settings.servicesHint}\n${I18N.settings.profileSwitchHelp}`} /></span>
+            <span className="services-toolbar__count">{I18N.settings.profileCount(settings.profiles.length)}<SettingsHelp label={I18N.settings.helpLabel} text={I18N.settings.profileSwitchHelp} /></span>
             <button
               type="button"
               className="settings-button settings-button--compact settings-button--quiet"
@@ -1285,11 +1285,9 @@ function ProviderPicker({
       <div className="provider-picker__heading">
         <span>
           <h2 tabIndex={-1} data-service-page-heading>{initialSetup ? I18N.settings.firstProfileTitle : I18N.settings.chooseProvider}</h2>
-          <SettingsHelp text={I18N.settings.chooseProviderDescription} label={I18N.settings.helpLabel} />
         </span>
         {!initialSetup && <button type="button" className="settings-link" disabled={cancelDisabled} onClick={onCancel}>{I18N.settings.cancel}</button>}
       </div>
-      {initialSetup && <p className="provider-picker__intro">{I18N.settings.firstProfileHint}</p>}
       {!selectedProvider && requiresStop && <InlineFeedback tone="info">{I18N.settings.profileCreateRequiresStop}</InlineFeedback>}
       {!selectedProvider && feedback && <InlineFeedback tone={feedback.tone}>{feedback.message}</InlineFeedback>}
       {apple.failed && <InlineFeedback tone="error">{I18N.settings.appleSpeechLoadFailed} <button type="button" className="settings-link" disabled={disabled || apple.loading} onClick={() => void apple.refresh()}>{I18N.settings.retryLoadingSettings}</button></InlineFeedback>}

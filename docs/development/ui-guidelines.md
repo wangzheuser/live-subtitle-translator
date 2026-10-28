@@ -67,13 +67,19 @@ These project rules apply to implementation and review.
   opens the editor. Do not crowd the name with repeated check/status text. Expose
   the checked state to accessibility, and keep saved order stable.
 - With no configurations, show the service picker directly after a successful
-  settings load. Keep one short next-step instruction, omit an intermediate
-  empty page and cancel-to-empty action, and create only after confirmation.
+  settings load. Let its heading and choices express the next step, without a
+  repeated introductory sentence. Omit an intermediate empty page and
+  cancel-to-empty action, and create only after confirmation.
   Reuse the same responsive picker for later Add actions; loading failures
   remain retryable errors rather than being presented as a fresh install.
 - Keep essential labels, choices and actionable errors readable at normal text
   size. Put non-essential explanations behind hover/focus help icons. Long raw
   diagnostics and advanced details start collapsed; bound long lists and text.
+- Omit explanations that merely repeat a label, button or familiar action;
+  moving them into a tooltip does not make them useful. Help should add a
+  non-obvious constraint, consequence or prerequisite. Do not repeat Mimi's
+  branding inside a control when it identifies nothing new; use the operation's
+  state and data to establish the visual hierarchy.
 - Verify wrapping, narrow windows, long labels, empty content and light/dark
   themes. Interactive controls, including help and toast dismissal, keep pointer
   cursors; preserve disabled, text-input, slider and resize cursors.

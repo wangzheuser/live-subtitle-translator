@@ -77,9 +77,9 @@ it.each(["zh", "zh-TW", "en", "ja", "de", "fr", "ko", "th"] as const)("keeps dia
   expect(host.querySelector("#advanced-settings h2")?.textContent).toBe(I18N.settings.advancedTitle);
   expect(host.querySelector("#advanced-settings #settings-category-diagnostics")?.textContent).toBe(I18N.settings.openDiagnostics);
   for (const [category, description] of [
-    ["subtitles", I18N.settings.subtitlePageDescription], ["voice", settingsPageCopy().voiceHelp], ["service", settingsPageCopy().modelsHelp],
-    ["export", I18N.settings.exportPageDescription], ["general", I18N.settings.generalPageDescription],
-    ["diagnostics", `${I18N.settings.diagnosticsPageDescription}\n${I18N.settings.diagnosticsHelp}`],
+    ["subtitles", undefined], ["voice", undefined], ["service", undefined],
+    ["export", I18N.settings.exportPageDescription], ["general", undefined],
+    ["diagnostics", I18N.settings.diagnosticsHelp],
   ] as const) {
     await select(category);
     expect(host.querySelector(".settings-session-card") !== null).toBe(category === "subtitles");

@@ -67,8 +67,9 @@ These project rules apply to implementation and review.
   opens the editor. Do not crowd the name with repeated check/status text. Expose
   the checked state to accessibility, and keep saved order stable.
 - With no configurations, show the service picker directly after a successful
-  settings load. Keep one short next-step instruction, omit an intermediate
-  empty page and cancel-to-empty action, and create only after confirmation.
+  settings load. Let its heading and choices express the next step, without a
+  repeated introductory sentence. Omit an intermediate empty page and
+  cancel-to-empty action, and create only after confirmation.
   Reuse the same responsive picker for later Add actions; loading failures
   remain retryable errors rather than being presented as a fresh install.
 - Keep essential labels, choices and actionable errors readable at normal text

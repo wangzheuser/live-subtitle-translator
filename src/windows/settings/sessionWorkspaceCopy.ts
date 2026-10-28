@@ -27,7 +27,7 @@ export const sessionWorkspaceCopy: Record<ResolvedUiLanguage, typeof en> = {
     whole: "导出整个所选会话。搜索筛选只影响阅读。", chooseFile: "选择保存位置",
     active: "停止当前会话后，可修改保存选项或导出当前内容。已保存的会话仍可查看和导出。",
     stopPlayback: "停止当前会话后可播放录音。",
-    back: "所有会话", wav: "录音 (.wav)", pause: "暂停播放", loadingAudio: "正在加载录音…", retryAudio: "重试播放", seek: "播放进度", playFailed: "暂时无法播放，请重试。", audioReady: "已就绪，点击播放",
+    back: "所有会话", wav: "录音 (.wav)", pause: "暂停播放", loadingAudio: "正在加载录音…", retryAudio: "重试播放", seek: "播放进度", playFailed: "暂时无法播放，请重试。", audioReady: "待播放",
   },
   "zh-TW": {
     search: "依名稱尋找工作階段", filter: "篩選工作階段", all: "全部", text: "有文字", audio: "有錄音",
@@ -40,7 +40,7 @@ export const sessionWorkspaceCopy: Record<ResolvedUiLanguage, typeof en> = {
     whole: "匯出整個所選工作階段。搜尋篩選只影響閱讀。", chooseFile: "選擇儲存位置",
     active: "停止目前工作階段後，可修改儲存選項或匯出目前內容。已儲存的工作階段仍可查看和匯出。",
     stopPlayback: "停止目前工作階段後可播放錄音。",
-    back: "所有工作階段", wav: "錄音 (.wav)", pause: "暫停播放", loadingAudio: "正在載入錄音…", retryAudio: "重試播放", seek: "播放進度", playFailed: "暫時無法播放，請重試。", audioReady: "已就緒，點按播放",
+    back: "所有工作階段", wav: "錄音 (.wav)", pause: "暫停播放", loadingAudio: "正在載入錄音…", retryAudio: "重試播放", seek: "播放進度", playFailed: "暫時無法播放，請重試。", audioReady: "待播放",
   },
   ja: {
     search: "名前でセッションを検索", filter: "セッションの絞り込み", all: "すべて", text: "テキストあり", audio: "録音あり",

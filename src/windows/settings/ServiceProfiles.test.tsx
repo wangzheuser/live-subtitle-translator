@@ -869,7 +869,6 @@ it("starts with no service and creates the first chosen provider only after conf
   await render(empty);
   expect(host.querySelector(".service-row")).toBeNull();
   expect(host.textContent).toContain(I18N.settings.firstProfileTitle);
-  expect(host.textContent).toContain(I18N.settings.firstProfileHint);
   expect(actions.createProfile).not.toHaveBeenCalled();
   expect(profileRevealCredential).not.toHaveBeenCalled();
   expect(testProfileConnection).not.toHaveBeenCalled();

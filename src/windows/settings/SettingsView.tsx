@@ -281,7 +281,6 @@ export function SettingsView() {
                   >
                     <div className="subtitle-preview__label">
                       <span>{I18N.settings.subtitlePreview}</span>
-                      <small>{I18N.settings.previewSample}</small>
                     </div>
                     <div
                       className="subtitle-preview__stage"

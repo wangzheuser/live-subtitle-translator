@@ -1288,7 +1288,6 @@ function ProviderPicker({
         </span>
         {!initialSetup && <button type="button" className="settings-link" disabled={cancelDisabled} onClick={onCancel}>{I18N.settings.cancel}</button>}
       </div>
-      {initialSetup && <p className="provider-picker__intro">{I18N.settings.firstProfileHint}</p>}
       {!selectedProvider && requiresStop && <InlineFeedback tone="info">{I18N.settings.profileCreateRequiresStop}</InlineFeedback>}
       {!selectedProvider && feedback && <InlineFeedback tone={feedback.tone}>{feedback.message}</InlineFeedback>}
       {apple.failed && <InlineFeedback tone="error">{I18N.settings.appleSpeechLoadFailed} <button type="button" className="settings-link" disabled={disabled || apple.loading} onClick={() => void apple.refresh()}>{I18N.settings.retryLoadingSettings}</button></InlineFeedback>}

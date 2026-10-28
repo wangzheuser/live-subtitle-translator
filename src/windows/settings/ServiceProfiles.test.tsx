@@ -635,7 +635,8 @@ it.each(["zh", "en", "ja"] as const)("previews a provider and leaves settings un
   expect(options.map(option => option.dataset.provider)).toEqual(SERVICE_PROVIDERS.filter(provider => provider !== "appleSpeech"));
   expect(options.slice(-2).map(option => option.dataset.provider)).toEqual(["customDashScopeASR", "customOpenAIASR"]);
   expect(host.querySelector(".provider-picker small, .provider-picker p")).toBeNull();
-  expect(host.querySelector(".provider-picker__heading .settings-help-control__description")?.textContent).toBe(I18N.settings.chooseProviderDescription);
+  expect(host.querySelector(".provider-picker__heading .settings-help-control")).toBeNull();
+  expect(host.querySelector('.provider-option[data-provider="customOpenAIASR"]')?.parentElement?.querySelector(".settings-help-control__description")?.textContent).toBe(I18N.settings.customSpeechDescription);
   await previewProvider("customOpenAIASR");
   expect(document.querySelector(".provider-picker__preview h3")?.textContent).toBe(providerDisplayName("customOpenAIASR"));
   expect(document.querySelector(".provider-picker__preview .settings-help-control__description")?.textContent).toBe(`${I18N.settings.customSpeechRequirementsOpenAI}\n${I18N.settings.customSpeechLanguages}`);

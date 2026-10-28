@@ -48,7 +48,7 @@ export function AudioInputSettings() {
     }
   };
   return <SettingsSection id="audio-input" title={I18N.settings.audioInputTitle}>
-    <SettingsRow label={I18N.settings.audioInputSystem} description={microphoneAvailable ? `${I18N.settings.audioInputHelp}\n${copy.switchHelp}` : I18N.settings.systemAudioHelp}
+    <SettingsRow label={I18N.settings.audioInputSystem} description={microphoneAvailable ? `${I18N.settings.audioInputHelp}\n${copy.switchHelp}` : undefined}
       hint={microphoneAvailable && selected === "system" ? I18N.settings.audioInputAtLeastOne : undefined}>
       {microphoneAvailable && <Switch aria-label={I18N.settings.audioInputSystem} checked={selected !== "microphone"}
         disabled={disabled || selected === "system"} onChange={checked => void toggle("system", checked)} />}

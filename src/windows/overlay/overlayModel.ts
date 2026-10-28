@@ -172,7 +172,7 @@ export function emptyStateText(
         session.isTranslationPending,
       ))
         ? I18N.overlay.translatingEmpty
-        : I18N.overlay.listeningEmpty;
+        : I18N.overlay.phaseListening;
     case "stopping":
       return I18N.overlay.stopping;
     case "error":

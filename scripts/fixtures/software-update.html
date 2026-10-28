@@ -49,11 +49,12 @@ const notes = [
 ].join("\n");
 
 window.applyUpdateCase = async (options = {}) => {
-  const next = { state: "available", language: "zh", theme: "light", notesOpen: false, ...options };
-  const allowed = ["normal", "checking", "noUpdate", "available", "checkError", "downloading", "verifying", "downloaded", "downloadError", "installError", "restartReady", "restartError"];
+  const next = { state: "available", language: "zh", theme: "light", notesOpen: false, platform: "macos", environment: "installed", ...options };
+  const allowed = ["normal", "checking", "noUpdate", "available", "checkError", "downloading", "downloadingUnknown", "verifying", "downloaded", "downloadError", "installing", "installError", "restartReady", "restarting", "restartError", "windowsInstallerStarted", "manual"];
   if (!allowed.includes(next.state)) throw new Error("Unknown fixture state");
   const counters = { checks: 0, downloads: 0, installs: 0, relaunches: 0 };
   const fixture = createFixtureSoftwareUpdater({
+    platform: next.platform === "windows" || next.state === "windowsInstallerStarted" ? "windows" : "other",
     currentVersion: next.currentVersion ?? "1.5.12",
     updateVersion: ["normal", "noUpdate"].includes(next.state) ? null : next.updateVersion ?? "1.5.13",
     notes: next.notes ?? notes,
@@ -75,30 +76,34 @@ window.applyUpdateCase = async (options = {}) => {
         ...candidate,
         async download(onEvent) {
           counters.downloads++;
-          if (["downloading", "verifying"].includes(next.state)) {
-            onEvent({ event: "Started", data: { contentLength: 100 * 1024 * 1024 } });
+          if (["downloading", "downloadingUnknown", "verifying"].includes(next.state)) {
+            onEvent({ event: "Started", data: { contentLength: next.state === "downloadingUnknown" ? undefined : 100 * 1024 * 1024 } });
             onEvent({ event: "Progress", data: { chunkLength: (next.state === "verifying" ? 100 : 42) * 1024 * 1024 } });
             if (next.state === "verifying") onEvent({ event: "Finished" });
             return never();
           }
           return candidate.download(onEvent);
         },
-        async install() { counters.installs++; return candidate.install(); },
+        async install() { counters.installs++; return next.state === "installing" ? never() : candidate.install(); },
       };
     },
-    async relaunch() { counters.relaunches++; return fixture.relaunch(); },
+    async relaunch() { counters.relaunches++; return next.state === "restarting" ? never() : fixture.relaunch(); },
   };
-  activeSession = createSoftwareUpdateSession({ createEnvironment: async () => ({ kind: "installed", updater }) });
+  activeSession = createSoftwareUpdateSession({ createEnvironment: async () => next.environment === "installed"
+    ? { kind: "installed", updater }
+    : { kind: next.environment, currentVersion: fixture.currentVersion } });
   if (next.state === "checking") void activeSession.enter();
   else await activeSession.enter();
-  if (["downloading", "verifying", "downloaded", "downloadError", "installError", "restartReady", "restartError"].includes(next.state)) {
-    if (["downloading", "verifying"].includes(next.state)) void activeSession.performAction();
+  if (["downloading", "downloadingUnknown", "verifying", "downloaded", "downloadError", "installing", "installError", "restartReady", "restarting", "restartError", "windowsInstallerStarted"].includes(next.state)) {
+    if (["downloading", "downloadingUnknown", "verifying"].includes(next.state)) void activeSession.performAction();
     else await activeSession.performAction();
   }
-  if (["installError", "restartReady", "restartError"].includes(next.state)) await activeSession.performAction();
-  if (next.state === "restartError") await activeSession.performAction();
+  if (next.state === "installing") void activeSession.performAction();
+  else if (["installError", "restartReady", "restarting", "restartError", "windowsInstallerStarted"].includes(next.state)) await activeSession.performAction();
+  if (next.state === "restarting") void activeSession.performAction();
+  else if (next.state === "restartError") await activeSession.performAction();
 
-  document.documentElement.dataset.platform = "macos";
+  document.documentElement.dataset.platform = next.platform;
   document.documentElement.lang = next.language === "zh" ? "zh-CN" : next.language;
   history.replaceState(null, "", "#application-settings");
   localStorage.setItem("mimi.settings-theme", next.theme);

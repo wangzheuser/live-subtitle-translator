@@ -74,6 +74,11 @@ These project rules apply to implementation and review.
 - Keep essential labels, choices and actionable errors readable at normal text
   size. Put non-essential explanations behind hover/focus help icons. Long raw
   diagnostics and advanced details start collapsed; bound long lists and text.
+- Omit explanations that merely repeat a label, button or familiar action;
+  moving them into a tooltip does not make them useful. Help should add a
+  non-obvious constraint, consequence or prerequisite. Do not repeat Mimi's
+  branding inside a control when it identifies nothing new; use the operation's
+  state and data to establish the visual hierarchy.
 - Verify wrapping, narrow windows, long labels, empty content and light/dark
   themes. Interactive controls, including help and toast dismissal, keep pointer
   cursors; preserve disabled, text-input, slider and resize cursors.

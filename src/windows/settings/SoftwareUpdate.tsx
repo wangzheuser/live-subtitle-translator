@@ -23,10 +23,10 @@ export function SoftwareUpdate({ active = true, session = softwareUpdateSession 
   const manualDistribution = environment === "portable" || environment === "linuxPackage";
   const interaction = updateInteraction(state);
   const update = "update" in state ? state.update : undefined;
-  const percent = downloadPercent(state);
+  const verifying = state.kind === "downloading" && state.transferComplete;
+  const percent = verifying ? undefined : downloadPercent(state);
   const status = stateStatus(state);
   const failed = isErrorState(state);
-  const verified = state.kind === "downloaded" || state.kind === "restartReady";
 
   const handleAction = async () => {
     const notify = beginToast();
@@ -53,35 +53,63 @@ export function SoftwareUpdate({ active = true, session = softwareUpdateSession 
     <div className="software-update">
       <div className="software-update__header">
         <div className="software-update__copy">
-          <span className="settings-row__label">
-            {I18N.settings.softwareUpdate}
-            <SettingsHelp text={manualDistribution
-              ? environment === "linuxPackage" ? I18N.settings.linuxPackageUpdateDescription : I18N.settings.portableUpdateDescription
-              : I18N.settings.updateDescription} label={I18N.settings.helpLabel} />
-          </span>
-          {currentVersion && <span className="software-update__current">{I18N.settings.currentVersion(currentVersion)}</span>}
-          <div className={`software-update__status${failed ? " software-update__status--error" : ""}`} role="status" aria-live="polite" aria-atomic="true">
-            {update && <span className="software-update__version">{I18N.settings.updateAvailable(update.version)}</span>}
-            {status && <span className="software-update__state">{verified && <Icon name="shield-check" />}{status}</span>}
+          <div className="software-update__identity">
+            <span className="settings-row__label">
+              {I18N.settings.softwareUpdate}
+              {manualDistribution && <SettingsHelp text={environment === "linuxPackage"
+                ? I18N.settings.linuxPackageUpdateDescription : I18N.settings.portableUpdateDescription} label={I18N.settings.helpLabel} />}
+            </span>
+            <div className="software-update__versions">
+              {currentVersion && <span className="software-update__current">
+                <span className="settings-sr-only">{I18N.settings.currentVersion(currentVersion)}</span>
+                <span aria-hidden="true">v{currentVersion}</span>
+              </span>}
+              {update && <>
+                {currentVersion && <span className="software-update__arrow" aria-hidden="true">→</span>}
+                <span className="software-update__target">
+                  <span className="settings-sr-only">{I18N.settings.updateAvailable(update.version)}</span>
+                  <span aria-hidden="true">v{update.version}</span>
+                </span>
+              </>}
+            </div>
           </div>
         </div>
         <div className="software-update__actions">
           {manualDistribution ? releasesButton : (interaction.action || interaction.busy) && (
             <button type="button" className={`settings-button software-update-button ${interaction.emphasized ? "settings-button--primary" : "settings-button--quiet"}`}
               disabled={interaction.busy} aria-busy={interaction.busy} onClick={() => void handleAction()}>
-              {state.kind === "available" && <Icon name="download" />}
+              {interaction.busy && <span className="settings-spinner" aria-hidden="true" />}
               {actionLabel(state, platform)}
             </button>
           )}
         </div>
       </div>
 
-      {state.kind === "downloading" && <progress className="software-update__progress" aria-label={I18N.settings.downloadingUpdate}
-        {...(percent === undefined ? {} : { value: percent, max: 100 })} />}
+      <div className={`software-update__status${failed ? " software-update__status--error" : ""}`} role="status" aria-live="polite" aria-atomic="true">
+        {state.kind === "available" && <span className="settings-sr-only">{I18N.settings.updateAvailable(state.update.version)}</span>}
+        {status && <span className="software-update__state">{status}</span>}
+      </div>
+
+      {state.kind === "downloading" && <div className="software-update__transfer">
+        {!verifying && <div className="software-update__metrics" aria-hidden="true">
+          <span>{percent === undefined
+            ? I18N.settings.downloadingUnknown(formatBytes(state.downloadedBytes))
+            : `${formatBytes(state.downloadedBytes)} / ${formatBytes(state.totalBytes ?? 0)}`}</span>
+          {percent !== undefined && <span className="software-update__percent">{percent}%</span>}
+        </div>}
+        <div className="software-update__track">
+          <progress className="software-update__progress" aria-label={verifying ? I18N.settings.verifyingUpdate : I18N.settings.downloadingUpdate}
+            aria-valuetext={downloadStatus(state)} max={100}
+            {...(percent === undefined ? {} : { value: percent })} />
+          {percent === undefined
+            ? <span className="software-update__activity" aria-hidden="true" />
+            : <span className="software-update__fill" style={{ transform: `scaleX(${percent / 100})` }} aria-hidden="true" />}
+        </div>
+      </div>}
 
       {update && <div className="software-update__details">
         <details className="software-update__release" key={update.version}>
-          <summary><Icon name="chevron-right" />{I18N.settings.releaseNotes}</summary>
+          <summary>{I18N.settings.releaseNotes}<Icon name="chevron-right" /></summary>
           <ReleaseNotes notes={update.notes} language={effectiveUiLanguage()} />
           {releasesButton}
         </details>
@@ -111,11 +139,7 @@ function stateStatus(state: UpdateCheckState): string {
     case "downloaded": return I18N.settings.updateDownloadVerified;
     case "restartReady": return I18N.settings.updateReadyToRestart;
     case "downloading": {
-      if (state.transferComplete) return I18N.settings.verifyingUpdate;
-      const percent = downloadPercent(state);
-      return percent === undefined
-        ? I18N.settings.downloadingUnknown(formatBytes(state.downloadedBytes))
-        : I18N.settings.downloadingKnown(percent, formatBytes(state.downloadedBytes), formatBytes(state.totalBytes ?? 0));
+      return state.transferComplete ? I18N.settings.verifyingUpdate : "";
     }
     case "restartRequested": return I18N.settings.restartRequested;
     case "windowsInstallerStarted": return I18N.settings.windowsInstallerStarted;
@@ -125,6 +149,14 @@ function stateStatus(state: UpdateCheckState): string {
     case "restartError": return I18N.settings.updateRestartFailed;
     default: return "";
   }
+}
+
+function downloadStatus(state: Extract<UpdateCheckState, { kind: "downloading" }>): string {
+  if (state.transferComplete) return I18N.settings.verifyingUpdate;
+  const percent = downloadPercent(state);
+  return percent === undefined
+    ? I18N.settings.downloadingUnknown(formatBytes(state.downloadedBytes))
+    : I18N.settings.downloadingKnown(percent, formatBytes(state.downloadedBytes), formatBytes(state.totalBytes ?? 0));
 }
 
 function formatBytes(bytes: number): string {

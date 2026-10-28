@@ -135,14 +135,9 @@ export function SettingsView() {
     },
   ];
 
-  const pageDescriptions: Record<SettingsCategory, string> = {
-    subtitles: I18N.settings.subtitlePageDescription,
-    service: settingsPageCopy().modelsHelp,
-    voice: settingsPageCopy().voiceHelp,
-    general: I18N.settings.generalPageDescription,
+  const pageDescriptions: Partial<Record<SettingsCategory, string>> = {
     export: I18N.settings.exportPageDescription,
-    diagnostics: `${I18N.settings.diagnosticsPageDescription}\n${I18N.settings.diagnosticsHelp}`,
-    guide: I18N.settings.quickStartDescription,
+    diagnostics: I18N.settings.diagnosticsHelp,
   };
 
   const selectCategory = useCallback((category: SettingsCategory) => {
@@ -260,7 +255,7 @@ export function SettingsView() {
         <div className="settings-console__frame">
           {!(activeCategory === "export" && sessionReaderOpen) && <header className="settings-page-header settings-page-header--help">
             <h1>{activeCategory === "guide" ? I18N.settings.quickStartTitle : activeCategory === "diagnostics" ? I18N.settings.diagnosticsTitle : categories.find((category) => category.id === activeCategory)?.label}</h1>
-            <SettingsHelp text={pageDescriptions[activeCategory]} label={I18N.settings.helpLabel} />
+            {pageDescriptions[activeCategory] && <SettingsHelp text={pageDescriptions[activeCategory]} label={I18N.settings.helpLabel} />}
           </header>}
           {initializationReady && <SubtitleSessionControls visible={activeCategory === "subtitles"} onConfigure={navigateToSettings} />}
           <div className="settings-layout">
@@ -494,7 +489,6 @@ export function SettingsView() {
               <SettingsSection id="application-preferences" title={I18N.settings.preferencesTitle}>
                 <SettingsRow
                   label={I18N.settings.appLanguage}
-                  description={I18N.settings.languageHelp}
                   align="start"
                 >
                   <SettingsSelect
@@ -542,7 +536,7 @@ export function SettingsView() {
                 <SoftwareUpdate active={activeCategory === "general"} />
               </SettingsSection>
               <SettingsSection id="advanced-settings" title={I18N.settings.advancedTitle}>
-                <SettingsRow label={I18N.settings.diagnosticsTitle} description={I18N.settings.diagnosticsPageDescription}>
+                <SettingsRow label={I18N.settings.diagnosticsTitle}>
                   <button id="settings-category-diagnostics" type="button" className="settings-button settings-button--quiet" aria-controls="diagnostics-panel" onClick={() => {
                     diagnosticNavigationFocus.current = "settings-diagnostics-back";
                     selectCategory("diagnostics");

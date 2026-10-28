@@ -63,7 +63,7 @@ export function NetworkProxySettings({ value = DEFAULT_NETWORK_PROXY, disabled, 
   const validated = validateNetworkProxy(mode, address);
   const locked = disabled || busy;
   const help = mode === "system" ? I18N.settings.networkProxySystemHelp
-    : mode === "direct" ? I18N.settings.networkProxyDirectHelp : I18N.settings.networkProxyCustomHelp;
+    : mode === "custom" ? I18N.settings.networkProxyCustomHelp : null;
 
   const save = async (nextMode = mode, nextAddress = address) => {
     if (disabled || inFlight.current) return;
@@ -88,7 +88,7 @@ export function NetworkProxySettings({ value = DEFAULT_NETWORK_PROXY, disabled, 
 
   const control = <>
     <form ref={form} className="network-proxy-form" aria-busy={busy} onSubmit={(event) => { event.preventDefault(); void save(); }}>
-      <SettingsRow label={label} descriptionId={`${addressId}-help`} description={[scope, help, ...(disabled ? [I18N.settings.networkProxyLocked] : [])].join("\n")}>
+      <SettingsRow label={label} descriptionId={`${addressId}-help`} description={[scope, help, ...(disabled ? [I18N.settings.networkProxyLocked] : [])].filter(Boolean).join("\n")}>
         {busy && <span className="network-proxy-saving" role="status">
           <span className="settings-spinner" aria-hidden="true" />
           <span className="settings-sr-only">{I18N.settings.networkProxySaving}</span>

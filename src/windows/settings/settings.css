@@ -665,34 +665,74 @@
   justify-content: flex-end;
 }
 
-/* The update row uses the same neutral type and controls as its neighbors. */
+/* The updater is one self-contained flow inside General, using existing tokens. */
 .software-update {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 10px;
+  gap: 18px;
+  padding: 20px;
+  border: 1px solid var(--settings-border);
+  border-radius: 14px;
+  background: var(--settings-panel-raised);
 }
 
 .software-update__header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px 18px;
+  gap: 14px 18px;
   flex-wrap: wrap;
 }
 
 .software-update__copy {
   display: flex;
   min-width: 0;
-  flex: 1 1 180px;
-  flex-direction: column;
-  gap: 4px;
+  flex: 1 1 200px;
+  align-items: center;
+  gap: 12px;
 }
 
-.software-update__current {
+.software-update__identity {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.software-update__identity .settings-row__label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--settings-text-muted);
+  line-height: 1.45;
+}
+
+.software-update__versions {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.software-update__current,
+.software-update__target {
+  max-width: 100%;
+  color: var(--settings-text);
+  font-size: 23px;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.software-update__versions:has(.software-update__target) .software-update__current,
+.software-update__arrow {
   color: var(--settings-text-faint);
-  font-size: 11px;
-  line-height: 1.5;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0;
 }
 
 .software-update__actions {
@@ -702,47 +742,141 @@
   justify-content: flex-end;
 }
 
-.software-update-button {
+.software-update .software-update-button {
   max-width: 100%;
   white-space: normal;
+  min-height: 34px;
+  border-radius: 8px;
+  font-size: 12px;
 }
+
+.software-update .software-update-button:disabled {
+  opacity: 1;
+  color: var(--settings-text-muted);
+  background: var(--settings-selection-soft);
+  border-color: transparent;
+}
+
+.software-update .settings-button--quiet { background: var(--settings-canvas); }
 
 .software-update__status {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
   color: var(--settings-text-muted);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
 .software-update__status:empty { display: none; }
+.software-update__status:has(> .settings-sr-only:only-child) {
+  position: absolute;
+}
 .software-update__status--error .software-update__state { color: var(--settings-danger); }
-.software-update__version { color: var(--settings-text); font-weight: 590; }
-.software-update__state { display: flex; align-items: baseline; gap: 5px; }
-.software-update__state svg { flex-shrink: 0; align-self: center; }
+.software-update__state { display: flex; align-items: baseline; gap: 6px; }
+
+.software-update__transfer {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.software-update__metrics {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--settings-text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.software-update__percent {
+  margin-left: auto;
+  color: var(--settings-text);
+  font-size: 22px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+}
+
+.software-update__track {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--settings-border-strong);
+}
 
 .software-update__progress {
+  display: block;
   width: 100%;
-  height: 4px;
-  accent-color: var(--settings-text);
+  height: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: var(--settings-text);
+  opacity: 0;
+}
+
+/* Keep native semantics, with the same visible fill across desktop WebViews. */
+.software-update__fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--settings-text);
+  transform-origin: left;
+  transition: transform 180ms ease-out;
+}
+.software-update__activity {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 35%;
+  border-radius: inherit;
+  background: var(--settings-text);
+  animation: software-update-activity 1.5s ease-in-out infinite alternate;
+}
+@keyframes software-update-activity {
+  from { transform: translateX(0); }
+  to { transform: translateX(185.714%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .software-update__activity { animation: none; }
+  .software-update__activity { left: 32.5%; }
+  .software-update__fill { transition: none; }
+}
+
+@media (forced-colors: active) {
+  .software-update__track {
+    forced-color-adjust: none;
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
+  .software-update__fill,
+  .software-update__activity { background: CanvasText; }
 }
 
 .software-update__details {
   min-width: 0;
   border-top: 1px solid var(--settings-border);
-  padding-top: 6px;
+  padding-top: 12px;
 }
 
 .software-update__release > summary {
   display: flex;
   align-items: center;
-  gap: 5px;
-  width: fit-content;
-  padding: 4px 0;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 2px 0;
   color: var(--settings-text-muted);
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
   list-style: none;
 }

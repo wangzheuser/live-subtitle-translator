@@ -51,7 +51,7 @@ it.each(["zh", "en", "ja"] as const)("keeps help compact and saves selected rout
   expect(host.querySelector(".settings-row__description")).toBeNull();
   expect(save).not.toHaveBeenCalled();
   await choose(I18N.settings.networkProxyDirect);
-  expect(host.querySelector(".settings-help-control__description")?.textContent).toBe(`${I18N.settings.networkProxyScope}\n${I18N.settings.networkProxyDirectHelp}`);
+  expect(host.querySelector(".settings-help-control__description")?.textContent).toBe(I18N.settings.networkProxyScope);
   expect(save).toHaveBeenCalledExactlyOnceWith({ mode: "direct", url: null });
   expect(host.querySelector('[role="status"], .network-proxy-actions')).toBeNull();
   await choose(I18N.settings.networkProxySystem);

@@ -42,7 +42,7 @@ it("keeps the empty-state translation feedback tied to the pending source, not t
   };
   const settings = { ...initial.settings, sourceLanguage: "auto" as const, targetLanguage: "zh" as const, audioInput: "both" as const };
   expect(emptyStateText(session, settings)).toBe(I18N.overlay.translatingEmpty);
-  expect(emptyStateText(session, { ...settings, targetLanguage: "original" })).toBe(I18N.overlay.listeningEmpty);
+  expect(emptyStateText(session, { ...settings, targetLanguage: "original" })).toBe(I18N.overlay.phaseListening);
   expect(emptyStateText({ ...session, isPaused: true }, settings)).toBe(I18N.overlay.paused);
 });
 

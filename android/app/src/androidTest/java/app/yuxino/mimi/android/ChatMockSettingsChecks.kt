@@ -395,6 +395,8 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
         val openAI = open(ServiceProvider.OPENAI)
         stage = "forms_openai_simultaneous_translation_hidden"
         onUi {
+            check(field<View>(openAI, "speech-setup-key").isShown) { "OpenAI has no credential setup action" }
+            check(field<View>(openAI, "speech-setup-key").contentDescription.toString().contains("OpenAI"))
             check(field<Spinner>(openAI, "speech-translation-mode").selectedItemPosition == 0)
             check(!field<View>(openAI, "translation-mode").isShown) { "Integrated speech translation exposes an independent text route" }
             check(openAI.window.decorView.findViewWithTag<View>("credential-baseUrl") == null)
@@ -802,6 +804,10 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
         }
         instrumentation.addMonitor(monitor)
         try {
+            onUi { check(field<View>(editor, "speech-setup-key").performClick()) }
+            instrumentation.waitForIdleSync()
+            check(opened.single().dataString == serviceSetupUrl(ServiceProvider.DASHSCOPE.wireProvider, TextTranslationSetupPage.API_KEY))
+            opened.clear()
             val openai = TextTranslationPresets.entries.first { it.id == "openai" }
             val kimi = TextTranslationPresets.entries.first { it.id == "kimi" }
             val index = TextTranslationPresets.entries.first { it.id == "indexTranslate" }
@@ -857,6 +863,30 @@ internal class ChatMockSettingsChecks(private val instrumentation: Instrumentati
             }
             instrumentation.waitForIdleSync()
             check(opened.size == 3) { "A stale setup action opened after the translation route changed" }
+            for (provider in listOf(TextTranslationProvider.XAI, TextTranslationProvider.DEEPL)) {
+                onUi { selectMode(editor, provider) }
+                instrumentation.waitForIdleSync()
+                val before = opened.size
+                onUi {
+                    key.setText("synthetic-unsaved-dedicated-key")
+                    val setup = field<View>(editor, "translation-service-setup-key")
+                    check(setup.isShown) { "A dedicated text service has no credential setup action" }
+                    check(setup.performClick())
+                    check(key.text.toString() == "synthetic-unsaved-dedicated-key") { "Opening credential setup changed an unsaved key" }
+                }
+                instrumentation.waitForIdleSync()
+                check(opened.size == before + 1)
+                check(opened.last().dataString == serviceSetupUrl(requireNotNull(textTranslationServiceSetupId(provider)), TextTranslationSetupPage.API_KEY))
+            }
+            val beforeCustom = opened.size
+            onUi { selectMode(editor, TextTranslationProvider.CHAT_MOCK) }
+            instrumentation.waitForIdleSync()
+            onUi {
+                check(!field<View>(editor, "translation-service-setup-key").isShown)
+                field<View>(editor, "translation-service-setup-key").performClick()
+            }
+            instrumentation.waitForIdleSync()
+            check(opened.size == beforeCustom) { "A custom text route opened a dedicated service's key page" }
             onUi { selectMode(editor, TextTranslationProvider.OPENAI_COMPATIBLE) }
             instrumentation.waitForIdleSync()
             onUi { picker.setSelection(0) }

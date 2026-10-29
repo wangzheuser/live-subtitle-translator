@@ -1042,5 +1042,61 @@
       "setupKind": "local",
       "setupHelpKey": "compatibleSetupLMStudioHelp"
     }
+  ],
+  "serviceSetups": [
+    {
+      "id": "alibabaCloud",
+      "label": "Alibaba Cloud",
+      "apiKeyUrl": "https://bailian.console.aliyun.com/cn-beijing/model/settings/api-key",
+      "guideUrl": "https://help.aliyun.com/zh/model-studio/get-api-key"
+    },
+    {
+      "id": "openAIRealtime",
+      "label": "OpenAI",
+      "apiKeyUrl": "https://platform.openai.com/api-keys",
+      "guideUrl": "https://developers.openai.com/api/docs/quickstart"
+    },
+    {
+      "id": "googleGeminiLive",
+      "label": "Google Gemini",
+      "apiKeyUrl": "https://aistudio.google.com/apikey",
+      "guideUrl": "https://ai.google.dev/gemini-api/docs/api-key"
+    },
+    {
+      "id": "azureOpenAIRealtime",
+      "label": "Azure OpenAI",
+      "apiKeyUrl": "https://portal.azure.com/",
+      "guideUrl": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/realtime-audio"
+    },
+    {
+      "id": "volcanoEngine",
+      "label": "Volcano Engine",
+      "apiKeyUrl": "https://console.volcengine.com/speech/new/setting/apikeys?projectName=default",
+      "guideUrl": "https://docs.volcengine.com/docs/DoubaoVoice/QuickStartNewConsole?lang=zh"
+    },
+    {
+      "id": "tencentCloud",
+      "label": "Tencent Cloud",
+      "apiKeyUrl": "https://console.cloud.tencent.com/cam/capi",
+      "guideUrl": "https://cloud.tencent.com/document/product/1093/54362"
+    },
+    {
+      "id": "baiduTranslate",
+      "label": "Baidu Translate",
+      "apiKeyUrl": "https://console.bce.baidu.com/ai-engine/machinetranslation/overview/index",
+      "guideUrl": "https://ai.baidu.com/ai-doc/MT/2l317egif"
+    },
+    {
+      "id": "xAIRealtime",
+      "label": "xAI Grok",
+      "apiKeyUrl": "https://console.x.ai/team/default/api-keys",
+      "guideUrl": "https://docs.x.ai/developers/quickstart"
+    },
+    {
+      "id": "deepL",
+      "label": "DeepL",
+      "apiKeyUrl": "https://app.deepl.com/your-account/keys",
+      "guideUrl": "https://developers.deepl.com/docs/getting-started/intro"
+    }
   ]
 }

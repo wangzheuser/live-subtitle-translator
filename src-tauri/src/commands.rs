@@ -816,6 +816,7 @@ mod tests {
             "open_tencent_setup_page",
             "open_alibaba_setup_page",
             "open_text_translation_setup_page",
+            "open_service_setup_page",
         ] {
             assert!(include_str!("lib.rs").contains(&format!("commands::{command},")));
             let permissions = include_str!("../permissions/app.toml");
@@ -916,6 +917,40 @@ mod tests {
             assert!(
                 serde_json::from_value::<TextTranslationSetupPage>(serde_json::json!(page))
                     .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn service_setup_pages_keep_speech_and_text_products_separate() {
+        for (id, expected) in [
+            ("openAIRealtime", "https://platform.openai.com/api-keys"),
+            (
+                "volcanoEngine",
+                "https://console.volcengine.com/speech/new/setting/apikeys?projectName=default",
+            ),
+            (
+                "baiduTranslate",
+                "https://console.bce.baidu.com/ai-engine/machinetranslation/overview/index",
+            ),
+            ("tencentCloud", "https://console.cloud.tencent.com/cam/capi"),
+        ] {
+            assert_eq!(
+                catalog_setup_url("serviceSetups", id, TextTranslationSetupPage::ApiKey),
+                Some(expected)
+            );
+        }
+        for id in [
+            "unknown",
+            "https://example.com",
+            "openAIRealtime/../",
+            "appleSpeech",
+            "customOpenAIASR",
+            "",
+        ] {
+            assert_eq!(
+                catalog_setup_url("serviceSetups", id, TextTranslationSetupPage::ApiKey),
+                None
             );
         }
     }
@@ -1963,6 +1998,14 @@ fn text_translation_setup_url(
     preset_id: &str,
     page: TextTranslationSetupPage,
 ) -> Option<&'static str> {
+    catalog_setup_url("compatiblePresets", preset_id, page)
+}
+
+fn catalog_setup_url(
+    catalog: &str,
+    service_id: &str,
+    page: TextTranslationSetupPage,
+) -> Option<&'static str> {
     static CATALOG: LazyLock<Option<serde_json::Value>> = LazyLock::new(|| {
         serde_json::from_str(include_str!("../../shared/provider-copy.json")).ok()
     });
@@ -1972,11 +2015,12 @@ fn text_translation_setup_url(
     };
     let preset = CATALOG
         .as_ref()?
-        .get("compatiblePresets")?
+        .get(catalog)?
         .as_array()?
         .iter()
-        .find(|preset| preset.get("id").and_then(serde_json::Value::as_str) == Some(preset_id))?;
+        .find(|preset| preset.get("id").and_then(serde_json::Value::as_str) == Some(service_id))?;
     if matches!(page, TextTranslationSetupPage::ApiKey)
+        && catalog == "compatiblePresets"
         && preset.get("setupKind").and_then(serde_json::Value::as_str) != Some("cloud")
     {
         return None;
@@ -1989,6 +2033,24 @@ fn text_translation_setup_url(
         && url.password().is_none()
         && !value.chars().any(char::is_control))
     .then_some(value)
+}
+
+/// Built-in speech and dedicated text services use the same fixed catalog on both platforms.
+#[tauri::command]
+pub fn open_service_setup_page(
+    app: AppHandle,
+    service_id: String,
+    page: TextTranslationSetupPage,
+) -> Result<(), String> {
+    let url = catalog_setup_url("serviceSetups", &service_id, page)
+        .ok_or_else(|| "service_setup_page_unavailable".to_string())?;
+    app.opener().open_url(url, None::<&str>).map_err(|_| {
+        tracing::warn!(
+            label = "system_opener_failed",
+            "service setup page open failed"
+        );
+        "service_setup_open_failed".to_string()
+    })
 }
 
 /// Settings supplies only a catalog ID and page kind, never an editable URL.

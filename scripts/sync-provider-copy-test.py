@@ -35,6 +35,7 @@ class SharedProviderCopyTest(unittest.TestCase):
         return patch.multiple(MODULE, ROOT=root, SOURCE=root / "shared/provider-copy.json",
                               TS_OUTPUT=root / "src/lib/generated/providerCopy.ts",
                               KOTLIN_OUTPUT=root / "android/app/src/main/java/app/yuxino/mimi/android/GeneratedTextTranslationPresets.kt",
+                              SERVICE_SETUP_OUTPUT=root / "android/app/src/main/java/app/yuxino/mimi/android/GeneratedServiceSetups.kt",
                               RESOURCE_ROOT=root / "android/app/src/main/res")
 
     def test_generation_and_check_work_with_legacy_windows_locale(self):
@@ -91,7 +92,7 @@ class SharedProviderCopyTest(unittest.TestCase):
         presets = json.loads(MODULE.SOURCE.read_text(encoding="utf-8"))["compatiblePresets"]
         outputs = MODULE.generated_files()
         ts = outputs[MODULE.TS_OUTPUT].split("export const OPENAI_COMPATIBLE_PRESETS = ", 1)[1]
-        self.assertEqual(presets, json.loads(ts.removesuffix(" as const;\n")))
+        self.assertEqual(presets, json.loads(ts.split(" as const;\n", 1)[0]))
         kotlin = outputs[MODULE.KOTLIN_OUTPUT]
         entries = json.loads(MODULE.SOURCE.read_text(encoding="utf-8"))["entries"]
         positions = []
@@ -102,6 +103,29 @@ class SharedProviderCopyTest(unittest.TestCase):
             positions.append(kotlin.index(row))
         self.assertEqual(sorted(positions), positions)
         self.assertEqual('"synthetic\\$value"', MODULE.kotlin_string("synthetic$value"))
+
+    def test_service_setups_share_order_and_values(self):
+        setups = json.loads(MODULE.SOURCE.read_text(encoding="utf-8"))["serviceSetups"]
+        outputs = MODULE.generated_files()
+        ts = outputs[MODULE.TS_OUTPUT].split("export const SERVICE_SETUPS = ", 1)[1]
+        self.assertEqual(setups, json.loads(ts.removesuffix(" as const;\n")))
+        kotlin = outputs[MODULE.SERVICE_SETUP_OUTPUT]
+        positions = [kotlin.index("ServiceSetup(" + ", ".join(MODULE.kotlin_string(setup[key]) for key in
+                     ("id", "label", "apiKeyUrl", "guideUrl")) + ")") for setup in setups]
+        self.assertEqual(sorted(positions), positions)
+
+    def test_service_setups_reject_unknown_fields_duplicates_and_unsafe_urls(self):
+        data = json.loads(MODULE.SOURCE.read_text(encoding="utf-8"))
+        setup = data["serviceSetups"][0]
+        cases = [[], [setup, setup], [{**setup, "unexpected": "field"}],
+                 [{**setup, "id": "not-an-id"}], [{**setup, "label": ""}]]
+        for field in ("apiKeyUrl", "guideUrl"):
+            for url in ("", "http://example.com", "https://localhost", "https://127.0.0.1",
+                        "https://key@example.com", "https://example.com:8443", "javascript:alert(1)"):
+                cases.append([{**setup, field: url}])
+        for setups in cases:
+            with self.subTest(setups=setups), self.assertRaisesRegex(ValueError, "[Ss]ervice setup"):
+                MODULE.service_setups({**data, "serviceSetups": setups})
 
     def test_invalid_compatible_presets_are_rejected(self):
         data = json.loads(MODULE.SOURCE.read_text(encoding="utf-8"))

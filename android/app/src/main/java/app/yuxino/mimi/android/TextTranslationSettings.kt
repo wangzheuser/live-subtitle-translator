@@ -78,6 +78,11 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
     private val endpoint = field(R.string.translation_endpoint, "translation-endpoint")
     private val model = field(R.string.translation_model, "translation-model")
     private val key = field(R.string.translation_key, "translation-key", true)
+    private val directSetupKey = setupButton(R.string.translation_setup_get_key, "translation-service-setup-key") {
+        if (key.isEnabled && providers.getOrNull(mode.selectedItemPosition) == selected) {
+            textTranslationServiceSetupId(selected)?.let { openServiceSetup(activity, it, TextTranslationSetupPage.API_KEY) }
+        }
+    }
     private val localHttp = CheckBox(activity).apply {
         tag = "translation-local-http"; text = activity.getString(R.string.translation_local_http); textSize = 16f
     }
@@ -127,6 +132,7 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
         qwenModelRow.addView(ServiceSettingsUi.label(activity, activity.getString(R.string.translation_model), 16f))
         qwenModelRow.addView(qwenModel, LinearLayout.LayoutParams(-1, dp(56)))
         root.addView(qwenModelRow, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(16) })
+        fields.addView(directSetupKey, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.END; bottomMargin = dp(8) })
         fields.addView(localHttp, LinearLayout.LayoutParams(-1, -2))
         val actions = LinearLayout(activity).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
         actions.addView(removeKey)
@@ -213,6 +219,9 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
         ServiceSettingsUi.fieldVisible(inputLayouts.getValue(model), selected.usesOpenAIProtocol)
         localHttp.visibility = if (customEndpoint) View.VISIBLE else View.GONE
         rendering = false
+        val setup = textTranslationServiceSetupId(selected)?.let { id -> ServiceSetups.entries.firstOrNull { it.id == id } }
+        directSetupKey.visibility = if (setup == null) View.GONE else View.VISIBLE
+        directSetupKey.contentDescription = setup?.let { "${it.label}: ${directSetupKey.text}" }
         updateKeyLabel()
     }
 
@@ -385,7 +394,7 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
     }
     fun setEditingEnabled(enabled: Boolean) {
         if (!enabled) invalidateCheck()
-        listOf(mode, preset, setupKey, setupGuide, qwenModel, endpoint, model, key, localHttp, removeKey, check).forEach { it.isEnabled = enabled }
+        listOf(mode, preset, setupKey, setupGuide, directSetupKey, qwenModel, endpoint, model, key, localHttp, removeKey, check).forEach { it.isEnabled = enabled }
     }
     private fun dp(value: Int) = ServiceSettingsUi.dp(activity, value)
     private fun setupButton(label: Int, tag: String, action: () -> Unit) =

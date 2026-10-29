@@ -59,6 +59,7 @@ import { NameDraftContext, NameDraftOwner } from "./nameDraftOwner";
 import { AppleSpeechSettings } from "./AppleSpeechSettings";
 import { useAppleSpeechSupport } from "./useAppleSpeechSupport";
 import { TencentSetupHelp } from "./TencentSetupHelp";
+import { ServiceSetupLink } from "./ServiceSetupLink";
 import { profileCopyName } from "../../lib/profileCopyName";
 import { AlibabaRealtimeSettings } from "./AlibabaRealtimeSettings";
 import { QwenMTModelSettings } from "./QwenMTModelSettings";
@@ -1083,6 +1084,7 @@ function CredentialEditor({
             return (
               <div className="settings-field" key={field}>
                 <label htmlFor={fieldId}>{copy.label}</label>
+                <div className="service-setup-control">
                 {copy.secret ? <SavedCredentialInput
                   key={`${profile.id}:${editorEpoch}:${field}`} id={fieldId}
                   profileId={profile.id}
@@ -1120,6 +1122,8 @@ function CredentialEditor({
                     if (field === "endpoint" && endpointInvalid) setEndpointInvalid(!deepLXEndpointIsValid(value));
                   }}
                 />}
+                {(field === "apiKey" || field === "appKey") && <ServiceSetupLink serviceId={profile.provider} disabled={disabled || busy} />}
+                </div>
                 {field === "endpoint" && endpointInvalid && <span id={`${fieldId}-error`} role="alert" className="credential-unavailable">{I18N.settings.deepLXEndpointInvalid}</span>}
               </div>
             );

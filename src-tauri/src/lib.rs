@@ -440,6 +440,7 @@ pub fn run() {
             commands::open_tencent_setup_page,
             commands::open_alibaba_setup_page,
             commands::open_text_translation_setup_page,
+            commands::open_service_setup_page,
             commands::settings_save,
             commands::profile_create,
             commands::profile_duplicate,

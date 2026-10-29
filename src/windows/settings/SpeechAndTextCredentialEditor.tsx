@@ -23,6 +23,7 @@ import { AppleTranslationSettings } from "./AppleTranslationSettings";
 import { OPENAI_COMPATIBLE_PRESETS, PROVIDER_COPY } from "../../lib/generated/providerCopy";
 import { compatiblePresetForEndpoint } from "../../lib/textTranslationPresets";
 import { TextTranslationSetupLink } from "./TextTranslationSetupLink";
+import { ServiceSetupLink } from "./ServiceSetupLink";
 
 const XAI_TRANSLATION_HELP = {
   zh: "使用 xAI 的 Grok 文字模型翻译识别结果。此处的 API Key 仅用于文字翻译，与语音识别配置分别保存。",
@@ -245,7 +246,7 @@ export function SpeechAndTextCredentialEditor({ profile, inputId, disabled, busy
         <label htmlFor={`${inputId}-apiKey`}>{I18N.settings.apiKey}</label>
         <div className="alibaba-setup-control">
         <SavedCredentialInput key={`${profile.id}:${revealEpoch}`} profileId={profile.id} field={profile.provider === "deepLX" ? "asrApiKey" : "apiKey"} label={I18N.settings.apiKey} hasSavedValue={recognitionState.state?.savedFields.includes(profile.provider === "deepLX" ? "asrApiKey" : "apiKey") ?? false} active={visible && !busy && !confirmingDelete} id={`${inputId}-apiKey`} type="password" autoComplete="new-password" spellCheck={false} disabled={disabled} value={draft.apiKey} placeholder={I18N.settings.apiKeyPlaceholder} aria-describedby={noteId} onValueChange={(value) => { setEditingKey(true); setDraft((current) => ({ ...current, apiKey: value })); }} />
-          {profile.provider === "alibabaCloud" && <AlibabaSetupLink page="apiKey" disabled={disabled || busy} />}
+          {(profile.provider === "alibabaCloud" || profile.provider === "deepLX") && <AlibabaSetupLink page="apiKey" disabled={disabled || busy} />}
         </div>
       </div>}
     </section>}
@@ -300,6 +301,7 @@ export function SpeechAndTextCredentialEditor({ profile, inputId, disabled, busy
           <SavedCredentialInput key={`${profile.id}:${translation}:${revealEpoch}`} profileId={profile.id} field="token" textTranslation={translation} label={destinationKeyLabel} hasSavedValue={hasTranslationKey && !clearTranslationToken && !endpointChanged && !presetDiscardedToken} allowSavedReveal={translation === savedTranslation && !presetDiscardedToken} active={visible && !busy && !confirmingDelete} id={`${inputId}-token`} type="password" autoComplete="new-password" spellCheck={false} disabled={disabled || clearTranslationToken} value={draft.token} placeholder={compatible ? clearTranslationToken ? I18N.settings.noTranslationKeyPlaceholder : hasTranslationKey && !endpointChanged && !presetDiscardedToken ? I18N.settings.savedTranslationKeyPlaceholder : setupPreset?.setupKind === "cloud" ? I18N.settings.apiKeyPlaceholder : I18N.settings.optionalTranslationKeyPlaceholder : translation === "deepL" || xaiTranslation ? hasTranslationKey ? I18N.settings.savedTranslationKeyPlaceholder : I18N.settings.apiKeyPlaceholder : undefined} aria-describedby={compatible ? `${inputId}-compatible-required ${noteId}` : noteId} onValueChange={(value) => setDraft((current) => ({ ...current, token: value }))} />
           {setupPreset?.setupKind === "keyless" ? <span className="translation-setup-keyless">{presetCopy.compatibleSetupNoKey}</span>
             : setupPreset && <TextTranslationSetupLink preset={setupPreset} page="apiKey" disabled={disabled || busy} />}
+          {(translation === "deepL" || xaiTranslation) && <ServiceSetupLink serviceId={xaiTranslation ? "xAIRealtime" : "deepL"} disabled={disabled || busy} />}
           </div>
         </div>
         {compatible && keepsSavedDestination && hasTranslationKey && !presetDiscardedToken && <span className="credential-form__actions">

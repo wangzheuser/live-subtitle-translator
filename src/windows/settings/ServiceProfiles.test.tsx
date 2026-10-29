@@ -7,7 +7,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { diagnosticCopy, profileErrorMessage } from "../../lib/connectionDiagnostics";
 import { speechLanguageGuidance, targetLanguageOptionLabel } from "../../lib/speechLanguageGuidance";
 import { I18N, UI_LANGUAGES, providerDisplayName, setStoredUiLanguage } from "../../lib/i18n";
-import { openAlibabaSetupPage, openTextTranslationSetupPage, getAppleSpeechSupport, prepareAppleSpeechLanguage, profileCredentialEditorState, profileRevealCredential, testProfileConnection } from "../../lib/ipc";
+import { openAlibabaSetupPage, openTextTranslationSetupPage, openServiceSetupPage, getAppleSpeechSupport, prepareAppleSpeechLanguage, profileCredentialEditorState, profileRevealCredential, testProfileConnection } from "../../lib/ipc";
 import { SERVICE_PROVIDERS, sourceLanguagesForSettings, targetLanguagesForSettings } from "../../lib/providerCapabilities";
 import { SOURCE_LANGUAGE_DISPLAY_NAMES, TARGET_LANGUAGE_DISPLAY_NAMES } from "../../lib/types";
 import type { AppleSpeechSupport, ServiceProfile, SettingsSnapshot } from "../../lib/types";
@@ -21,7 +21,7 @@ const actions = vi.hoisted(() => ({
 }));
 const boot = vi.hoisted(() => ({ initializationStatus: "ready" as "ready" | "loading" | "error", initializationError: null as "timeout" | "unavailable" | null, init: vi.fn(), nativeSettings: null as SettingsSnapshot | null }));
 vi.mock("../../lib/store", () => ({ useStore: (select: (state: typeof actions & typeof boot & { settings: { windowsAudioSource?: string }; session: { isActive: boolean; isPaused: boolean } }) => unknown) => select({ ...actions, ...boot, settings: boot.nativeSettings ?? { windowsAudioSource: "" }, session: { isActive: false, isPaused: false } }) }));
-vi.mock("../../lib/ipc", () => ({ isTauri: false, openAlibabaSetupPage: vi.fn(), openTextTranslationSetupPage: vi.fn(), getAppleSpeechSupport: vi.fn(), prepareAppleSpeechLanguage: vi.fn(), testProfileConnection: vi.fn(), profileRevealCredential: vi.fn(), profileCredentialEditorState: vi.fn(), setOverlayPointerCursor: vi.fn() }));
+vi.mock("../../lib/ipc", () => ({ isTauri: false, openAlibabaSetupPage: vi.fn(), openTextTranslationSetupPage: vi.fn(), openServiceSetupPage: vi.fn(), getAppleSpeechSupport: vi.fn(), prepareAppleSpeechLanguage: vi.fn(), testProfileConnection: vi.fn(), profileRevealCredential: vi.fn(), profileCredentialEditorState: vi.fn(), setOverlayPointerCursor: vi.fn() }));
 
 const profile: ServiceProfile = { id: "synthetic", name: "Alibaba", provider: "alibabaCloud", credentialState: "unavailable" };
 const settings: SettingsSnapshot = {
@@ -40,6 +40,7 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
   vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla Linux");
   for (const action of Object.values(actions)) action.mockReset();
+  vi.mocked(openServiceSetupPage).mockReset().mockResolvedValue(undefined);
   vi.mocked(openAlibabaSetupPage).mockReset().mockResolvedValue(undefined);
   vi.mocked(openTextTranslationSetupPage).mockReset().mockResolvedValue(undefined);
   vi.mocked(testProfileConnection).mockReset();
@@ -2625,4 +2626,46 @@ it("lets Azure ASR check recognition without a translation deployment or text cr
     kind: "azureOpenAI", endpoint: "https://synthetic.openai.azure.com", deployment: "", transcriptionDeployment: "transcribe", apiKey: "synthetic-speech-key",
   });
   expect(host.querySelector('.service-stage--translation [role="combobox"]')?.textContent).toBe(I18N.settings.textTranslationOpenAICompatible);
+});
+
+
+it.each(["openAIRealtime", "googleGeminiLive", "azureOpenAIRealtime", "volcanoEngine", "baiduTranslate", "xAIRealtime"] as const)("opens the %s speech key page without discarding drafts or running services", async provider => {
+  await render({ ...settings, profiles: [{ ...profile, provider, credentialState: "missing" }] });
+  const field = provider === "baiduTranslate" ? "appKey" : "apiKey";
+  const selector = `.credential-form input[id$="-${field}"]`;
+  await change(selector, "synthetic-unsaved-key");
+  const button = host.querySelector<HTMLButtonElement>('.service-stage--integrated .translation-setup-link')!;
+  expect(button).not.toBeNull();
+  expect(openServiceSetupPage).not.toHaveBeenCalled();
+  await act(async () => button.click());
+  expect(openServiceSetupPage).toHaveBeenCalledExactlyOnceWith(provider, "apiKey");
+  expect(host.querySelector<HTMLInputElement>(selector)!.value).toBe("synthetic-unsaved-key");
+  expect(actions.saveProfileCredentials).not.toHaveBeenCalled();
+  expect(testProfileConnection).not.toHaveBeenCalled();
+  expect(profileRevealCredential).not.toHaveBeenCalled();
+});
+
+it.each(["deepL", "xAI"] as const)("opens the dedicated %s translation key page and preserves its unsaved key", async translation => {
+  await render({ ...settings, profiles: [{ ...profile, credentialState: "present", textTranslation: translation }] });
+  const selector = '.service-stage--translation input[id$="-token"]';
+  await change(selector, "synthetic-unsaved-text-key");
+  await act(async () => host.querySelector<HTMLButtonElement>('.service-stage--translation .translation-setup-link')!.click());
+  expect(openServiceSetupPage).toHaveBeenCalledExactlyOnceWith(translation === "xAI" ? "xAIRealtime" : "deepL", "apiKey");
+  expect(host.querySelector<HTMLInputElement>(selector)!.value).toBe("synthetic-unsaved-text-key");
+  expect(actions.saveProfileCredentials).not.toHaveBeenCalled();
+  expect(testProfileConnection).not.toHaveBeenCalled();
+  expect(profileRevealCredential).not.toHaveBeenCalled();
+});
+
+
+it("keeps Alibaba recognition key access in legacy DeepLX configurations", async () => {
+  await render({ ...settings, profiles: [{ ...profile, provider: "deepLX", credentialState: "missing" }] });
+  const selector = '.credential-form input[id$="-apiKey"]';
+  await change(selector, "synthetic-legacy-recognition-key");
+  const link = host.querySelector<HTMLButtonElement>('.service-stage .alibaba-setup-link')!;
+  expect(link).not.toBeNull();
+  await act(async () => link.click());
+  expect(openAlibabaSetupPage).toHaveBeenCalledExactlyOnceWith("apiKey");
+  expect(host.querySelector<HTMLInputElement>(selector)!.value).toBe("synthetic-legacy-recognition-key");
+  expect(actions.saveProfileCredentials).not.toHaveBeenCalled();
 });

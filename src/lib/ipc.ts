@@ -85,6 +85,10 @@ export function openAlibabaSetupPage(page: AlibabaSetupPage): Promise<void> {
 }
 
 export type TextTranslationSetupPage = "apiKey" | "guide";
+export function openServiceSetupPage(serviceId: string, page: TextTranslationSetupPage): Promise<void> {
+  return invoke("open_service_setup_page", { serviceId, page });
+}
+
 export function openTextTranslationSetupPage(presetId: string, page: TextTranslationSetupPage): Promise<void> {
   return invoke("open_text_translation_setup_page", { presetId, page });
 }

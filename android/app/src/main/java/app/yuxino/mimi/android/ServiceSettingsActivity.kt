@@ -32,6 +32,7 @@ class ServiceSettingsActivity : AppCompatActivity() {
     private lateinit var draftHolder: ServiceEditorDraftViewModel
     private lateinit var status: android.widget.TextView
     private var sessionBlocked = false
+    private var setupKey: MaterialButton? = null
     private val sessionListener: () -> Unit = { runOnUiThread { refreshSessionUi() } }
     private fun dp(value:Int)=ServiceSettingsUi.dp(this,value)
 
@@ -140,6 +141,24 @@ class ServiceSettingsActivity : AppCompatActivity() {
             } else pair.second.setText(saved.value(field.id))
             editorDraft?.speechValues?.get(field.id)?.let { pair.second.setText(it) }
             inputs[field.id]=pair
+            val keyField = when (provider) {
+                ServiceProvider.TENCENT -> "secretKey"
+                ServiceProvider.BAIDU -> "appKey"
+                else -> "apiKey"
+            }
+            if (field.id == keyField) {
+                val setup = ServiceSetups.entries.firstOrNull { it.id == provider.wireProvider }
+                if (setup != null) {
+                    setupKey = MaterialButton(this, null, com.google.android.material.R.attr.borderlessButtonStyle).apply {
+                        tag = "speech-setup-key"; setText(R.string.translation_setup_get_key)
+                        textSize = 16f; isAllCaps = false; isSingleLine = false; minimumHeight = dp(48)
+                        setTextColor(ContextCompat.getColor(context, R.color.mimi_text))
+                        contentDescription = "${setup.label}: ${getString(R.string.translation_setup_get_key)}"
+                        setOnClickListener { if (isEnabled) openServiceSetup(this@ServiceSettingsActivity, setup.id, TextTranslationSetupPage.API_KEY) }
+                    }
+                    content.addView(setupKey, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.END; bottomMargin = dp(8) })
+                }
+            }
         }
         if (provider == ServiceProvider.XAI || provider.supportsSpeechTranslationMode) {
             speechSettings = SpeechModeSettings(this, saved, editorDraft, ::speechProbeConfiguration, ::updateSpeechMode)
@@ -222,6 +241,7 @@ class ServiceSettingsActivity : AppCompatActivity() {
         alibabaMode?.isEnabled = !running && !storageUnavailable
         workspaceInput?.second?.isEnabled = !running && !storageUnavailable
         inputs.values.forEach { (_, edit) -> edit.isEnabled = !running && !storageUnavailable }
+        setupKey?.isEnabled = !running && !storageUnavailable
         translationSettings?.setEditingEnabled(!running && !storageUnavailable)
         speechSettings?.setEditingEnabled(!running && !storageUnavailable)
         findViewById<View>(R.id.save).isEnabled = !running && !storageUnavailable

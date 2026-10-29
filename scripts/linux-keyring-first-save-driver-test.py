@@ -83,7 +83,10 @@ class FirstSaveDriverTests(unittest.TestCase):
             for name in ("uname", "gdbus", "sleep", "openbox", "gnome-keyring-daemon",
                          "timeout", "cargo", "xdotool"):
                 executable = binaries / name
-                executable.write_text(STUB)
+                # The polling sleep must not start a Python interpreter 240 times.
+                # Preserve the same delay and driver assertions under slow CI hosts.
+                stub = "#!/usr/bin/env bash\nexec /bin/sleep .002\n" if name == "sleep" else STUB
+                executable.write_bytes(stub.encode("utf-8"))
                 executable.chmod(0o700)
             env = dict(os.environ, PATH=f"{binaries}{os.pathsep}{os.environ['PATH']}",
                        MIMI_LINUX_FIRST_SAVE_SESSION="1",

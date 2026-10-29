@@ -13,6 +13,7 @@ use mimi_runtime::{
     core::{
         audio_input::{AudioInput, AudioSource},
         configuration::LiveTranslationConfiguration,
+        credentials::{ProviderCredentials, ProviderCredentialsError},
         diagnostics::TranslationRecovery,
         models::{
             SessionStatus, SourceLanguage, SubtitleSnapshot, TargetLanguage, TranslationMode,
@@ -23,8 +24,8 @@ use mimi_runtime::{
             volcano_engine::{VolcanoEngineEndpoint, VolcanoEngineServerEvent},
         },
         provider::{
-            AlibabaRealtimeMode, ProviderKind, ProviderPreferences, SpeechTranslationMode,
-            TextTranslation, XAISpeechMode,
+            AlibabaRealtimeMode, ProviderKind, ProviderPreferences, ServiceProfile,
+            SpeechTranslationMode, TextTranslation, XAISpeechMode,
         },
         recovery::{
             advance_lifecycle_sequence_if_current, provider_error_is_retryable,
@@ -764,6 +765,35 @@ pub fn exchange(request: &str) -> Result<String, &'static str> {
         .ok_or("native_runtime_invalid_request")?
     {
         "merge_snapshots" => crate::snapshot_merge::merge(&value)?,
+        "resolve_credentials_draft" => {
+            let provider: ProviderKind = serde_json::from_value(value["provider"].clone())
+                .map_err(|_| "native_runtime_invalid_request")?;
+            let mode: SpeechTranslationMode =
+                serde_json::from_value(value["speechTranslationMode"].clone())
+                    .map_err(|_| "native_runtime_invalid_request")?;
+            let draft: ProviderCredentials = serde_json::from_value(value["draft"].clone())
+                .map_err(|_| "native_runtime_invalid_request")?;
+            let saved: Option<ProviderCredentials> = value
+                .get("saved")
+                .filter(|saved| !saved.is_null())
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|_| "native_runtime_invalid_request")?;
+            let mut profile =
+                ServiceProfile::new("android-credential-draft", "Credentials", provider)
+                    .map_err(|_| "invalid_credentials_draft")?;
+            profile
+                .set_speech_translation_mode(mode)
+                .map_err(|_| "invalid_credentials_draft")?;
+            let credentials = draft
+                .resolve_draft_for_profile(&profile, saved.as_ref())
+                .map_err(|error| match error {
+                    ProviderCredentialsError::Missing(_) => "missing_credentials_draft",
+                    _ => "invalid_credentials_draft",
+                })?;
+            json!({"credentials": credentials})
+        }
         "policy" => {
             json!({"snapshotPublishIntervalMs":mimi_runtime::core::health::SNAPSHOT_PUBLISH_INTERVAL.as_millis() as u64,
                 "sessionFinishTimeoutMs":mimi_runtime::core::health::SESSION_FINISH_TIMEOUT.as_millis() as u64})
@@ -2029,6 +2059,36 @@ mod tests {
                 "native_runtime_invalid_request"
             );
         }
+    }
+
+    #[test]
+    fn credential_draft_resolution_uses_shared_validation_and_content_free_errors() {
+        let request = json!({"operation":"resolve_credentials_draft", "provider":"openAIRealtime",
+            "speechTranslationMode":"simultaneous", "draft":{"kind":"apiKey", "apiKey":""},
+            "saved":{"kind":"apiKey", "apiKey":"synthetic-saved-key"}});
+        let response: Value =
+            serde_json::from_str(&exchange(&request.to_string()).unwrap()).unwrap();
+        assert_eq!(response["credentials"]["apiKey"], "synthetic-saved-key");
+        let mut missing = request.clone();
+        missing["saved"] = Value::Null;
+        assert_eq!(
+            exchange(&missing.to_string()).unwrap_err(),
+            "missing_credentials_draft"
+        );
+        for field in ["provider", "speechTranslationMode", "draft"] {
+            let mut invalid = request.clone();
+            invalid[field] = json!("synthetic-private-value");
+            assert_eq!(
+                exchange(&invalid.to_string()).unwrap_err(),
+                "native_runtime_invalid_request"
+            );
+        }
+        let mut malformed_saved = request;
+        malformed_saved["saved"] = json!({"synthetic-private-field":"synthetic-private-value"});
+        assert_eq!(
+            exchange(&malformed_saved.to_string()).unwrap_err(),
+            "native_runtime_invalid_request"
+        );
     }
 
     #[test]

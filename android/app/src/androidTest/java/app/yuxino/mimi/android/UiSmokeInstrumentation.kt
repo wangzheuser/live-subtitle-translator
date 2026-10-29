@@ -126,6 +126,14 @@ class UiSmokeInstrumentation : Instrumentation() {
             CredentialMatchChecks(this).run()
             return
         }
+        if (captureArguments?.getString("speech_credential_drafts") == "true") {
+            SpeechCredentialDraftChecks(this).run()
+            return
+        }
+        if (captureArguments?.getString("text_check_state") == "true") {
+            TextCheckStateChecks(this).run()
+            return
+        }
         if (captureArguments?.getString("live_acceptance") == "true") {
             LiveAcceptanceChecks(this).run(captureArguments)
             return

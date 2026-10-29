@@ -26,6 +26,112 @@ import kotlin.concurrent.thread
 
 /** Actual JNI checks use synthetic credentials; live transport fixtures stay on loopback. */
 class NativeRuntimeJniTest {
+    @Test fun azureCredentialDraftsRetainKeysOnlyForTheSameResourceAcrossActualJni() {
+        val saved = JSONObject().put("kind", "azureOpenAI").put("endpoint", "https://synthetic.openai.azure.com")
+            .put("deployment", "translation-alias").put("transcriptionDeployment", "speech-alias").put("apiKey", "synthetic-old-key")
+        val blank = JSONObject().put("kind", "azureOpenAI").put("endpoint", "").put("deployment", "")
+            .put("transcriptionDeployment", "").put("apiKey", "")
+        val retained = NativeRuntimeConfiguration.resolveCredentialsDraft(ServiceProvider.AZURE, "simultaneous", blank, saved)
+        assertEquals(saved.getString("endpoint"), retained.getString("endpoint"))
+        assertEquals("synthetic-old-key", retained.getString("apiKey"))
+        assertEquals("translation-alias", retained.getString("deployment"))
+        assertEquals("speech-alias", retained.getString("transcriptionDeployment"))
+        assertEquals("invalid_credentials_draft", assertThrows(IllegalArgumentException::class.java) {
+            NativeRuntimeConfiguration.resolveCredentialsDraft(ServiceProvider.AZURE, "simultaneous",
+                JSONObject(blank.toString()).put("transcriptionDeployment", "invalid deployment"), saved)
+        }.message)
+        val moved = JSONObject(blank.toString()).put("endpoint", "https://synthetic-replacement.openai.azure.com")
+        assertEquals("missing_credentials_draft", assertThrows(IllegalArgumentException::class.java) {
+            NativeRuntimeConfiguration.resolveCredentialsDraft(ServiceProvider.AZURE, "simultaneous", moved, saved)
+        }.message)
+        assertEquals("synthetic-replacement-key", NativeRuntimeConfiguration.resolveCredentialsDraft(
+            ServiceProvider.AZURE, "simultaneous", JSONObject(moved.toString()).put("apiKey", "synthetic-replacement-key"), saved).getString("apiKey"))
+        assertEquals("synthetic-replacement-key", NativeRuntimeConfiguration.resolveCredentialsDraft(
+            ServiceProvider.AZURE, "simultaneous", JSONObject(moved.toString()).put("apiKey", "synthetic-replacement-key"),
+            JSONObject(saved.toString()).put("endpoint", "synthetic-damaged-endpoint")).getString("apiKey"))
+
+        val asrSaved = JSONObject(saved.toString()).put("deployment", "")
+        val asr = NativeRuntimeConfiguration.resolveCredentialsDraft(ServiceProvider.AZURE, "asrMt", blank, asrSaved)
+        assertEquals("", asr.getString("deployment"))
+        assertEquals("speech-alias", asr.getString("transcriptionDeployment"))
+        assertThrows(IllegalArgumentException::class.java) {
+            NativeRuntimeConfiguration.resolveCredentialsDraft(ServiceProvider.AZURE, "simultaneous", blank, asrSaved)
+        }
+    }
+
+    @Test fun tencentCredentialDraftsBindBothSavedSecretsToTheirOriginalOwnerAcrossActualJni() {
+        val saved = JSONObject().put("kind", "tencentCloud").put("appId", "123456789")
+            .put("secretId", "synthetic-secret-id").put("secretKey", "synthetic-secret-key")
+        val blank = JSONObject().put("kind", "tencentCloud").put("appId", "").put("secretId", "").put("secretKey", "")
+        val retained = NativeRuntimeConfiguration.resolveCredentialsDraft(ServiceProvider.TENCENT, "simultaneous", blank, saved)
+        assertEquals("123456789", retained.getString("appId"))
+        assertEquals("synthetic-secret-id", retained.getString("secretId"))
+        assertEquals("synthetic-secret-key", retained.getString("secretKey"))
+        for (moved in listOf(JSONObject(blank.toString()).put("appId", "987654321"),
+                JSONObject(blank.toString()).put("secretId", "synthetic-replacement-id"))) {
+            assertEquals("missing_credentials_draft", assertThrows(IllegalArgumentException::class.java) {
+                NativeRuntimeConfiguration.resolveCredentialsDraft(ServiceProvider.TENCENT, "simultaneous", moved, saved)
+            }.message)
+        }
+        val replacement = JSONObject(blank.toString()).put("appId", "987654321")
+            .put("secretId", "synthetic-replacement-id").put("secretKey", "synthetic-replacement-key")
+        val resolved = NativeRuntimeConfiguration.resolveCredentialsDraft(ServiceProvider.TENCENT, "simultaneous", replacement, saved)
+        assertEquals("987654321", resolved.getString("appId"))
+        assertEquals("synthetic-replacement-id", resolved.getString("secretId"))
+        assertEquals("synthetic-replacement-key", resolved.getString("secretKey"))
+    }
+
+    @Test fun legacyAzureEndpointSpellingKeepsTheSameResourceKeyAcrossActualJni() {
+        val saved = JSONObject().put("kind", "azureOpenAI").put("endpoint", "https://synthetic.openai.azure.com/")
+            .put("deployment", "translation-alias").put("transcriptionDeployment", "speech-alias").put("apiKey", "synthetic-old-key")
+        val blank = JSONObject().put("kind", "azureOpenAI").put("endpoint", "").put("deployment", "")
+            .put("transcriptionDeployment", "").put("apiKey", "")
+        for (endpoint in listOf("", "https://synthetic.openai.azure.com")) {
+            val resolved = NativeRuntimeConfiguration.resolveCredentialsDraft(ServiceProvider.AZURE, "simultaneous",
+                JSONObject(blank.toString()).put("endpoint", endpoint), saved)
+            assertEquals("https://synthetic.openai.azure.com", resolved.getString("endpoint"))
+            assertEquals("synthetic-old-key", resolved.getString("apiKey"))
+        }
+    }
+
+    @Test fun baiduCredentialDraftsNeverReuseAKeyForAnotherApplicationAcrossActualJni() {
+        val saved = JSONObject().put("kind", "baiduTranslate").put("appId", "123456789").put("appKey", "synthetic-old-key")
+        val blank = JSONObject().put("kind", "baiduTranslate").put("appId", "").put("appKey", "")
+        assertEquals("synthetic-old-key", NativeRuntimeConfiguration.resolveCredentialsDraft(
+            ServiceProvider.BAIDU, "simultaneous", blank, saved).getString("appKey"))
+        val moved = JSONObject(blank.toString()).put("appId", "987654321")
+        assertEquals("missing_credentials_draft", assertThrows(IllegalArgumentException::class.java) {
+            NativeRuntimeConfiguration.resolveCredentialsDraft(ServiceProvider.BAIDU, "simultaneous", moved, saved)
+        }.message)
+        assertEquals("synthetic-new-key", NativeRuntimeConfiguration.resolveCredentialsDraft(ServiceProvider.BAIDU,
+            "simultaneous", JSONObject(moved.toString()).put("appKey", "synthetic-new-key"), saved).getString("appKey"))
+    }
+
+    @Test fun singleKeyCredentialDraftsAndInvalidRequestsUseSharedValidationAcrossActualJni() {
+        val saved = JSONObject().put("kind", "apiKey").put("apiKey", "synthetic-old-key")
+        val blank = JSONObject().put("kind", "apiKey").put("apiKey", "")
+        for (provider in listOf(ServiceProvider.DASHSCOPE, ServiceProvider.OPENAI, ServiceProvider.GEMINI,
+                ServiceProvider.VOLCANO, ServiceProvider.XAI)) {
+            assertEquals("synthetic-old-key", NativeRuntimeConfiguration.resolveCredentialsDraft(
+                provider, "simultaneous", blank, saved).getString("apiKey"))
+            assertEquals("synthetic-new-key", NativeRuntimeConfiguration.resolveCredentialsDraft(provider, "simultaneous",
+                JSONObject(saved.toString()).put("apiKey", "synthetic-new-key"), null).getString("apiKey"))
+            assertEquals("missing_credentials_draft", assertThrows(IllegalArgumentException::class.java) {
+                NativeRuntimeConfiguration.resolveCredentialsDraft(provider, "simultaneous", blank, null)
+            }.message)
+        }
+        assertEquals("native_runtime_invalid_request", assertThrows(IllegalArgumentException::class.java) {
+            NativeRuntimeConfiguration.resolveCredentialsDraft(ServiceProvider.OPENAI, "synthetic-invalid-mode", saved, null)
+        }.message)
+        assertEquals("invalid_credentials_draft", assertThrows(IllegalArgumentException::class.java) {
+            NativeRuntimeConfiguration.resolveCredentialsDraft(ServiceProvider.VOLCANO, "asrMt", saved, null)
+        }.message)
+        assertEquals("native_runtime_invalid_request", assertThrows(IllegalArgumentException::class.java) {
+            NativeRuntimeConfiguration.resolveCredentialsDraft(ServiceProvider.OPENAI, "simultaneous",
+                JSONObject(saved.toString()).put("synthetic-private-field", "synthetic-private-value"), null)
+        }.message)
+    }
+
     @Test fun realtimeIndependentModesUseSharedFactoriesAndSeparateTextCredentialsAcrossActualJni() {
         val translator = TranslationConfiguration(provider = TextTranslationProvider.XAI,
             apiKey = "synthetic-independent-key", model = "grok-independent")

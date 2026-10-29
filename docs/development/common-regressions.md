@@ -636,6 +636,15 @@ artifacts, and signing material.
   draft to profile/provider identity, preserve each translation route's key
   removal intent, retain fresh storage/session guards and release on finish.
   Process death reloads persisted configuration; it cannot restore RAM secrets.
+- Android speech drafts pass raw fields through the shared credential resolver
+  before either checks or saves. Never prefill blank secrets from saved values:
+  that bypasses Azure resource, Tencent AppID/SecretID and Baidu AppID ownership.
+  Compare legacy Azure addresses through the same shared canonical validator;
+  equivalent spelling retains the key, while a new owner needs explicit secrets.
+- Session-state refresh and asynchronous completion must preserve both editor
+  availability and a pending connection check. Re-enabling an editor alone must
+  not re-enable its pending check; cancellation/disposal must not enable a
+  blocked editor. Check a slow local request during native state refresh.
 - For credential-free Android instrumentation, compare catalog files directly
   when proving cancellation did not write. `SettingsStore.profiles()` can trigger
   legacy credential migration or retirement; it is not a read-only precondition.

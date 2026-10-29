@@ -126,6 +126,27 @@ internal fun TranslationConfiguration.runtimeCredentials(): JSONObject? {
     }
 }
 
+/** Serialize native fields without resolving blanks; shared Rust owns identity-bound retention. */
+internal fun ServiceConfiguration.runtimeCredentials(): JSONObject {
+    fun credential(kind: String) = JSONObject().put("kind", kind)
+    fun value(field: String) = this.value(field).trim()
+    return when (provider) {
+        ServiceProvider.AZURE -> credential("azureOpenAI").put("endpoint", value("endpoint")).put("deployment", value("deployment"))
+            .put("transcriptionDeployment", value("transcriptionDeployment")).put("apiKey", value("apiKey"))
+        ServiceProvider.TENCENT -> credential("tencentCloud").put("appId", value("appId")).put("secretId", value("secretId")).put("secretKey", value("secretKey"))
+        ServiceProvider.BAIDU -> credential("baiduTranslate").put("appId", value("appId")).put("appKey", value("appKey"))
+        else -> credential("apiKey").put("apiKey", value("apiKey"))
+    }
+}
+
+/** UI adapters must not turn retained secrets into explicit replacements before shared validation. */
+internal fun resolveSpeechCredentialDraft(saved: ServiceConfiguration, values: Map<String, String>, speechTranslationMode: String): Map<String, String> {
+    val draft = ServiceConfiguration(saved.provider, values, speechTranslationMode = speechTranslationMode)
+    val credentials = NativeRuntimeConfiguration.resolveCredentialsDraft(saved.provider, speechTranslationMode,
+        draft.runtimeCredentials(), saved.runtimeCredentials())
+    return saved.provider.fields.associate { it.id to credentials.getString(it.id) }
+}
+
 /** Adapt saved platform fields only. Recognition, translation and validation run in shared Rust. */
 internal fun buildRuntimeConfiguration(
     speech: ServiceConfiguration,
@@ -138,17 +159,9 @@ internal fun buildRuntimeConfiguration(
     require(speech.speechTranslationMode in listOf("simultaneous", "asrMt") &&
         (speech.speechTranslationMode == "simultaneous" || speech.provider.supportsSpeechTranslationMode)) { "speech_mode" }
     val route = if (speech.usesIndependentTextTranslation) translation.provider else TextTranslationProvider.BUILTIN
-    fun credential(kind: String) = JSONObject().put("kind", kind)
-    fun value(field: String) = speech.value(field).trim()
     val target = if (speech.originalOnly(route)) "original" else targetLanguage
     val text = if (speech.usesIndependentTextTranslation && target != "original") translation.runtimeCredentials() else null
-    val credentials = when (speech.provider) {
-        ServiceProvider.AZURE -> credential("azureOpenAI").put("endpoint", value("endpoint")).put("deployment", value("deployment"))
-            .put("transcriptionDeployment", value("transcriptionDeployment")).put("apiKey", value("apiKey"))
-        ServiceProvider.TENCENT -> credential("tencentCloud").put("appId", value("appId")).put("secretId", value("secretId")).put("secretKey", value("secretKey"))
-        ServiceProvider.BAIDU -> credential("baiduTranslate").put("appId", value("appId")).put("appKey", value("appKey"))
-        else -> credential("apiKey").put("apiKey", value("apiKey"))
-    }
+    val credentials = speech.runtimeCredentials()
     return JSONObject()
         .put("provider", speech.provider.wireProvider)
         .put("credentials", credentials)

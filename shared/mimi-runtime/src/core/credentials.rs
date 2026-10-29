@@ -451,14 +451,10 @@ impl ProviderCredentials {
                 }),
             ) => {
                 let endpoint = validated_azure_endpoint(&retain(endpoint, old_endpoint))?;
-                let api_key = retain(
-                    api_key,
-                    if endpoint == *old_endpoint {
-                        old_key
-                    } else {
-                        ""
-                    },
-                );
+                // Older native adapters saved valid addresses before canonicalization.
+                let same_resource = validated_azure_endpoint(old_endpoint)
+                    .is_ok_and(|previous| endpoint == previous);
+                let api_key = retain(api_key, if same_resource { old_key } else { "" });
                 Self::AzureOpenAI {
                     endpoint,
                     api_key,
@@ -1131,6 +1127,64 @@ mod tests {
                 assert!(key(&other).is_empty());
             }
         }
+    }
+
+    #[test]
+    fn azure_drafts_compare_canonical_resource_owners_before_retaining_keys() {
+        let draft = ProviderCredentials::AzureOpenAI {
+            endpoint: String::new(),
+            deployment: String::new(),
+            transcription_deployment: String::new(),
+            api_key: String::new(),
+        };
+        for endpoint in [
+            "https://saved.openai.azure.com/",
+            " https://SAVED.openai.azure.com/// ",
+        ] {
+            let saved = ProviderCredentials::AzureOpenAI {
+                endpoint: endpoint.into(),
+                deployment: "translate".into(),
+                transcription_deployment: "transcribe".into(),
+                api_key: "synthetic-saved-key".into(),
+            };
+            let resolved = draft
+                .resolve_draft(ProviderKind::AzureOpenAIRealtime, Some(&saved))
+                .unwrap();
+            assert_eq!(
+                resolved.azure_openai(),
+                Some((
+                    "https://saved.openai.azure.com",
+                    "translate",
+                    "transcribe",
+                    "synthetic-saved-key"
+                ))
+            );
+            let changed = ProviderCredentials::AzureOpenAI {
+                endpoint: "https://different.openai.azure.com".into(),
+                deployment: String::new(),
+                transcription_deployment: String::new(),
+                api_key: String::new(),
+            };
+            assert!(changed
+                .resolve_draft(ProviderKind::AzureOpenAIRealtime, Some(&saved))
+                .is_err());
+        }
+        let damaged = ProviderCredentials::AzureOpenAI {
+            endpoint: "invalid-legacy-endpoint".into(),
+            deployment: String::new(),
+            transcription_deployment: String::new(),
+            api_key: "synthetic-old-key".into(),
+        };
+        let replacement = ProviderCredentials::AzureOpenAI {
+            endpoint: "https://replacement.openai.azure.com".into(),
+            deployment: "translate".into(),
+            transcription_deployment: "transcribe".into(),
+            api_key: "synthetic-explicit-key".into(),
+        };
+        assert_eq!(
+            replacement.resolve_draft(ProviderKind::AzureOpenAIRealtime, Some(&damaged)),
+            Ok(replacement)
+        );
     }
 
     #[test]

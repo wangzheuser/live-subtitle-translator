@@ -265,18 +265,34 @@ class ServiceSettingsActivity : AppCompatActivity() {
         translationSettings?.view?.visibility = if (integrated) View.GONE else View.VISIBLE
         if (integrated) translationSettings?.dispose()
     }
-    private fun speechProbeConfiguration(): org.json.JSONObject? {
-        if (storageUnavailable || MimiService.isRunning || MimiService.isStopping || speechSettings == null) return null
+    private fun speechDraftValues(mode: String): Map<String, String>? {
         var valid = true
         val values = provider.fields.associate { field ->
             val (layout, edit) = inputs.getValue(field.id)
-            val value = edit.text.toString().trim().ifBlank { if (field.secret) saved.value(field.id) else "" }
-            val required = !(provider == ServiceProvider.AZURE && field.id == "deployment" && speechSettings?.speechMode == "asrMt")
+            val value = edit.text.toString().trim()
+            val required = !field.secret && !(provider == ServiceProvider.AZURE && field.id == "deployment" && mode == "asrMt")
             layout.error = if (required && value.isBlank()) getString(R.string.service_required) else null
             if (required && value.isBlank()) valid = false
             field.id to value
         }
         if (!valid) return null
+        return try {
+            resolveSpeechCredentialDraft(saved, values, mode)
+        } catch (error: Exception) {
+            // Blank secrets can be retained only by the shared owner rules.
+            // An address/account change requires an explicit replacement.
+            if (error is IllegalArgumentException && error.message == "missing_credentials_draft") {
+                provider.fields.filter { it.secret && values[it.id].isNullOrBlank() }.forEach { field ->
+                    inputs.getValue(field.id).first.error = getString(R.string.service_required)
+                }
+            }
+            status.setText(R.string.service_invalid); status.visibility = View.VISIBLE
+            null
+        }
+    }
+    private fun speechProbeConfiguration(): org.json.JSONObject? {
+        if (storageUnavailable || MimiService.isRunning || MimiService.isStopping || speechSettings == null) return null
+        val values = speechDraftValues(if (provider.supportsSpeechTranslationMode) speechSettings!!.speechMode else saved.speechTranslationMode) ?: return null
         val config = ServiceConfiguration(provider, values, saved.endpoint, saved.model,
             xaiSpeechMode = if (provider == ServiceProvider.XAI) speechSettings!!.speechMode else saved.xaiSpeechMode,
             xaiTextModel = saved.xaiTextModel,
@@ -284,7 +300,9 @@ class ServiceSettingsActivity : AppCompatActivity() {
         return runCatching {
             val (source, _) = provider.normalize(SettingsStore.sourceLang(this), "original", TextTranslationProvider.NONE,
                 xaiSpeechMode = config.xaiSpeechMode, speechTranslationMode = config.speechTranslationMode)
-            buildSpeechProbeConfiguration(config, source)
+            buildSpeechProbeConfiguration(config, source).also {
+                if (status.text.toString() == getString(R.string.service_invalid)) status.visibility = View.GONE
+            }
         }.getOrElse { status.setText(R.string.service_invalid); status.visibility = View.VISIBLE; null }
     }
     private fun save() {
@@ -303,15 +321,8 @@ class ServiceSettingsActivity : AppCompatActivity() {
         val workspace = workspaceInput?.second?.text?.toString()?.trim().orEmpty()
         workspaceInput?.first?.error = if (live && workspace.isBlank()) getString(R.string.service_required) else null
         if (live && workspace.isBlank()) valid = false
-        val values=provider.fields.associate { field ->
-            val (layout,edit)=inputs.getValue(field.id)
-            val value=edit.text.toString().trim().ifBlank { if(field.secret) saved.value(field.id) else "" }
-            val required = !(provider == ServiceProvider.AZURE && field.id == "deployment" && speechSettings?.speechMode == "asrMt")
-            layout.error=if(required && value.isBlank()) getString(R.string.service_required) else null
-            if(required && value.isBlank()) valid=false
-            field.id to value
-        }
         if(!valid) { status.visibility = View.GONE; return }
+        val values = speechDraftValues(if (provider.supportsSpeechTranslationMode) speechSettings?.speechMode ?: saved.speechTranslationMode else saved.speechTranslationMode) ?: return
         // The shared factory owns speech models and endpoints. Retain old overrides
         // for compatibility without offering editable fields that the runtime ignores.
         val config=ServiceConfiguration(provider, values, saved.endpoint, saved.model,

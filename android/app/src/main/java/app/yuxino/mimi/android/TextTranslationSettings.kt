@@ -99,6 +99,7 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
     }
     private var request: TranslationCall? = null
     private var generation = 0
+    private var editingEnabled = true
     val enabled: Boolean get() = selected != TextTranslationProvider.BUILTIN
     val qwenMtModel: String get() = qwenModels[qwenModel.selectedItemPosition.coerceIn(qwenModels.indices)]
     val view: View get() = root
@@ -340,6 +341,7 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
     }
 
     private fun checkConnection() {
+        if (!editingEnabled || request != null) return
         val config = draft() ?: return
         if (!hasNetworkProvider()) return
         val epoch = ++generation
@@ -354,12 +356,12 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
                 speechTranslationMode = if (speechProvider.supportsSpeechTranslationMode) "asrMt" else "simultaneous")
             buildTextProbeConfiguration(config, source, target, qwenMtModel)
         } catch (_: Exception) {
-            check.isEnabled = true; check.setText(R.string.translation_check)
+            updateCheckEnabled(); check.setText(R.string.translation_check)
             showError(R.string.translation_invalid); return
         }
         request = NativeTextProbeClient().check(probe) { outcome -> activity.runOnUiThread {
             if (epoch != generation || activity.isDestroyed || activity.isFinishing) return@runOnUiThread
-            request = null; check.isEnabled = true; check.setText(R.string.translation_check)
+            request = null; updateCheckEnabled(); check.setText(R.string.translation_check)
             result.visibility = View.VISIBLE
             result.text = when (outcome) {
                 is TranslationResult.Success -> activity.getString(R.string.translation_check_success, outcome.elapsedMs)
@@ -386,15 +388,18 @@ internal class TextTranslationSettings(private val activity: AppCompatActivity, 
     }
     private fun invalidateCheck() {
         ++generation; request?.cancel(); request = null
-        check.isEnabled = true; check.setText(R.string.translation_check); result.visibility = View.GONE
+        updateCheckEnabled(); check.setText(R.string.translation_check); result.visibility = View.GONE
     }
+    private fun updateCheckEnabled() { check.isEnabled = editingEnabled && request == null }
     fun dispose() {
         invalidateCheck()
         key.transformationMethod = android.text.method.PasswordTransformationMethod.getInstance()
     }
     fun setEditingEnabled(enabled: Boolean) {
+        editingEnabled = enabled
         if (!enabled) invalidateCheck()
-        listOf(mode, preset, setupKey, setupGuide, directSetupKey, qwenModel, endpoint, model, key, localHttp, removeKey, check).forEach { it.isEnabled = enabled }
+        listOf(mode, preset, setupKey, setupGuide, directSetupKey, qwenModel, endpoint, model, key, localHttp, removeKey).forEach { it.isEnabled = enabled }
+        updateCheckEnabled()
     }
     private fun dp(value: Int) = ServiceSettingsUi.dp(activity, value)
     private fun setupButton(label: Int, tag: String, action: () -> Unit) =

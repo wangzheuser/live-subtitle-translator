@@ -21,6 +21,10 @@ internal object NativeRuntimeConfiguration {
     fun textEndpointsEquivalent(provider: TextTranslationProvider, saved: String, draft: String): Boolean = exchange(
         JSONObject().put("operation", "text_endpoints_equivalent").put("route", provider.runtimeRoute())
             .put("savedEndpoint", saved).put("draftEndpoint", draft)).getBoolean("equivalent")
+    fun resolveCredentialsDraft(provider: ServiceProvider, mode: String, draft: JSONObject, saved: JSONObject?): JSONObject = exchange(
+        JSONObject().put("operation", "resolve_credentials_draft").put("provider", provider.wireProvider)
+            .put("speechTranslationMode", mode).put("draft", draft).put("saved", saved ?: JSONObject.NULL))
+        .getJSONObject("credentials")
     val policy: JSONObject by lazy { exchange(JSONObject().put("operation", "policy")) }
     fun command(operation: String, handle: Long): JSONObject = exchange(JSONObject().put("operation", operation).put("handle", handle))
     fun poll(handle: Long, sinceVersion: Long? = null): JSONObject = exchange(runtimePollRequest(handle, sinceVersion))
